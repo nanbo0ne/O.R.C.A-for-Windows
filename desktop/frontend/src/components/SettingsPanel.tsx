@@ -5,6 +5,7 @@ import { useDeferredClose } from "../lib/useMountTransition";
 import { app, onComputerUseChanged, onLocalAIChanged, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { mergedFetchedProviderModels, providerDefaultModel, providerModelCandidates } from "../lib/providerModels";
+import { DEEPSEEK_EFFORT_LEVELS, isOfficialDeepSeekProvider, officialModelInfo, providerModelIDs, providerModelLabel, providerModelRef } from "../lib/modelCatalog";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
 import { persistUIStyle, UI_STYLES, type UIStyle } from "../lib/uiStyle";
@@ -601,7 +602,7 @@ function settingsModelMeta(s: SettingsView, t: ReturnType<typeof useT>): string 
   const [provider, ...modelParts] = ref.split("/");
   const model = modelParts.join("/") || ref;
   const providerView = s.providers.find((p) => p.name === provider);
-  return `${modelProviderLabel(provider, providerView, t)} · ${model}`;
+  return `${modelProviderLabel(provider, providerView, t)} · ${providerModelLabel(ref, providerView, model)}`;
 }
 
 function botSettingsMeta(bot: BotSettingsView, t: ReturnType<typeof useT>): string {
@@ -616,21 +617,25 @@ function allRefs(s: SettingsView): string[] {
   const out: string[] = [];
   for (const p of s.providers) {
     if (!p.added || !p.keySet) continue;
-    for (const m of p.models) out.push(`${p.name}/${m}`);
+    for (const m of providerModelIDs(p, p.models)) out.push(`${p.name}/${m}`);
   }
-  return out;
+  return [...new Set(out)];
 }
 
 // toRef normalises a stored model id (a provider name, a bare model, or a ref) to
 // a "provider/model" ref so a <select> of refs can show it selected.
 function toRef(model: string, s: SettingsView): string {
   if (!model) return "";
-  if (model.includes("/")) return model;
+  if (model.includes("/")) return providerModelRef(model, s.providers.find((p) => p.name === model.split("/")[0]));
   const byName = s.providers.find((p) => p.name === model);
-  if (byName) return `${byName.name}/${byName.default || byName.models[0] || ""}`;
-  const byModel = s.providers.find((p) => p.models.includes(model));
-  if (byModel) return `${byModel.name}/${model}`;
+  if (byName) return providerModelRef(`${byName.name}/${byName.default || byName.models[0] || ""}`, byName);
+  const byModel = s.providers.find((p) => p.models.includes(providerModelIDs(p, [model])[0]));
+  if (byModel) return providerModelRef(`${byModel.name}/${model}`, byModel);
   return model;
+}
+
+function settingsModelLabel(ref: string, s: SettingsView, fallback?: string): string {
+  return providerModelLabel(ref, s.providers.find((p) => p.name === ref.split("/")[0]), fallback);
 }
 
 const PROXY_MODES = ["auto", "custom", "off"] as const;
@@ -791,7 +796,8 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
       ...p,
       builtIn: Boolean(p.builtIn),
       added: Boolean(p.added),
-      models: asArray(p.models),
+      models: providerModelIDs(p, asArray(p.models)),
+      default: providerModelIDs(p, [p.default])[0],
       modelsUrl: p.modelsUrl ?? "",
       reasoningProtocol: normalizeReasoningProtocol(p.reasoningProtocol),
       supportedEfforts: asArray(p.supportedEfforts),
@@ -1922,9 +1928,13 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
   const plannerSelectRef = plannerRef === defaultRef ? "" : plannerRef;
   const [defaultProvider, defaultModel] = defaultRef.split("/");
   const defaultProviderView = s.providers.find((p) => p.name === defaultProvider);
-  const currentModelLabel = defaultModel || defaultRef || t("common.none");
+  const currentModelLabel = settingsModelLabel(defaultRef, s, defaultModel) || t("common.none");
   const providerLabel = defaultProvider ? modelProviderLabel(defaultProvider, defaultProviderView, t) : t("common.none");
-  const plannerLabel = plannerSelectRef || t("settings.plannerNone");
+  const plannerLabel = settingsModelLabel(plannerSelectRef, s) || t("settings.plannerNone");
+  const subagentProvider = s.providers.find((provider) => provider.name === (subagentRef || defaultRef).split("/")[0]);
+  const subagentEfforts = isOfficialDeepSeekProvider(subagentProvider) && officialModelInfo(subagentRef || defaultRef)
+    ? DEEPSEEK_EFFORT_LEVELS.slice(1)
+    : subagentProvider?.supportedEfforts.length ? subagentProvider.supportedEfforts : EFFORT_PRESETS;
   const keyStatusLabel = defaultProviderView?.keySet ? t("settings.keySet") : t("settings.noKey");
   const modelRefKey = refs.join("|");
 
@@ -2080,12 +2090,12 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
             <SettingsField label={t("settings.subagentEffort")} hint={t("settings.subagentHint")}>
               <select
                 className="mem-select set-grow"
-                value={s.subagentEffort || ""}
+                value={s.subagentEffort === "auto" ? "" : s.subagentEffort || ""}
                 disabled={busy}
                 onChange={(e) => void apply(() => app.SetSubagentEffort(e.target.value))}
               >
                 <option value="">{t("settings.subagentEffortDefault")}</option>
-                {EFFORT_PRESETS.map((level) => (
+                {subagentEfforts.map((level) => (
                   <option key={level} value={level}>
                     {level}
                   </option>
@@ -2100,7 +2110,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                 value={s.visionModel ?? ""}
                 disabled={busy}
                 emptyOptionLabel={t("settings.visionModelAuto")}
-                emptyOptionHint={s.effectiveVisionModel || t("common.auto")}
+                emptyOptionHint={settingsModelLabel(s.effectiveVisionModel || "", s) || t("common.auto")}
                 onPick={(ref) => void apply(() => app.SetVisionModel(ref))}
               />
             </SettingsField>
@@ -2137,7 +2147,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                   return (
                     <div className="settings-vision-capabilities__row" key={ref}>
                       <div className="settings-vision-capabilities__model">
-                        <strong title={ref}>{ref}</strong>
+                        <strong title={ref}>{settingsModelLabel(ref, s)}</strong>
                         <span>{t("settings.visionAutomatic")}: {automaticStatusLabel} · {t("settings.visionEffective")}: {statusLabel} · {checked}</span>
                         {capability?.reason && <small title={capability.reason}>{capability.reason}</small>}
                       </div>
@@ -2249,10 +2259,11 @@ function ModelPicker({
   const emptyLabel = includeSameDefault ? t("settings.plannerNone") : emptyOptionLabel;
   const emptyHint = includeSameDefault ? t("settings.plannerNoneHint") : emptyOptionHint;
   const emptyMeta = includeSameDefault ? t("settings.plannerNoneHintShort") : emptyOptionHint;
-  const selected = refs.includes(value) ? modelOptionFromRef(value, s) : null;
+  const selectedRef = toRef(value, s);
+  const selected = refs.includes(selectedRef) ? modelOptionFromRef(selectedRef, s) : null;
   const selectedLabel = value === "" && emptyLabel
     ? emptyLabel
-    : selected?.model || value || t("common.none");
+    : settingsModelLabel(selectedRef, s, selected?.model) || t("common.none");
   const selectedMeta = value === "" && emptyLabel
     ? emptyMeta || ""
     : selected
@@ -2273,7 +2284,7 @@ function ModelPicker({
     const options = refs
       .map((ref) => modelOptionFromRef(ref, s))
       .filter((opt): opt is ModelPickerOption => Boolean(opt))
-      .filter((opt) => !q || `${opt.ref} ${opt.provider} ${modelProviderLabel(opt.provider, opt.providerView, t)} ${opt.model}`.toLowerCase().includes(q));
+      .filter((opt) => !q || `${opt.ref} ${opt.provider} ${modelProviderLabel(opt.provider, opt.providerView, t)} ${providerModelLabel(opt.ref, opt.providerView, opt.model)}`.toLowerCase().includes(q));
     for (const opt of options) {
       const groupID = modelOptionGroupID(opt);
       if (!providerSeen.has(groupID)) {
@@ -2364,15 +2375,15 @@ function ModelPicker({
                   key={opt.ref}
                   type="button"
                   role="option"
-                  aria-selected={opt.ref === value}
-                  className={`settings-model-picker__option${opt.ref === value ? " settings-model-picker__option--selected" : ""}`}
+                  aria-selected={opt.ref === selectedRef}
+                  className={`settings-model-picker__option${opt.ref === selectedRef ? " settings-model-picker__option--selected" : ""}`}
                   onClick={() => pick(opt.ref)}
                 >
                   <span>
-                    <strong>{opt.model}</strong>
+                    <strong title={opt.ref}>{providerModelLabel(opt.ref, opt.providerView, opt.model)}</strong>
                     <small>{modelOptionMeta(opt, t)}</small>
                   </span>
-                  {opt.ref === value && <Check size={14} />}
+                  {opt.ref === selectedRef && <Check size={14} />}
                 </button>
               ))}
             </div>
@@ -2465,10 +2476,11 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   };
 
   const modelDraftForFetch = (p: ProviderView, fetched: string[]): ProviderModelDraft => {
-    const candidates = providerModelCandidates(p.models, fetched);
-    const selected = mergedFetchedProviderModels(p.models, fetched, { preserveCurated: true });
+    const candidates = providerModelIDs(p, providerModelCandidates(p.models, fetched));
+    const selected = providerModelIDs(p, mergedFetchedProviderModels(p.models, fetched, { preserveCurated: true }));
     return {
       providerName: p.name,
+      provider: p,
       candidates,
       selected: candidates.filter((model) => selected.includes(model)),
     };
@@ -2686,6 +2698,7 @@ type ProviderFetchResult = {
 };
 
 type ProviderModelDraft = {
+  provider: ProviderView;
   providerName: string;
   candidates: string[];
   selected: string[];
@@ -2933,7 +2946,7 @@ function ProviderAccessCard({
         <div className="provider-model-chips" aria-label={t(group.keySet ? "settings.enabledModels" : "settings.modelList")}>
           {visibleModels.length > 0 ? visibleModels.map((model) => (
             <span className="provider-model-chip" key={model}>
-              {model}
+              {providerModelLabel(`${group.providers.find((provider) => provider.models.includes(model))?.name || ""}/${model}`, group.providers.find((provider) => provider.models.includes(model)), model)}
             </span>
           )) : <span className="provider-model-chip provider-model-chip--empty">{t("settings.noModelsConfigured")}</span>}
           {hiddenModelCount > 0 && (
@@ -2974,7 +2987,7 @@ function ProviderAccessCard({
             return (
               <div className="provider-profile-row" key={p.name}>
                 <span>{p.name}</span>
-                <span>{p.models.join(", ") || t("common.none")}</span>
+                <span>{p.models.map((model) => providerModelLabel(`${p.name}/${model}`, p, model)).join(", ") || t("common.none")}</span>
                 <button
                   className="btn btn--small"
                   disabled={busy}
@@ -3028,7 +3041,7 @@ function ProviderModelDraftPicker({
   const selected = new Set(draft.selected);
   const q = query.trim().toLowerCase();
   const visibleCandidates = q
-    ? draft.candidates.filter((model) => model.toLowerCase().includes(q))
+    ? draft.candidates.filter((model) => `${model} ${providerModelLabel(`${draft.providerName}/${model}`, draft.provider, model)}`.toLowerCase().includes(q))
     : draft.candidates;
   const disabled = busy || fetching;
 
@@ -3064,7 +3077,7 @@ function ProviderModelDraftPicker({
               disabled={disabled}
               onChange={() => onToggle(model)}
             />
-            <span>{model}</span>
+            <span title={model}>{providerModelLabel(`${draft.providerName}/${model}`, draft.provider, model)}</span>
           </label>
         )) : (
           <div className="provider-model-draft__empty">{t("settings.noMatchingCandidateModels")}</div>
@@ -3139,7 +3152,7 @@ function officialProviderKind(p: ProviderView): string {
   if (!p.builtIn) return "";
   const name = canonicalOfficialProviderName(p.name);
   const host = providerBaseHost(p.baseUrl);
-  if (name === "deepseek" && host === "api.deepseek.com") return "deepseek";
+  if (isOfficialDeepSeekProvider(p)) return "deepseek";
   if (name === "mimo-token-plan" && host === "token-plan-cn.xiaomimimo.com") return "mimo-token-plan";
   if (name === "mimo-api" && host === "api.xiaomimimo.com") return "mimo-api";
   return "";
@@ -3217,6 +3230,7 @@ function ProviderEditor({
   const [supportedEfforts, setSupportedEfforts] = useState<string[]>(initial?.supportedEfforts ?? []);
   const [customEffortDraft, setCustomEffortDraft] = useState("");
   const [defaultEffort, setDefaultEffort] = useState(initial?.defaultEffort ?? "");
+  const providerIdentity = { name: name.trim(), kind: kind.trim(), baseUrl: baseUrl.trim(), builtIn: initial?.builtIn ?? false };
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchStatus, setFetchStatus] = useState<string | null>(null);
   const [fetchErr, setFetchErr] = useState<string | null>(null);
@@ -3284,10 +3298,11 @@ function ProviderEditor({
         defaultEffort,
       });
       if (fetched.length === 0) throw new Error(t("settings.fetchModelsEmpty"));
-      setModels(fetched.join(", "));
+      const candidates = providerModelIDs(providerIdentity, fetched);
+      setModels(candidates.join(", "));
       if (keyDraft.trim()) setKeyDraft("");
       setDefaultEffort((v) => v);
-      setFetchStatus(t("settings.fetchModelsSuccess", { n: fetched.length }));
+      setFetchStatus(t("settings.fetchModelsSuccess", { n: candidates.length }));
     } catch (e) {
       setFetchErr(String((e as Error)?.message ?? e));
     } finally {
@@ -3296,10 +3311,10 @@ function ProviderEditor({
   };
 
   const save = async () => {
-    const ms = models
+    const ms = providerModelIDs(providerIdentity, models
       .split(",")
       .map((m) => m.trim())
-      .filter(Boolean);
+      .filter(Boolean));
     const effectiveApiKeyEnv = apiKeyEnv.trim() || apiKeyEnvFromProviderName(name);
     if (keyDraft.trim()) await app.SetProviderKey(effectiveApiKeyEnv, keyDraft.trim());
     onSave({
@@ -3531,7 +3546,7 @@ function ProviderEditor({
           <div className="provider-card-block__label">{t("settings.availableModels")}</div>
           <div className="provider-model-chips">
             {modelNames.slice(0, 8).map((model) => (
-              <span className="provider-model-chip" key={model}>{model}</span>
+              <span className="provider-model-chip" key={model} title={model}>{providerModelLabel(`${name.trim()}/${model}`, providerIdentity, model)}</span>
             ))}
             {modelNames.length > 8 && (
               <span className="provider-model-chip provider-model-chip--more">{t("settings.moreModels", { n: modelNames.length - 8 })}</span>

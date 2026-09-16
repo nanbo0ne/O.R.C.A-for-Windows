@@ -82,8 +82,13 @@ func Providers(cfg *config.Config) []ProviderInfo {
 		return nil
 	}
 	out := make([]ProviderInfo, 0, len(cfg.Providers))
+	selected, _ := cfg.ResolveModel(cfg.DefaultModel)
 	for i := range cfg.Providers {
 		e := &cfg.Providers[i]
+		isDefault := selected != nil && selected.Name == e.Name
+		if isDefault {
+			e = selected
+		}
 		info := ProviderInfo{
 			Name:          e.Name,
 			Kind:          e.Kind,
@@ -92,7 +97,7 @@ func Providers(cfg *config.Config) []ProviderInfo {
 			APIKeyEnv:     e.APIKeyEnv,
 			KeyReady:      e.APIKey() != "",
 			ContextWindow: e.ContextWindow,
-			IsDefault:     e.Name == cfg.DefaultModel,
+			IsDefault:     isDefault,
 		}
 		if p := e.Price.SnapshotAt(time.Now()); p != nil {
 			info.Pricing = &PricingInfo{

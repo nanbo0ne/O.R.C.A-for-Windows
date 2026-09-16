@@ -14,15 +14,11 @@ import (
 // official DeepSeek V4 model. It returns nil for custom gateways, other
 // providers, and unknown models so their configured prices remain untouched.
 func OfficialDeepSeekPricing(providerName, endpoint, model string) *provider.Pricing {
-	model = strings.ToLower(strings.TrimSpace(model))
-	if model == "" || !officialProviderName(providerName) || !officialEndpoint(endpoint) {
-		return nil
-	}
-	switch model {
-	case "deepseek-v4-flash", "deepseek-v4-flash-vision-exp":
+	switch OfficialDeepSeekModel(providerName, endpoint, model) {
+	case "deepseek-flash":
 		return deepSeekSchedule(
-			provider.PricingRates{CacheHit: 0.05, Input: 1.5, Output: 4.5},
-			provider.PricingRates{CacheHit: 0.10, Input: 3, Output: 9},
+			provider.PricingRates{CacheHit: 0.02, Input: 1, Output: 4},
+			provider.PricingRates{CacheHit: 0.04, Input: 2, Output: 8},
 		)
 	case "deepseek-v4-pro":
 		return deepSeekSchedule(
@@ -31,6 +27,22 @@ func OfficialDeepSeekPricing(providerName, endpoint, model string) *provider.Pri
 		)
 	default:
 		return nil
+	}
+}
+
+// OfficialDeepSeekModel returns the canonical model ID only for a known model
+// on an official provider and endpoint. Legacy Flash IDs now alias V4.1 Flash.
+func OfficialDeepSeekModel(providerName, endpoint, model string) string {
+	if !officialProviderName(providerName) || !officialEndpoint(endpoint) {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp":
+		return "deepseek-flash"
+	case "deepseek-v4-pro":
+		return "deepseek-v4-pro"
+	default:
+		return ""
 	}
 }
 
@@ -64,15 +76,16 @@ func deepSeekSchedule(offPeak, peak provider.PricingRates) *provider.Pricing {
 
 func officialEndpoint(endpoint string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(endpoint))
-	if err != nil || parsed.Scheme != "https" || !strings.EqualFold(parsed.Host, "api.deepseek.com") || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if err != nil || parsed.Scheme != "https" || !strings.EqualFold(parsed.Host, "api.deepseek.com") || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(endpoint, "#") {
 		return false
 	}
-	return parsed.Path == "" || parsed.Path == "/" || parsed.Path == "/v1" || parsed.Path == "/v1/"
+	path := parsed.EscapedPath()
+	return path == "" || path == "/" || path == "/v1" || path == "/v1/"
 }
 
 // IsOfficialDeepSeekPricing reports whether p is one of the known official
-// DeepSeek V4 per-request snapshots. Legacy USD snapshots remain recognized
-// for persisted/in-flight compatibility; they are never converted to CNY.
+// DeepSeek per-request snapshots. Historical CNY and USD snapshots remain
+// recognized for persisted/in-flight compatibility; they are never repriced.
 func IsOfficialDeepSeekPricing(p *provider.Pricing, endpoint string) bool {
 	if p == nil || !officialEndpoint(endpoint) {
 		return false
@@ -83,6 +96,8 @@ func IsOfficialDeepSeekPricing(p *provider.Pricing, endpoint string) bool {
 		input, output float64
 	}
 	known := []knownPricing{
+		{currency: "¥", cacheHit: 0.02, input: 1, output: 4},
+		{currency: "¥", cacheHit: 0.04, input: 2, output: 8},
 		{currency: "¥", cacheHit: 0.05, input: 1.5, output: 4.5},
 		{currency: "¥", cacheHit: 0.10, input: 3, output: 9},
 		{currency: "¥", cacheHit: 0.15, input: 4.5, output: 13.5},

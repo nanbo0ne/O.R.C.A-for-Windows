@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Brain, Check, ChevronsUpDown } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
+import { modelDisplayLabel, selectableModels } from "../lib/modelCatalog";
 import { useT } from "../lib/i18n";
 import type { ModelInfo } from "../lib/types";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
@@ -43,7 +44,7 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
 
   useEffect(() => {
     if (open) {
-      (tabId ? app.ModelsForTab(tabId) : app.Models()).then((next) => setModels(asArray(next))).catch(() => {});
+      (tabId ? app.ModelsForTab(tabId) : app.Models()).then((next) => setModels(selectableModels(asArray(next)))).catch(() => {});
     }
   }, [open, tabId]);
 
@@ -84,11 +85,11 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
               role="option"
               aria-selected={m.current}
               className={`modelsw__item ${m.current ? "modelsw__item--current" : ""}`}
-              onClick={() => pick(m.ref, m.model)}
+              onClick={() => pick(m.ref, modelDisplayLabel(m.ref, m.model, m.metadataSource === "deepseek_official"))}
             >
               <span className="modelsw__copy">
-                <span className="modelsw__model" title={m.model}>{m.model}</span>
-                <span className="modelsw__provider" title={providerLabel(m.provider, t)}>{providerLabel(m.provider, t)}</span>
+                <span className="modelsw__model" title={m.ref}>{modelDisplayLabel(m.ref, m.model, m.metadataSource === "deepseek_official")}</span>
+                <span className="modelsw__provider" title={providerLabel(m, t)}>{providerLabel(m, t)}</span>
               </span>
               {m.current && <Check size={13} className="modelsw__check" />}
             </button>
@@ -99,12 +100,13 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
   );
 }
 
-function providerLabel(provider: string, t: ReturnType<typeof useT>): string {
+function providerLabel(model: ModelInfo, t: ReturnType<typeof useT>): string {
+  const provider = model.provider;
   switch (provider) {
     case "deepseek":
     case "deepseek-flash":
     case "deepseek-pro":
-      return t("settings.providerLabel.deepseek");
+      return model.metadataSource === "deepseek_official" ? t("settings.providerLabel.deepseek") : provider;
     case "mimo-api":
     case "mimo":
     case "xiaomi-mimo":

@@ -92,8 +92,8 @@ func TestNormalizeLegacyProviderModelsRepairsOfficialProvider(t *testing.T) {
 		APIKeyEnv: "DEEPSEEK_API_KEY",
 	}}}
 	normalizeLegacyProviderModels(c)
-	if got := c.Providers[0].Model; got != "deepseek-v4-flash" {
-		t.Fatalf("deepseek-flash model = %q, want deepseek-v4-flash", got)
+	if got := c.Providers[0].Model; got != "deepseek-flash" {
+		t.Fatalf("deepseek-flash model = %q, want deepseek-flash", got)
 	}
 }
 

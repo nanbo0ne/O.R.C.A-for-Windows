@@ -578,10 +578,11 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) error {
 				streamRecoveries++
 				if hasVisibleFinalAnswer(text) {
 					a.session.Add(provider.Message{
-						Role:               provider.RoleAssistant,
-						Content:            text,
-						ReasoningContent:   reasoning,
-						ReasoningSignature: signature,
+						Role:                     provider.RoleAssistant,
+						Content:                  text,
+						ReasoningContent:         reasoning.content,
+						ProtocolReasoningContent: reasoning.protocol,
+						ReasoningSignature:       signature,
 					})
 				}
 				a.session.Add(provider.Message{
@@ -607,16 +608,15 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) error {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
 		}
 
-		// Keep reasoning_content on the assistant turn for display and session
-		// archive. It is NOT re-uploaded to the API: the openai provider drops it
-		// when building the request, since re-sent reasoning is billable prompt
-		// input for no cache or coherence gain.
+		// Keep the display text and the original protocol block separately so
+		// hooks cannot change the reasoning replayed with DeepSeek tool history.
 		a.session.Add(provider.Message{
-			Role:               provider.RoleAssistant,
-			Content:            text,
-			ReasoningContent:   reasoning,
-			ReasoningSignature: signature,
-			ToolCalls:          calls,
+			Role:                     provider.RoleAssistant,
+			Content:                  text,
+			ReasoningContent:         reasoning.content,
+			ProtocolReasoningContent: reasoning.protocol,
+			ReasoningSignature:       signature,
+			ToolCalls:                calls,
 		})
 
 		if len(calls) == 0 {
@@ -829,12 +829,17 @@ func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
 	}
 }
 
+type turnReasoning struct {
+	content  string
+	protocol *string
+}
+
 // stream runs one completion, emitting reasoning and text deltas as typed
 // events and collecting complete tool calls. A Message event closes the text
 // stream so a sink can re-render the streamed raw text as styled markdown. The
 // accumulated text and reasoning are also returned so the caller can round-trip
 // reasoning on the next turn.
-func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string, string, string, []provider.ToolCall, *provider.Usage, bool, bool, error) {
+func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string, turnReasoning, string, []provider.ToolCall, *provider.Usage, bool, bool, error) {
 	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
 		a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max})
 	})
@@ -845,7 +850,7 @@ func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string,
 		Temperature: a.temperature,
 	})
 	if err != nil {
-		return "", "", "", nil, nil, false, false, err
+		return "", turnReasoning{}, "", nil, nil, false, false, err
 	}
 
 	// A PostLLMCall hook rewrites the whole reasoning block, so when one is wired
@@ -859,7 +864,8 @@ func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string,
 	var calls []provider.ToolCall
 	var usage *provider.Usage
 	var partialToolStarted bool
-	finishReasoning := func() (stored, display string) {
+	var reasoningReceived bool
+	finishReasoning := func() (stored turnReasoning, display string) {
 		original := reasoning.String()
 		display = original
 		if transformReasoning && original != "" {
@@ -868,15 +874,19 @@ func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string,
 				a.sink.Emit(event.Event{Kind: event.Reasoning, Text: display})
 			}
 		}
-		stored = display
+		stored.content = display
+		if reasoningReceived {
+			stored.protocol = &original
+		}
 		if signature != "" {
-			stored = original
+			stored.content = original
 		}
 		return stored, display
 	}
 	for chunk := range ch {
 		switch chunk.Type {
 		case provider.ChunkReasoning:
+			reasoningReceived = true
 			reasoning.WriteString(chunk.Text)
 			if chunk.Signature != "" {
 				signature = chunk.Signature
@@ -911,19 +921,13 @@ func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string,
 				stored, _ := finishReasoning()
 				return text.String(), stored, signature, calls, usage, true, partialToolStarted, chunk.Err
 			}
-			return "", "", "", nil, nil, false, false, chunk.Err
+			return "", turnReasoning{}, "", nil, nil, false, false, chunk.Err
 		}
 	}
 	// With a PostLLMCall hook, the live stream was suppressed above; transform the
 	// full reasoning now and emit it once so the sink never sees the untranslated
 	// text. Without a hook this is skipped — the chunk-by-chunk events already fired.
 	stored, display := finishReasoning()
-	// Store the transformed reasoning — except when a provider signature pins it to
-	// the original text (Anthropic extended thinking). That signed thinking block is
-	// replayed verbatim on the next tool-call turn; re-uploading transformed text
-	// under the original signature is rejected, so keep the original for storage
-	// while the user still sees the transformed version live. finishReasoning did
-	// that choice above.
 	// Close the text stream: a sink may re-render the streamed raw text as
 	// styled markdown now that it is complete. Reasoning rides along so the sink
 	// has the full chain if it wants it.

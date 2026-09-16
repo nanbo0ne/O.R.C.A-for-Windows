@@ -1,5 +1,16 @@
 # O.R.C.A Desktop Changelog
 
+## V3.0.5 (Unreleased / 发布准备)
+
+- Canonical official model: `deepseek/deepseek-flash`, DeepSeek V4.1 Flash, with native vision, 1M context, up to 384K output, tool calls, and JSON Output. `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` are compatibility aliases; Pro remains selectable and text-only.
+- One-time upgrade of existing official DeepSeek defaults, roles, and saved session model selections, including old official Pro selections. Custom providers, proxy endpoints, credentials, history, and later deliberate Pro choices remain intact. 官方默认值、角色与会话选择一次性升级，自定义配置和历史数据保留，迁移后仍可重新选择 Pro。
+- Official reasoning effort is `low` / `high` / `max`; `auto` uses `high`. Compact/Detailed changes reasoning visibility only.
+- CNY per million tokens, in cache-hit input / cache-miss input / output order: Flash off-peak 0.02 / 1 / 4, peak 0.04 / 2 / 8; Pro off-peak 0.15 / 4.5 / 13.5, peak 0.30 / 9 / 27. Peak time is fixed UTC+8 Monday-Friday 09:00-12:00 and 14:00-18:00; all other times are off-peak. Historical amounts and currencies are not recalculated or relabeled.
+- Prepared bilingual whole-product READMEs, release notes, download targets, desktop version metadata, and Windows installer contracts for the published 3.0.4 baseline. No legacy-brand duplicate assets; historical releases and entries below remain unchanged.
+- Managed local AI and Computer Use remain disabled on every platform with code, configuration, and models retained. No DPI work. 本次仅发布准备，未提交、推送或发布；完整回归、原生构建及真实安装升级仍需独立验收。
+
+See [bilingual notes and official sources](docs/releases/desktop-v3.0.5.md) and the [build/acceptance checklist](docs/build/desktop-v3.0.5.md). Preparation and contract tests are not a passed release acceptance run.
+
 ## V3.0.4
 
 - Fixed incremental text rendering before message commit and removed a second Markdown delay. Stage replies and tool groups remain visible in chronological order.

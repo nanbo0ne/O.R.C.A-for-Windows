@@ -3,7 +3,8 @@ import { Check, KeyRound, SkipForward } from "lucide-react";
 import logoSymbol from "../assets/logo-symbol.png";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
-import { ONBOARDING_PROVIDER_ID } from "../lib/onboarding";
+import { ONBOARDING_MODEL_REF, ONBOARDING_PROVIDER_ID } from "../lib/onboarding";
+import { modelDisplayLabel } from "../lib/modelCatalog";
 
 export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
   const t = useT();
@@ -57,7 +58,7 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
       <div id="onboarding-title" className="onboarding__title">{t("onboarding.title")}</div>
       <div id="onboarding-description" className="onboarding__tag">{t("onboarding.tagline")}</div>
       <div className="onboarding__privacy"><span>{t("onboarding.deepseekPrivacy")}</span><span>{t("onboarding.deepseekPrivacyLocal")}</span></div>
-      <div className="onboarding__provider-heading"><KeyRound size={18} /><span><strong>{t("onboarding.officialApi")}</strong><small>https://api.deepseek.com</small></span></div>
+      <div className="onboarding__provider-heading"><KeyRound size={18} /><span><strong title={t("onboarding.officialApi")}>{modelDisplayLabel(ONBOARDING_MODEL_REF, undefined, true)}</strong><small>https://api.deepseek.com</small></span></div>
       <label className="onboarding__label" htmlFor="onboarding-deepseek-key">DEEPSEEK_API_KEY</label>
       <input id="onboarding-deepseek-key" className="onboarding__input" type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-..." />
       {error && <div className="onboarding__error" role="alert">{error}</div>}

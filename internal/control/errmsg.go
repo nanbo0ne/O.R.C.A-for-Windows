@@ -17,6 +17,15 @@ func explainError(err error) error {
 	if err == nil {
 		return nil
 	}
+	// This wrapper also contains an APIError; handle it before the generic HTTP
+	// mapping so the recovery guidance is not replaced by the raw server body.
+	var historyErr *provider.ReasoningHistoryError
+	if errors.As(err, &historyErr) {
+		if i18n.M == i18n.Chinese {
+			return errors.New("DeepSeek 无法使用这段对话的推理记录。请带上摘要新建对话，原对话会保留。")
+		}
+		return errors.New(historyErr.Error())
+	}
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
 		msg := i18n.M.ProviderStatusMessage(apiErr.Status)

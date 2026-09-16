@@ -29,9 +29,10 @@ type modelReasoningCapability struct {
 }
 
 var modelReasoningCapabilities = map[string]modelReasoningCapability{
-	"deepseek-v4-flash":            {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"high", "max"}, Default: "auto"},
-	"deepseek-v4-pro":              {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"high", "max"}, Default: "auto"},
-	"deepseek-v4-flash-vision-exp": {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"high", "max"}, Default: "auto"},
+	"deepseek-flash":               {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"low", "high", "max"}, Default: "high"},
+	"deepseek-v4-flash":            {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"low", "high", "max"}, Default: "high"},
+	"deepseek-v4-pro":              {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"low", "high", "max"}, Default: "high"},
+	"deepseek-v4-flash-vision-exp": {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"low", "high", "max"}, Default: "high"},
 }
 
 // IsOfficialDeepSeekEntry reports whether an entry uses DeepSeek's official API.
@@ -50,10 +51,7 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 		levels := make([]string, 0, len(supported)+1)
 		levels = append(levels, "auto")
 		levels = append(levels, supported...)
-		def := normalizeEffortLevel(e.DefaultEffort)
-		if def == "" || !containsString(supported, def) {
-			def = supported[0]
-		}
+		def := defaultSupportedEffort(e, supported)
 		return EffortCapability{Supported: true, Levels: levels, Default: def}
 	}
 	switch explicitReasoningProtocol(e) {
@@ -99,6 +97,13 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	if explicitReasoningProtocol(e) == ReasoningProtocolNone {
 		return "", effortNotConfigurableError(e)
 	}
+	if ReasoningProtocolForEntry(e) == ReasoningProtocolDeepSeek && level != "off" {
+		var err error
+		level, err = openai.NormalizeDeepSeekEffort(level)
+		if err != nil {
+			return "", fmt.Errorf("usage: /effort auto|low|high|max")
+		}
+	}
 	supported := normalizedSupportedEfforts(e)
 	if len(supported) > 0 {
 		if containsString(supported, level) {
@@ -109,14 +114,10 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	switch ReasoningProtocolForEntry(e) {
 	case ReasoningProtocolDeepSeek:
 		switch level {
-		case "high", "max":
+		case "low", "high", "max":
 			return level, nil
-		case "low", "medium":
-			return "high", nil
-		case "xhigh":
-			return "max", nil
 		default:
-			return "", fmt.Errorf("usage: /effort auto|high|max")
+			return "", fmt.Errorf("usage: /effort auto|low|high|max")
 		}
 	case ReasoningProtocolOpenAI:
 		switch level {
@@ -175,10 +176,18 @@ func EffectiveEffort(e *ProviderEntry) string {
 		return ""
 	}
 	if effort := normalizeStoredEffort(e.Effort); effort != "" {
+		if ReasoningProtocolForEntry(e) == ReasoningProtocolDeepSeek {
+			if normalized, err := openai.NormalizeDeepSeekEffort(effort); err == nil {
+				return normalized
+			}
+		}
 		return effort
 	}
 	supported := normalizedSupportedEfforts(e)
 	if len(supported) == 0 {
+		if ReasoningProtocolForEntry(e) == ReasoningProtocolDeepSeek {
+			return "high"
+		}
 		if cap, ok := resolvedModelReasoningCapability(e); ok {
 			def := normalizeEffortLevel(cap.Default)
 			if def != "" && def != "auto" && containsString(cap.Levels, def) {
@@ -190,8 +199,20 @@ func EffectiveEffort(e *ProviderEntry) string {
 		}
 		return ""
 	}
+	return defaultSupportedEffort(e, supported)
+}
+
+func defaultSupportedEffort(e *ProviderEntry, supported []string) string {
 	def := normalizeEffortLevel(e.DefaultEffort)
-	if def == "" || !containsString(supported, def) {
+	if ReasoningProtocolForEntry(e) == ReasoningProtocolDeepSeek {
+		if normalized, err := openai.NormalizeDeepSeekEffort(def); err == nil {
+			def = normalized
+		}
+		if !containsString(supported, def) && containsString(supported, "high") {
+			def = "high"
+		}
+	}
+	if !containsString(supported, def) {
 		return supported[0]
 	}
 	return def
@@ -214,6 +235,11 @@ func normalizeProviderEffortFields(e *ProviderEntry) {
 	e.ReasoningProtocol = normalizeReasoningProtocol(e.ReasoningProtocol)
 	e.DefaultEffort = normalizeEffortLevel(e.DefaultEffort)
 	e.SupportedEfforts = normalizedSupportedEfforts(e)
+	if ReasoningProtocolForEntry(e) == ReasoningProtocolDeepSeek {
+		if effort, err := openai.NormalizeDeepSeekEffort(e.Effort); err == nil {
+			e.Effort = effort
+		}
+	}
 }
 
 func normalizeStoredEffort(raw string) string {
@@ -296,7 +322,7 @@ func effortCapabilityFromModel(cap modelReasoningCapability) EffortCapability {
 }
 
 func deepSeekEffortCapability() EffortCapability {
-	return EffortCapability{Supported: true, Levels: []string{"auto", "high", "max"}, Default: "auto"}
+	return EffortCapability{Supported: true, Levels: []string{"auto", "low", "high", "max"}, Default: "high"}
 }
 
 func openAIEffortCapability() EffortCapability {
@@ -335,6 +361,11 @@ func normalizedSupportedEfforts(e *ProviderEntry) []string {
 	seen := map[string]bool{}
 	for _, raw := range e.SupportedEfforts {
 		level := normalizeEffortLevel(raw)
+		if ReasoningProtocolForEntry(e) == ReasoningProtocolDeepSeek {
+			if normalized, err := openai.NormalizeDeepSeekEffort(level); err == nil {
+				level = normalized
+			}
+		}
 		if level == "" || level == "auto" || seen[level] {
 			continue
 		}

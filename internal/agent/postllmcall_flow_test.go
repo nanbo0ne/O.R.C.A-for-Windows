@@ -84,6 +84,11 @@ func TestPostLLMCallTransformsReasoningOnce(t *testing.T) {
 	if got := assistantReasoning(a.session.Messages); got != "TRANSLATED" {
 		t.Fatalf("stored reasoning = %q, want the hook's replacement", got)
 	}
+	for _, m := range a.session.Messages {
+		if m.Role == provider.RoleAssistant && (m.ProtocolReasoningContent == nil || *m.ProtocolReasoningContent != "think A think B") {
+			t.Fatalf("protocol reasoning was replaced by the hook: %+v", m)
+		}
+	}
 }
 
 // TestPostLLMCallConfiguredButNoReasoning makes sure a hook with an empty

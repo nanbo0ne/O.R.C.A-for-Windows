@@ -8,6 +8,7 @@
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
 
 import { t } from "./i18n";
+import { DEEPSEEK_DEFAULT_EFFORT, DEEPSEEK_EFFORT_LEVELS, DEEPSEEK_FLASH_REF, isOfficialDeepSeekProvider, modelDisplayLabel, officialModelInfo, OFFICIAL_DEEPSEEK_MODELS, providerModelLabel, providerModelRef } from "./modelCatalog";
 import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeToolApprovalMode } from "./types";
 
 import type {
@@ -759,17 +760,19 @@ function makeMockApp(): AppBindings {
   // Mutable settings so the Settings panel's edits are observable in browser dev.
   const settings: SettingsView = {
     defaultModel: "deepseek",
-    automationModel: "deepseek/deepseek-v4-flash",
+    automationModel: DEEPSEEK_FLASH_REF,
     plannerModel: "",
     subagentModel: "",
     subagentEffort: "",
+    visionModel: "",
+    effectiveVisionModel: DEEPSEEK_FLASH_REF,
     autoPlan: "off",
     providers: [
-      { name: "deepseek", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+      { name: "deepseek", builtIn: true, added: true, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: OFFICIAL_DEEPSEEK_MODELS.map((model) => model.model), default: "deepseek-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
       { name: "mimo-token-plan", builtIn: true, added: false, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
     ],
     officialProviders: [
-      { name: "deepseek", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+      { name: "deepseek", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: OFFICIAL_DEEPSEEK_MODELS.map((model) => model.model), default: "deepseek-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
       { name: "mimo-api", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5", "mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
       { name: "mimo-token-plan", builtIn: true, added: false, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
     ],
@@ -841,12 +844,14 @@ function makeMockApp(): AppBindings {
     autoApproveTools: false,
     bypass: false,
   };
+  const mockProviderForRef = (ref: string) => settings.providers.find((provider) => provider.name === ref.split("/")[0]);
+  const mockOfficialInfo = (ref: string) => isOfficialDeepSeekProvider(mockProviderForRef(ref)) ? officialModelInfo(ref) : undefined;
   let mockVisionCapabilities: VisionCapability[] = settings.providers.flatMap((provider) => provider.models.map((model) => ({
     modelRef: `${provider.name}/${model}`,
     key: `${provider.kind}|${provider.baseUrl}|${model}`,
-    status: provider.name === "deepseek" ? "unsupported" : "unknown",
+    status: mockOfficialInfo(`${provider.name}/${model}`)?.vision ?? "unknown",
     checkedAt: provider.name === "deepseek" ? Date.now() : undefined,
-    reason: provider.name === "deepseek" ? "model does not support image input" : undefined,
+    reason: mockOfficialInfo(`${provider.name}/${model}`)?.vision === "unsupported" ? "model does not support image input" : undefined,
   })));
   settings.providers = settings.providers.map((provider) =>
     provider.apiKeyEnv === "DEEPSEEK_API_KEY" ? { ...provider, keySet: !freshMock } : provider,
@@ -1050,7 +1055,7 @@ function makeMockApp(): AppBindings {
       workspaceName: "独立工作区",
       topicId: "",
       topicTitle: "独立工作区",
-      label: "DeepSeek-R1",
+      label: DEEPSEEK_FLASH_REF,
       ready: true,
       running: false,
       mode: "normal",
@@ -1068,7 +1073,7 @@ function makeMockApp(): AppBindings {
       topicId: "topic_dev_standard",
       topicTitle: t("mock.trashDevStandardTitle"),
       projectColor: "blue",
-      label: "DeepSeek-R1",
+      label: DEEPSEEK_FLASH_REF,
       ready: true,
       running: false,
       mode: "normal",
@@ -1085,7 +1090,7 @@ function makeMockApp(): AppBindings {
       topicId: "topic_p3b_pd",
       topicTitle: "p3b P&D",
       projectColor: "purple",
-      label: "DeepSeek-R1",
+      label: DEEPSEEK_FLASH_REF,
       ready: true,
       running: runningMock && mockTopicIsRunning("topic_p3b_pd"),
       mode: "normal",
@@ -1101,7 +1106,7 @@ function makeMockApp(): AppBindings {
       workspaceName: "独立工作区",
       topicId: "topic_global",
       topicTitle: "独立工作区",
-      label: "DeepSeek-R1",
+      label: DEEPSEEK_FLASH_REF,
       ready: true,
       running: false,
       mode: "normal",
@@ -1111,34 +1116,38 @@ function makeMockApp(): AppBindings {
       cwd: "~/projects/joyquant-db",
     },
   ];
-  const mockModelCatalog = [
-    { ref: "deepseek/deepseek-v4-flash", provider: "deepseek", model: "deepseek-v4-flash" },
-    { ref: "deepseek/deepseek-v4-pro", provider: "deepseek", model: "deepseek-v4-pro" },
-    { ref: "deepseek/deepseek-v4-flash-vision-exp", provider: "deepseek", model: "deepseek-v4-flash-vision-exp" },
-  ];
+  const mockModelCatalog = OFFICIAL_DEEPSEEK_MODELS;
+  const configuredMockModels = () => settings.providers
+    .filter((provider) => provider.added && provider.keySet)
+    .flatMap((provider) => provider.models.map((model) => ({
+      ref: `${provider.name}/${model}`, provider: provider.name, model,
+      ...mockOfficialInfo(`${provider.name}/${model}`),
+      metadataSource: isOfficialDeepSeekProvider(provider) ? "deepseek_official" : undefined,
+      contextWindow: provider.modelContextWindows?.[model] || provider.contextWindow || mockOfficialInfo(`${provider.name}/${model}`)?.contextWindow,
+      vision: mockVisionCapabilities.find((capability) => capability.key === `${provider.kind}|${provider.baseUrl}|${model}`)?.status ?? mockOfficialInfo(`${provider.name}/${model}`)?.vision ?? "unknown",
+    })));
   const defaultMockModelRef = mockModelCatalog[0].ref;
   const mockModelRef = (name: string): string => {
-    const trimmed = name.trim();
-    if (!trimmed || trimmed === "DeepSeek-R1") return defaultMockModelRef;
+    const trimmed = providerModelRef(name.trim(), mockProviderForRef(name.trim()));
+    if (!trimmed) return defaultMockModelRef;
     const exact = mockModelCatalog.find((model) => model.ref === trimmed);
     if (exact) return exact.ref;
     const byModel = mockModelCatalog.find((model) => model.model === trimmed);
     return byModel?.ref ?? trimmed;
   };
-  const mockModelLabel = (ref: string): string => mockModelCatalog.find((model) => model.ref === mockModelRef(ref))?.model ?? ref.split("/").pop() ?? ref;
+  const mockModelLabel = (ref: string): string => providerModelLabel(mockModelRef(ref), mockProviderForRef(mockModelRef(ref)));
   const mockTabModelRef = (tab?: TabMeta): string => mockModelRef(tab?.label ?? "");
   const setMockTabModel = (tabID: string | undefined, name: string) => {
     const ref = mockModelRef(name);
-    const label = mockModelLabel(ref);
     let applied = false;
     mockTabs = mockTabs.map((tab) => {
       const match = tabID ? tab.id === tabID : tab.active;
       if (!match) return tab;
       applied = true;
-      return { ...tab, label };
+      return { ...tab, label: ref };
     });
     if (!applied && mockTabs.length > 0) {
-      mockTabs = mockTabs.map((tab, index) => (index === 0 ? { ...tab, label } : tab));
+      mockTabs = mockTabs.map((tab, index) => (index === 0 ? { ...tab, label: ref } : tab));
     }
   };
   return {
@@ -1670,10 +1679,14 @@ function makeMockApp(): AppBindings {
       if (index >= 0) mockProjectTree.splice(index, 1);
     },
         async ContextUsage() {
-          return { used: 42124, window: 128000, sessionTokens: 34479, compactRatio: 0.8 };
+          const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
+          return this.ContextUsageForTab(active?.id ?? "");
         },
-        async ContextUsageForTab() {
-          return this.ContextUsage();
+        async ContextUsageForTab(tabID) {
+          const tab = mockTabs.find((item) => item.id === tabID);
+          const modelRef = mockTabModelRef(tab);
+          const model = configuredMockModels().find((model) => model.ref === modelRef);
+          return { used: 42124, window: model?.contextWindow ?? 0, windowConfirmed: Boolean(model?.contextWindow), modelRef, sessionTokens: 34479, compactRatio: 0.8 };
         },
         async Balance() {
       // Mirror the active mock provider: deepseek-flash carries a balance_url.
@@ -1695,7 +1708,7 @@ function makeMockApp(): AppBindings {
           const toolApprovalMode = normalizeToolApprovalMode(active?.toolApprovalMode, active ? normalizeMode(active.mode) : "normal", settings.autoApproveTools);
           const autoApproveTools = toolApprovalMode === "yolo";
           return {
-            label: active?.label ?? "DeepSeek-R1",
+            label: mockModelLabel(mockTabModelRef(active)),
             ready: active?.ready ?? true,
             eventChannel: EVENT_CHANNEL,
             cwd: active?.cwd || cwd,
@@ -1718,7 +1731,7 @@ function makeMockApp(): AppBindings {
           const toolApprovalMode = normalizeToolApprovalMode(tab?.toolApprovalMode, tab ? normalizeMode(tab.mode) : "normal", settings.autoApproveTools);
           const autoApproveTools = toolApprovalMode === "yolo";
           return {
-            label: tab?.label ?? "DeepSeek-R1",
+            label: mockModelLabel(mockTabModelRef(tab)),
             ready: tab?.ready ?? true,
             eventChannel: EVENT_CHANNEL,
             cwd: tab?.cwd || cwd,
@@ -1902,11 +1915,11 @@ function makeMockApp(): AppBindings {
           { label: "trust", insert: "trust", hint: "信任此项目的 hook" },
         ],
         "/model": [
-          { label: "deepseek/deepseek-v4-flash", insert: "deepseek/deepseek-v4-flash", hint: "当前" },
-          { label: "deepseek/deepseek-v4-pro", insert: "deepseek/deepseek-v4-pro", hint: "" },
+          ...configuredMockModels().map((model) => ({ label: modelDisplayLabel(model.ref, model.model, model.metadataSource === "deepseek_official"), insert: model.ref, hint: model.ref === mockTabModelRef(mockTabs.find((tab) => tab.active)) ? "当前" : "" })),
         ],
         "/effort": [
-          { label: "auto", insert: "auto", hint: "使用模型默认值" },
+          { label: "auto", insert: "auto", hint: "high" },
+          { label: "low", insert: "low", hint: "较少思考" },
           { label: "high", insert: "high", hint: "更深入思考" },
           { label: "max", insert: "max", hint: "最高思考强度" },
         ],
@@ -2040,12 +2053,12 @@ function makeMockApp(): AppBindings {
         async Models() {
           const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
           const current = mockTabModelRef(active);
-          return mockModelCatalog.map((model) => ({ ...model, current: model.ref === current }));
+          return configuredMockModels().map((model) => ({ ...model, current: model.ref === current }));
         },
         async ModelsForTab(tabID) {
           const tab = mockTabs.find((item) => item.id === tabID) ?? mockTabs.find((item) => item.active) ?? mockTabs[0];
           const current = mockTabModelRef(tab);
-          return mockModelCatalog.map((model) => ({ ...model, current: model.ref === current }));
+          return configuredMockModels().map((model) => ({ ...model, current: model.ref === current }));
         },
         async SetModel(name) {
           setMockTabModel(undefined, name);
@@ -2054,7 +2067,7 @@ function makeMockApp(): AppBindings {
           setMockTabModel(tabID, name);
         },
         async Effort() {
-          return { supported: true, current: mockEffort, default: "high", levels: ["auto", "high", "max"] };
+          return { supported: true, current: mockEffort, default: DEEPSEEK_DEFAULT_EFFORT, levels: [...DEEPSEEK_EFFORT_LEVELS] };
         },
         async EffortForTab() {
           return this.Effort();
@@ -2153,6 +2166,7 @@ function makeMockApp(): AppBindings {
     },
     async SetVisionModel(ref: string) {
       settings.visionModel = ref;
+      settings.effectiveVisionModel = providerModelRef(ref, mockProviderForRef(ref)) || DEEPSEEK_FLASH_REF;
     },
     async SetAutoPlan(mode: string) {
       settings.autoPlan = mode;
@@ -2165,7 +2179,7 @@ function makeMockApp(): AppBindings {
     },
     async AddOfficialProviderAccess(kind: string, key: string) {
       const templates: Record<string, ProviderView> = {
-        deepseek: { name: "deepseek", builtIn: true, added: true, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: !!key.trim(), balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+        deepseek: { name: "deepseek", builtIn: true, added: true, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: OFFICIAL_DEEPSEEK_MODELS.map((model) => model.model), default: "deepseek-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: !!key.trim(), balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
         "mimo-api": { name: "mimo-api", builtIn: true, added: true, kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5", "mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: !!key.trim(), balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
         "mimo-token-plan": { name: "mimo-token-plan", builtIn: true, added: true, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: !!key.trim(), balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
       };
@@ -2178,7 +2192,7 @@ function makeMockApp(): AppBindings {
       if (!p.baseUrl.trim()) throw new Error(t("settings.fetchModelsMissingBaseUrl"));
       if (!p.apiKeyEnv.trim()) throw new Error(t("settings.fetchModelsMissingKeyEnv"));
       await delay(350);
-      if (p.baseUrl.includes("deepseek")) return ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"];
+      if (isOfficialDeepSeekProvider(p)) return mockModelCatalog.map((model) => model.model);
       if (p.baseUrl.includes("mimo") || p.baseUrl.includes("xiaomimimo")) return ["mimo-v2.5", "mimo-v2.5-pro"];
       return ["gpt-5", "gpt-5-mini", "qwen3-coder"];
     },
@@ -2387,8 +2401,7 @@ function makeMockApp(): AppBindings {
           return mockVisionCapabilities.map((item) => ({ ...item }));
         },
         async ProbeModelVision(modelRef: string) {
-          const lower = modelRef.toLowerCase();
-          const next: VisionCapability = { modelRef, key: modelRef, status: lower.includes("deepseek-v4-flash-vision-exp") ? "supported" : lower.includes("deepseek") ? "unsupported" : "supported", checkedAt: Date.now() };
+          const next: VisionCapability = { modelRef, key: modelRef, status: mockOfficialInfo(modelRef)?.vision ?? "unknown", checkedAt: Date.now() };
           mockVisionCapabilities = [...mockVisionCapabilities.filter((item) => item.modelRef !== modelRef), next];
           return next;
         },
@@ -2449,7 +2462,11 @@ function makeMockApp(): AppBindings {
       return { required: false, completed: true, hasCloudModel: true, hasLocalRuntime: false, platform: "browser", providers: settings.providers };
     },
     async CompleteOnboarding() { settings.computerUseFullAccessApproved = false; },
-    async ConnectProviderPreset(_presetID: string, _apiKey: string) { return settings.providers[0]?.models ?? []; },
+    async ConnectProviderPreset(presetID: string, apiKey: string) {
+      if (!apiKey.trim()) throw new Error("key is required");
+      await this.AddOfficialProviderAccess(presetID, apiKey);
+      return settings.providers.find((provider) => provider.name === presetID)?.models ?? [];
+    },
     async GetHardwareProfile() {
       return { platform: "browser", supported: false, gpus: [], gpuDetectionFailed: false, memoryTotalMiB: 0, memoryFreeMiB: 0, cpuLogicalCores: 0, diskFreeBytes: 0, recommendedRuntime: "", recommendedModel: "" };
     },
@@ -2488,7 +2505,7 @@ function makeMockApp(): AppBindings {
     },
     // Tab management mocks.
     async ListTabs() {
-      return mockTabs.map((tab) => ({ ...tab }));
+      return mockTabs.map((tab) => ({ ...tab, label: mockModelLabel(mockTabModelRef(tab)) }));
     },
     async OpenProjectTab(workspaceRoot: string, _topicID: string) {
       const existing = mockTabs.find((tab) => tab.scope === "project" && tab.workspaceRoot === workspaceRoot && tab.topicId === _topicID);
@@ -2505,7 +2522,7 @@ function makeMockApp(): AppBindings {
         topicId: _topicID,
         topicTitle: topicLabel(_topicID, t("mock.newSession")),
         projectColor: mockProjectTree.find((node) => node.root === workspaceRoot)?.projectColor,
-        label: "deepseek-v4-flash",
+        label: DEEPSEEK_FLASH_REF,
         ready: true,
         running: mockTopicRunsInScenario(_topicID),
         mode: "normal",
@@ -2530,7 +2547,7 @@ function makeMockApp(): AppBindings {
         workspaceName: "独立工作区",
         topicId: _topicID,
         topicTitle: topicLabel(_topicID, "独立工作区"),
-        label: "deepseek-v4-flash",
+        label: DEEPSEEK_FLASH_REF,
         ready: true,
         running: false,
         mode: "normal",
@@ -2550,7 +2567,7 @@ function makeMockApp(): AppBindings {
       }
       const tab: TabMeta = {
         id: "tab_" + Date.now(), scope: "automation", workspaceRoot: "", workspaceName: "Orca",
-        topicId: _topicID, topicTitle: topicLabel(_topicID, "Orca"), label: "deepseek-v4-flash",
+        topicId: _topicID, topicTitle: topicLabel(_topicID, "Orca"), label: DEEPSEEK_FLASH_REF,
         ready: true, running: false, mode: "normal", collaborationMode: "normal", toolApprovalMode: "ask",
         promptMode: "assistant", enhancedModeEnabled: false, active: true, cwd: "",
       };
@@ -2690,11 +2707,14 @@ function makeMockApp(): AppBindings {
     async SaveWindowState(_state) {
       // no-op in browser dev — no real window geometry to persist
     },
-    async ContextPanel(_tabID: string) {
+    async ContextPanel(tabID: string) {
       const now = Date.now();
+      const context = await this.ContextUsageForTab(tabID);
       return {
         usedTokens: 42124,
-        windowTokens: 128000,
+        windowTokens: context.window,
+        windowConfirmed: context.windowConfirmed,
+        modelRef: context.modelRef,
         promptTokens: 22134,
         completionTokens: 12345,
         totalTokens: 34479,

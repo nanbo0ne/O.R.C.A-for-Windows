@@ -815,6 +815,9 @@ func (c *Config) SaveTo(path string) error {
 }
 
 func (c *Config) SaveToScope(path string, scope RenderScope) error {
+	if c.loadErr != nil {
+		return c.loadErr
+	}
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")
 	}

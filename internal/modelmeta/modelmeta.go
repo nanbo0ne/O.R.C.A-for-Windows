@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/billing"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/product"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
@@ -24,6 +25,7 @@ const (
 	SourceUserOverride     = "user_model_override"
 	SourceProviderDefault  = "provider_default"
 	SourceLocalRuntime     = "local_runtime"
+	SourceDeepSeekOfficial = "deepseek_official"
 )
 
 type Metadata struct {
@@ -198,25 +200,32 @@ func Resolve(entry *config.ProviderEntry, store *Store) Resolved {
 	resolved.ToolUse = nonEmpty(stored.ToolUse, CapabilityUnknown)
 	resolved.StructuredOutput = nonEmpty(stored.StructuredOutput, CapabilityUnknown)
 	resolved.MetadataSource = stored.MetadataSource
-	if config.IsOfficialDeepSeekEntry(entry) {
-		switch strings.ToLower(strings.TrimSpace(entry.Model)) {
-		case "deepseek-v4-flash", "deepseek-v4-pro":
+	officialModel := ""
+	if strings.EqualFold(strings.TrimSpace(entry.Kind), "openai") {
+		officialModel = billing.OfficialDeepSeekModel(entry.Name, entry.BaseURL, entry.Model)
+	}
+	if officialModel != "" {
+		resolved.Vision = CapabilitySupported
+		if officialModel == "deepseek-v4-pro" {
 			resolved.Vision = CapabilityUnsupported
-			resolved.ToolUse = CapabilitySupported
-			resolved.StructuredOutput = CapabilitySupported
-			resolved.MetadataSource = "deepseek_official"
-		case "deepseek-v4-flash-vision-exp":
-			resolved.Vision = CapabilitySupported
-			resolved.ToolUse = CapabilitySupported
-			resolved.StructuredOutput = CapabilitySupported
-			resolved.MetadataSource = "deepseek_official"
 		}
+		resolved.ToolUse = CapabilitySupported
+		resolved.StructuredOutput = CapabilitySupported
+		resolved.MetadataSource = SourceDeepSeekOfficial
 	}
 
 	if strings.EqualFold(strings.TrimSpace(entry.Name), "orca-local") && entry.ContextWindow > 0 {
 		resolved.ContextWindow = entry.ContextWindow
 		resolved.ContextConfirmed = true
 		resolved.ContextSource = SourceLocalRuntime
+	} else if officialModel != "" {
+		resolved.ContextWindow = 1_000_000
+		resolved.ContextConfirmed = true
+		resolved.ContextSource = SourceDeepSeekOfficial
+		if override := officialContextOverride(entry, officialModel); override > 0 {
+			resolved.ContextWindow = override
+			resolved.ContextSource = SourceUserOverride
+		}
 	} else if stored.ContextWindow > 0 {
 		resolved.ContextWindow = stored.ContextWindow
 		resolved.ContextConfirmed = stored.ContextConfirmed
@@ -235,11 +244,29 @@ func Resolve(entry *config.ProviderEntry, store *Store) Resolved {
 	if resolved.Pricing == nil && stored.Pricing != nil {
 		resolved.Pricing = stored.Pricing
 	}
+	if officialModel != "" {
+		// Refresh model metadata for future requests without mutating cached prices
+		// or the snapshots already attached to usage records and in-flight requests.
+		resolved.Pricing = billing.OfficialDeepSeekPricing(entry.Name, entry.BaseURL, entry.Model)
+	}
 	if resolved.Pricing != nil {
 		resolved.PricingAvailable = true
 		resolved.Currency = resolved.Pricing.Symbol()
 	}
 	return resolved
+}
+
+func officialContextOverride(entry *config.ProviderEntry, model string) int {
+	models := []string{model, entry.Model}
+	if model == "deepseek-flash" {
+		models = append(models, "deepseek-v4-flash", "deepseek-v4-flash-vision-exp")
+	}
+	for _, id := range models {
+		if window := entry.ModelContextWindows[id]; window > 0 {
+			return window
+		}
+	}
+	return 0
 }
 
 func MetadataFromDiscovery(entry *config.ProviderEntry, contextWindow int, contextSource string, vision, toolUse, structuredOutput string, pricing *provider.Pricing) Metadata {

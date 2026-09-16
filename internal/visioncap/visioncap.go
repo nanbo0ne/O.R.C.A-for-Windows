@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/billing"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/product"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
@@ -128,11 +129,16 @@ func (s *Store) Stored(e *config.ProviderEntry) Capability {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if c, ok := s.Items[k]; ok {
+		c.Key = k
 		c.ModelRef = ModelRef(e)
 		if status, known := officialModelStatus(e); known {
 			c.Status = status
+			c.AutomaticStatus = status
 			c.Source = SourceMetadata
 			c.Reason = "DeepSeek official model capability"
+			if status == Supported {
+				c.Override = s.officialFlashOverride(e, c.Override)
+			}
 		}
 		if c.AutomaticStatus == "" {
 			c.AutomaticStatus = c.Status
@@ -140,19 +146,50 @@ func (s *Store) Stored(e *config.ProviderEntry) Capability {
 		return c
 	}
 	if status, known := officialModelStatus(e); known {
-		return Capability{ModelRef: ModelRef(e), Key: k, Status: status, AutomaticStatus: status, Source: SourceMetadata, Reason: "DeepSeek official model capability", Override: OverrideAuto}
+		c := Capability{ModelRef: ModelRef(e), Key: k, Status: status, AutomaticStatus: status, Source: SourceMetadata, Reason: "DeepSeek official model capability", Override: OverrideAuto}
+		if status == Supported {
+			c.Override = s.officialFlashOverride(e, c.Override)
+		}
+		return c
 	}
 	return Capability{ModelRef: ModelRef(e), Key: k, Status: Unknown, Override: OverrideAuto}
 }
 
+// Called under s.mu only for an official Flash entry. Keep its endpoint and
+// storage key intact so clearing an inherited override writes the requested ID.
+func (s *Store) officialFlashOverride(e *config.ProviderEntry, fallback string) string {
+	alias := *e
+	for _, model := range []string{"deepseek-flash", e.Model} {
+		if !strings.EqualFold(strings.TrimSpace(model), "deepseek-flash") {
+			continue
+		}
+		alias.Model = model
+		switch override := s.Items[Key(&alias)].Override; override {
+		case Supported, Unsupported, OverrideAuto:
+			// Explicit canonical auto also wins, allowing users to clear an override.
+			return override
+		}
+	}
+	for _, model := range []string{e.Model, "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"} {
+		alias.Model = model
+		switch s.Items[Key(&alias)].Override {
+		case Unsupported:
+			return Unsupported
+		case Supported:
+			fallback = Supported
+		}
+	}
+	return fallback
+}
+
 func officialModelStatus(e *config.ProviderEntry) (string, bool) {
-	if !config.IsOfficialDeepSeekEntry(e) {
+	if e == nil || !strings.EqualFold(strings.TrimSpace(e.Kind), "openai") {
 		return "", false
 	}
-	switch strings.ToLower(strings.TrimSpace(e.Model)) {
-	case "deepseek-v4-flash", "deepseek-v4-pro":
+	switch billing.OfficialDeepSeekModel(e.Name, e.BaseURL, e.Model) {
+	case "deepseek-v4-pro":
 		return Unsupported, true
-	case "deepseek-v4-flash-vision-exp":
+	case "deepseek-flash":
 		return Supported, true
 	default:
 		return "", false

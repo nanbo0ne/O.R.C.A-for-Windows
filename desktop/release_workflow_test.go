@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -111,6 +112,28 @@ func TestStableManualDispatchIsMainOnlyBeforeBuild(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowGatesConfigMigrationWithLinuxRace(t *testing.T) {
+	workflow := readDesktopReleaseWorkflow(t)
+	gate := workflowSection(workflow, "  cache-guard:", "  build:")
+	if !strings.Contains(gate, "runs-on: ubuntu-latest") {
+		t.Fatal("concurrency checks must run on the Linux gate")
+	}
+	race := workflowSection(gate, "- name: Test changed concurrency boundaries", "- name: Generate frontend bindings")
+	want := "run: go test -race ./internal/agent ./internal/control ./internal/billing ./internal/localai ./internal/config -count=1 -p=1"
+	if !strings.Contains(race, want) {
+		t.Fatal("race gate must include config migration and retain the existing packages")
+	}
+	for _, forbidden := range []string{"continue-on-error", "if:", "CGO_ENABLED: 0", "|| true"} {
+		if strings.Contains(race, forbidden) {
+			t.Fatalf("race check must remain mandatory, found %q", forbidden)
+		}
+	}
+	build := workflowSection(workflow, "  build:", "    strategy:")
+	if !strings.Contains(build, "needs: cache-guard") {
+		t.Fatal("native builds must wait for the concurrency checks")
+	}
+}
+
 func TestReleaseWorkflowRepackagesSignedPortablePayload(t *testing.T) {
 	workflow := readDesktopReleaseWorkflow(t)
 	section := workflowSection(workflow, "- name: Repackage Windows installer with signed app", "- name: Upload unsigned Windows installer for SignPath")
@@ -133,29 +156,83 @@ func TestReleaseWorkflowRepackagesSignedPortablePayload(t *testing.T) {
 	}
 }
 
-func TestInstallerAcceptanceUsesPublished303Baseline(t *testing.T) {
+func TestInstallerAcceptanceUsesPublished304Baseline(t *testing.T) {
 	body, err := os.ReadFile("../scripts/test-desktop-installer.ps1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	script := string(body)
 	for _, want := range []string{
-		"$ExpectedVersion = '3.0.4'",
-		"releases/tags/desktop-v3.0.3",
-		"Assert-Installation $upgradeDir '3.0.3' 'installed-303'",
+		"$ExpectedVersion = '3.0.5'",
+		"$assetName = 'O.R.C.A-for-Windows-windows-amd64-installer.exe'",
+		"[version]$productVersion -le [version]'3.0.4'",
+		"releases/tags/desktop-v3.0.4",
+		"Assert-Installation $upgradeDir '3.0.4' 'installed-304'",
 		"'SHA256SUMS.txt'",
-		"7437055c8680e564311c3455f5d6d1ddea06e9a1b69ee2e56d3e52960b9cc75b",
+		"3bb58aab89011e36210521b28ac8620bb6a4a372759db5df4a94aa1d843519a2",
 		"$oldHash -ine $checksumRows[0].Groups[1].Value -or $oldHash -cne $pinnedOldHash",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("installer acceptance is missing published-baseline check %q", want)
 		}
 	}
-	if strings.Contains(script, "3.0.2") {
-		t.Fatal("installer acceptance must not retain the 3.0.2 upgrade baseline")
+	if strings.Contains(script, "3.0.3") {
+		t.Fatal("installer acceptance must not retain the 3.0.3 upgrade baseline")
 	}
-	if strings.Contains(script, "5bf27fd4d958fc389a2ef320e401d05875d379b4d96c4ac64a8e8288ea48894d") {
-		t.Fatal("installer acceptance must not retain the 3.0.2 baseline hash")
+	if strings.Contains(script, "7437055c8680e564311c3455f5d6d1ddea06e9a1b69ee2e56d3e52960b9cc75b") {
+		t.Fatal("installer acceptance must not retain the 3.0.3 baseline hash")
+	}
+	workflow := readDesktopReleaseWorkflow(t)
+	for _, want := range []string{
+		"# Published upgrade baseline: desktop-v3.0.4.",
+		"# Asset: O.R.C.A-for-Windows-windows-amd64-installer.exe",
+		"# SHA256: 3bb58aab89011e36210521b28ac8620bb6a4a372759db5df4a94aa1d843519a2",
+		`"$seven_zip" t dist/O.R.C.A-for-Windows-windows-amd64-installer.exe`,
+	} {
+		if !strings.Contains(workflow, want) {
+			t.Errorf("workflow baseline or package filename is missing %q", want)
+		}
+	}
+}
+
+func TestReleaseDesktopVersionMetadataAgrees(t *testing.T) {
+	readJSON := func(path string, value any) {
+		t.Helper()
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(body, value); err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+	}
+	var wails struct {
+		Info struct {
+			ProductVersion string `json:"productVersion"`
+		} `json:"info"`
+	}
+	readJSON("wails.json", &wails)
+	if wails.Info.ProductVersion != "3.0.5" {
+		t.Fatalf("Wails version = %q, want 3.0.5", wails.Info.ProductVersion)
+	}
+	var windows struct {
+		Fixed map[string]string            `json:"fixed"`
+		Info  map[string]map[string]string `json:"info"`
+	}
+	readJSON("build/windows/info.json", &windows)
+	for field, value := range map[string]string{
+		"fixed.file_version":    windows.Fixed["file_version"],
+		"fixed.product_version": windows.Fixed["product_version"],
+		"info.FileVersion":      windows.Info["0409"]["FileVersion"],
+		"info.ProductVersion":   windows.Info["0409"]["ProductVersion"],
+	} {
+		if value != wails.Info.ProductVersion+".0" {
+			t.Errorf("%s = %q, must match Wails product version", field, value)
+		}
+	}
+	notes := "../docs/releases/desktop-v" + wails.Info.ProductVersion + ".md"
+	if body, err := os.ReadFile(notes); err != nil || len(body) == 0 {
+		t.Fatalf("release notes required for version %s: %v", wails.Info.ProductVersion, err)
 	}
 }
 

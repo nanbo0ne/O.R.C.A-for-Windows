@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronsUpDown, Gauge } from "lucide-react";
 import { asArray } from "../lib/array";
+import { useT } from "../lib/i18n";
 import type { EffortInfo } from "../lib/types";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
 
@@ -13,6 +14,7 @@ export function EffortSwitcher({
   disabled: boolean;
   onPick: (level: string) => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -60,6 +62,7 @@ export function EffortSwitcher({
         type="button"
         className={`modelsw__trigger effortsw__trigger ${current !== "auto" ? "effortsw__trigger--explicit" : ""}`}
         disabled={disabled}
+        title={current === "auto" ? t("status.effortAutoTitle", { def: effort.default }) : t("status.effortTitle")}
         aria-expanded={open && !closing}
         onClick={() => (open || closing ? closeMenu() : openMenu())}
       >

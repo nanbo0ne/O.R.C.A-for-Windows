@@ -46,6 +46,7 @@ func TestModelRefsSkipsUnconfigured(t *testing.T) {
 // TestModelArgCompletion verifies "/model " completes to the configured refs
 // through the shared completion path.
 func TestModelArgCompletion(t *testing.T) {
+	isolateUserConfig(t)
 	t.Chdir(t.TempDir())
 	t.Setenv("DEEPSEEK_API_KEY", "test-key")
 	m := newTestChatTUI()

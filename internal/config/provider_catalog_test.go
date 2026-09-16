@@ -7,7 +7,7 @@ func TestSelectableProviderPresetCatalogIsDeepSeekOnly(t *testing.T) {
 	if len(catalog) != 1 || catalog[0].ID != "deepseek" {
 		t.Fatalf("new provider catalog = %#v, want only DeepSeek", catalog)
 	}
-	if catalog[0].Entry.DefaultModel() != "deepseek-v4-flash" {
+	if catalog[0].Entry.DefaultModel() != "deepseek-flash" {
 		t.Fatalf("DeepSeek default model = %q", catalog[0].Entry.DefaultModel())
 	}
 }

@@ -104,8 +104,8 @@ func TestEffortDefaultsBeforeStartup(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	got := NewApp().Effort()
-	if !got.Supported || got.Current != "auto" || got.Default != "auto" || !hasLevel(got.Levels, "auto") {
-		t.Fatalf("pre-startup Effort() = %+v, want auto with DeepSeek default auto", got)
+	if !got.Supported || got.Current != "auto" || got.Default != "high" || !hasLevel(got.Levels, "low") {
+		t.Fatalf("pre-startup Effort() = %+v, want auto with DeepSeek default high", got)
 	}
 }
 
@@ -400,11 +400,11 @@ api_key_env = "DEEPSEEK_API_KEY"
 		if !p.BuiltIn {
 			t.Fatalf("deepseek provider should be marked built-in for official endpoint: %+v", p)
 		}
-		if !p.Added || !p.KeySet || len(p.Models) != 3 || p.Models[0] != "deepseek-v4-flash" || p.Models[1] != "deepseek-v4-pro" || p.Models[2] != "deepseek-v4-flash-vision-exp" || p.Default != "deepseek-v4-flash" {
+		if !p.Added || !p.KeySet || len(p.Models) != 2 || p.Models[0] != "deepseek-flash" || p.Models[1] != "deepseek-v4-pro" || p.Default != "deepseek-flash" {
 			t.Fatalf("deepseek provider = %+v, want added repaired official model list", p)
 		}
-		if got.DefaultModel != "deepseek/deepseek-v4-flash" {
-			t.Fatalf("default_model = %q, want deepseek/deepseek-v4-flash", got.DefaultModel)
+		if got.DefaultModel != "deepseek/deepseek-flash" {
+			t.Fatalf("default_model = %q, want deepseek/deepseek-flash", got.DefaultModel)
 		}
 		return
 	}
@@ -498,8 +498,8 @@ api_key_env = "MIMO_API_KEY"
 	if !providers["mimo-token-plan"].Added || !providers["mimo-token-plan"].KeySet {
 		t.Fatalf("mimo-token-plan provider = %+v, want inferred added key-set provider", providers["mimo-token-plan"])
 	}
-	if got.DefaultModel != "deepseek/deepseek-v4-pro" {
-		t.Fatalf("default_model = %q, want deepseek/deepseek-v4-pro", got.DefaultModel)
+	if got.DefaultModel != "deepseek/deepseek-flash" {
+		t.Fatalf("default_model = %q, want deepseek/deepseek-flash after upgrade", got.DefaultModel)
 	}
 }
 
@@ -600,14 +600,14 @@ api_key_env = "DEEPSEEK_API_KEY"
 	if !ok {
 		t.Fatal("deepseek provider not saved")
 	}
-	if len(p.Models) != 3 || p.Models[0] != "deepseek-v4-flash" || p.Models[1] != "deepseek-v4-pro" || p.Models[2] != "deepseek-v4-flash-vision-exp" || p.Default != "deepseek-v4-flash" {
+	if len(p.Models) != 2 || p.Models[0] != "deepseek-flash" || p.Models[1] != "deepseek-v4-pro" || p.Default != "deepseek-flash" {
 		t.Fatalf("deepseek provider after add = %+v, want official model list", p)
 	}
 	if !providerAccessSet(cfg.Desktop.ProviderAccess)["deepseek"] {
 		t.Fatalf("provider_access missing deepseek: %+v", cfg.Desktop.ProviderAccess)
 	}
-	if cfg.DefaultModel != "deepseek/deepseek-v4-flash" {
-		t.Fatalf("default_model = %q, want deepseek/deepseek-v4-flash", cfg.DefaultModel)
+	if cfg.DefaultModel != "deepseek/deepseek-flash" {
+		t.Fatalf("default_model = %q, want deepseek/deepseek-flash", cfg.DefaultModel)
 	}
 }
 
@@ -672,9 +672,8 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 	models := NewApp().Models()
 	refs := modelRefsFromView(models)
 	for _, want := range []string{
-		"deepseek/deepseek-v4-flash",
+		"deepseek/deepseek-flash",
 		"deepseek/deepseek-v4-pro",
-		"deepseek/deepseek-v4-flash-vision-exp",
 		"mimo-token-plan/mimo-v2.5-pro",
 	} {
 		if !refs[want] {
@@ -689,8 +688,8 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 			t.Fatalf("Models() refs = %+v, should not include hidden provider %s", models, hidden)
 		}
 	}
-	if len(models) != 4 {
-		t.Fatalf("Models() len = %d, want 4: %+v", len(models), models)
+	if len(models) != 3 {
+		t.Fatalf("Models() len = %d, want 3: %+v", len(models), models)
 	}
 }
 

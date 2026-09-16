@@ -88,6 +88,9 @@ func (m *chatTUI) showModels() {
 	var refs []string
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
+		if cfg.HiddenDeepSeekCompatibilityEntry(p) {
+			continue
+		}
 		if !p.Configured() {
 			continue
 		}
@@ -132,6 +135,9 @@ func modelRefs() []string {
 	var out []string
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
+		if cfg.HiddenDeepSeekCompatibilityEntry(p) {
+			continue
+		}
 		if !p.Configured() {
 			continue
 		}

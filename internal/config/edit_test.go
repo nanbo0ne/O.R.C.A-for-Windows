@@ -351,10 +351,10 @@ func TestSetLanguage(t *testing.T) {
 func TestNormalizeEffortDeepSeek(t *testing.T) {
 	e := &ProviderEntry{Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4"}
 	cap := EffortCapabilityForEntry(e)
-	if !cap.Supported || len(cap.Levels) != 3 || cap.Levels[0] != "auto" || cap.Levels[1] != "high" || cap.Levels[2] != "max" {
-		t.Fatalf("DeepSeek levels = %+v, want auto/high/max", cap)
+	if !cap.Supported || strings.Join(cap.Levels, "/") != "auto/low/high/max" || cap.Default != "high" {
+		t.Fatalf("DeepSeek levels = %+v, want auto/low/high/max with default high", cap)
 	}
-	for in, want := range map[string]string{"auto": "", "high": "high", "max": "max", "low": "high", "medium": "high", "xhigh": "max"} {
+	for in, want := range map[string]string{"auto": "", "high": "high", "max": "max", "minimal": "low", "low": "low", "medium": "high", "xhigh": "high", "ultra": "max"} {
 		got, err := NormalizeEffort(e, in)
 		if err != nil || got != want {
 			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
@@ -403,7 +403,7 @@ func TestNormalizeEffortAnthropic(t *testing.T) {
 
 func TestResolveModelPreservesProviderEffort(t *testing.T) {
 	c := Default()
-	c.Providers = append(c.Providers, ProviderEntry{
+	c.Providers = []ProviderEntry{{
 		Name:      "deepseek",
 		Kind:      "openai",
 		BaseURL:   "https://api.deepseek.com",
@@ -412,7 +412,7 @@ func TestResolveModelPreservesProviderEffort(t *testing.T) {
 		Default:   "deepseek-v4-flash",
 		APIKeyEnv: "DEEPSEEK_API_KEY",
 		Effort:    "max",
-	})
+	}}
 	e, ok := c.ResolveModel("deepseek/deepseek-v4-pro")
 	if !ok {
 		t.Fatal("ResolveModel did not find deepseek/deepseek-v4-pro")
@@ -438,8 +438,8 @@ func TestResolveOfficialDeepSeekModelPricing(t *testing.T) {
 	if !ok || flash.Price == nil {
 		t.Fatalf("ResolveModel flash pricing = %+v, %v", flash, ok)
 	}
-	if flash.Price.CacheHit != 0.05 || flash.Price.Input != 1.5 || flash.Price.Output != 4.5 || flash.Price.Currency != "¥" {
-		t.Fatalf("flash off-peak pricing = %+v, want cache_hit 0.05 input 1.5 output 4.5 CNY", flash.Price)
+	if flash.Price.CacheHit != 0.02 || flash.Price.Input != 1 || flash.Price.Output != 4 || flash.Price.Currency != "¥" {
+		t.Fatalf("flash off-peak pricing = %+v, want cache_hit 0.02 input 1 output 4 CNY", flash.Price)
 	}
 
 	pro, ok := c.ResolveModel("deepseek/deepseek-v4-pro")
@@ -455,15 +455,15 @@ func TestResolveOfficialDeepSeekModelPricing(t *testing.T) {
 	}
 	beijing := time.FixedZone("test-beijing", 8*60*60)
 	flashPeak := flash.Price.SnapshotAt(time.Date(2026, time.August, 17, 10, 0, 0, 0, beijing))
-	if flashPeak.CacheHit != 0.10 || flashPeak.Input != 3 || flashPeak.Output != 9 {
-		t.Fatalf("flash peak pricing = %+v, want cache_hit 0.10 input 3 output 9", flashPeak)
+	if flashPeak.CacheHit != 0.04 || flashPeak.Input != 2 || flashPeak.Output != 8 {
+		t.Fatalf("flash peak pricing = %+v, want cache_hit 0.04 input 2 output 8", flashPeak)
 	}
 	proPeak := pro.Price.SnapshotAt(time.Date(2026, time.August, 17, 15, 0, 0, 0, beijing))
 	if proPeak.CacheHit != 0.30 || proPeak.Input != 9 || proPeak.Output != 27 {
 		t.Fatalf("pro peak pricing = %+v, want cache_hit 0.30 input 9 output 27", proPeak)
 	}
 	weekend := flash.Price.SnapshotAt(time.Date(2026, time.August, 22, 10, 0, 0, 0, beijing))
-	if weekend.CacheHit != 0.05 || weekend.Input != 1.5 || weekend.Output != 4.5 {
+	if weekend.CacheHit != 0.02 || weekend.Input != 1 || weekend.Output != 4 {
 		t.Fatalf("weekend pricing = %+v, want Flash off-peak prices", weekend)
 	}
 }
@@ -988,7 +988,7 @@ func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
 	if !cap.Supported {
 		t.Fatalf("deepseek model behind proxy should expose effort, got %+v", cap)
 	}
-	wantLevels := []string{"auto", "high", "max"}
+	wantLevels := []string{"auto", "low", "high", "max"}
 	if len(cap.Levels) != len(wantLevels) {
 		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
 	}
@@ -997,8 +997,8 @@ func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
 			t.Fatalf("levels[%d] = %q, want %q", i, cap.Levels[i], want)
 		}
 	}
-	if cap.Default != "auto" {
-		t.Fatalf("default = %q, want auto", cap.Default)
+	if cap.Default != "high" {
+		t.Fatalf("default = %q, want high", cap.Default)
 	}
 	if protocol := ReasoningProtocolForEntry(e); protocol != ReasoningProtocolDeepSeek {
 		t.Fatalf("protocol = %q, want deepseek", protocol)

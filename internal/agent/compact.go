@@ -159,7 +159,7 @@ func estimateMessagesTokens(msgs []provider.Message) int {
 	for _, m := range msgs {
 		total += 4 // chat-message framing overhead
 		total += estimateTextTokens(m.Content)
-		total += estimateTextTokens(m.ReasoningContent)
+		total += estimateTextTokens(messageProtocolReasoning(m))
 		total += estimateTextTokens(m.Name)
 		total += estimateTextTokens(m.ToolCallID)
 		for _, image := range m.Images {
@@ -435,8 +435,9 @@ func tailStart(msgs []provider.Message, head, budgetTokens int, tokPerChar float
 
 // tokPerChar derives a tokens-per-character ratio from the last turn's real
 // usage so per-message estimates track the provider's tokenizer without a local
-// one. Reasoning content is excluded from the char count to match the prompt
-// actually sent (the provider strips it). Falls back to ~4 chars/token before
+// one. Reasoning is excluded from the baseline character count; when sent by
+// the provider its token cost is reflected in the observed ratio instead.
+// Falls back to ~4 chars/token before
 // any usage is known, and ignores absurd ratios.
 func (a *Agent) tokPerChar() float64 {
 	if u := a.lastUsage.Load(); u != nil && u.PromptTokens > 0 {
@@ -449,15 +450,21 @@ func (a *Agent) tokPerChar() float64 {
 	return fallbackTokPerChar
 }
 
-// msgChars counts the characters that ride to the provider for one message —
-// content plus tool-call names and arguments, but not reasoning (stripped on
-// send).
+// msgChars counts the stable content and tool-call characters used to calibrate
+// the observed token ratio, independent of provider-specific reasoning replay.
 func msgChars(m provider.Message) int {
 	n := len(m.Content)
 	for _, tc := range m.ToolCalls {
 		n += len(tc.Name) + len(tc.Arguments)
 	}
 	return n
+}
+
+func messageProtocolReasoning(m provider.Message) string {
+	if m.ProtocolReasoningContent != nil {
+		return *m.ProtocolReasoningContent
+	}
+	return m.ReasoningContent
 }
 
 func charsOfMessages(msgs []provider.Message) int {

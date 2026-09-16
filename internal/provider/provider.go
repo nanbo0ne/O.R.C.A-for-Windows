@@ -30,7 +30,11 @@ const (
 type Message struct {
 	Role             Role   `json:"role"`
 	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
+	ReasoningContent string `json:"reasoning_content,omitempty"` // assistant: display/archive text (original when signed)
+	// ProtocolReasoningContent preserves the original model reasoning before
+	// display hooks. Non-nil distinguishes a captured empty block from legacy
+	// history whose original reasoning was not recorded. Treat it as immutable.
+	ProtocolReasoningContent *string `json:"protocol_reasoning_content,omitempty"`
 	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContent
 	// is genuine model output. Anthropic requires the signed thinking block be
 	// replayed on the next turn when a tool call followed thinking; providers
@@ -377,6 +381,20 @@ type Chunk struct {
 	Usage     *Usage    // ChunkUsage
 	Err       error     // ChunkError
 }
+
+// ReasoningHistoryError is a non-retryable history/protocol failure. Retrying
+// the same conversation or re-executing its tools cannot recover lost reasoning.
+type ReasoningHistoryError struct {
+	Provider     string
+	MessageIndex int // zero-based; -1 when the server did not identify a message
+	Err          error
+}
+
+func (e *ReasoningHistoryError) Error() string {
+	return "DeepSeek cannot use this conversation's reasoning history. Start a new conversation with a summary; the original is kept."
+}
+
+func (e *ReasoningHistoryError) Unwrap() error { return e.Err }
 
 // StreamInterruptedError marks a recoverable transport cut that happened after
 // the caller had already received model output. Providers must not replay these

@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
+import { modelDisplayLabel } from "./lib/modelCatalog";
+import type { ModelInfo } from "./lib/types";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onProjectTreeChanged, openExternal } from "./lib/bridge";
@@ -436,13 +438,6 @@ function sessionItemsToJson(title: string, items: Item[], live?: LiveStream): st
 function safeFilename(name: string): string {
   const cleaned = name.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").slice(0, 80);
   return cleaned || "orca-session";
-}
-
-function modelDisplayLabel(ref: string, displayLabel?: string): string {
-  const label = displayLabel?.trim();
-  if (label) return label;
-  const parts = ref.split("/").filter(Boolean);
-  return parts[parts.length - 1] || ref;
 }
 
 /** Global hotkey handler for shell-expand toggle (Ctrl/Cmd+B). */
@@ -930,12 +925,24 @@ export default function App() {
   askWorkflowEnabledRef.current = askWorkflowEnabled;
   stepThinkingEnabledRef.current = stepThinkingEnabled;
   goalRef.current = goal;
+  const [displayModel, setDisplayModel] = useState<{ tabId: string; model: ModelInfo }>();
+  useEffect(() => {
+    if (!activeTabId) return;
+    let cancelled = false;
+    void app.ModelsForTab(activeTabId).then((models) => {
+      const model = asArray(models).find((item) => item.current);
+      if (!cancelled) setDisplayModel(model ? { tabId: activeTabId, model } : undefined);
+    }).catch(() => { if (!cancelled) setDisplayModel(undefined); });
+    return () => { cancelled = true; };
+  }, [activeTabId, state.context.modelRef, state.meta]);
+  const currentModel = displayModel && displayModel.tabId === activeTabId && displayModel.model.ref === state.context.modelRef ? displayModel.model : undefined;
+  const currentModelLabel = modelDisplayLabel(state.context.modelRef || "", state.meta?.label, currentModel?.metadataSource === "deepseek_official");
   const displayedModelLabel = activeTabId
-    ? pendingModelLabelsByTab[activeTabId] ?? state.meta?.label ?? t("status.connecting")
-    : state.meta?.label ?? t("status.connecting");
+    ? pendingModelLabelsByTab[activeTabId] ?? (currentModelLabel || t("status.connecting"))
+    : currentModelLabel || t("status.connecting");
   const displayedStatusModelLabel = activeTabId
-    ? pendingModelLabelsByTab[activeTabId] ?? state.meta?.label
-    : state.meta?.label;
+    ? pendingModelLabelsByTab[activeTabId] ?? currentModelLabel
+    : currentModelLabel;
   const displayedEffort = activeTabId && pendingEffortsByTab[activeTabId]
     ? { ...(state.effort ?? { supported: true, levels: [pendingEffortsByTab[activeTabId]], current: pendingEffortsByTab[activeTabId], default: pendingEffortsByTab[activeTabId] }), current: pendingEffortsByTab[activeTabId] }
     : state.effort;

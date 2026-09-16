@@ -36,8 +36,9 @@ func TestProviders(t *testing.T) {
 	}
 
 	var sawDefault, sawReady bool
+	selected, _ := cfg.ResolveModel(cfg.DefaultModel)
 	for _, p := range got {
-		if p.Name == cfg.DefaultModel {
+		if selected != nil && p.Name == selected.Name {
 			if !p.IsDefault {
 				t.Errorf("provider %q should be flagged default", p.Name)
 			}

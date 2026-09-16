@@ -387,7 +387,8 @@ func TestBuildRequestDeepSeekThinking(t *testing.T) {
 		wantThinking  string
 		wantReasoning string
 	}{
-		{name: "auto", effort: "", wantThinking: "enabled", wantReasoning: ""},
+		{name: "auto", effort: "", wantThinking: "enabled", wantReasoning: "high"},
+		{name: "low", effort: "low", wantThinking: "enabled", wantReasoning: "low"},
 		{name: "high", effort: "high", wantThinking: "enabled", wantReasoning: "high"},
 		{name: "max", effort: "max", wantThinking: "enabled", wantReasoning: "max"},
 	} {
@@ -405,6 +406,7 @@ func TestBuildRequestDeepSeekThinking(t *testing.T) {
 
 func TestBuildRequestDeepSeekRoundTripsReasoningContent(t *testing.T) {
 	req := (&client{model: "deepseek-v4", deepseek: true}).buildRequest(provider.Request{
+		Tools: []provider.ToolSchema{{Name: "read_file"}},
 		Messages: []provider.Message{
 			{
 				Role:             provider.RoleAssistant,
@@ -419,7 +421,7 @@ func TestBuildRequestDeepSeekRoundTripsReasoningContent(t *testing.T) {
 			{Role: provider.RoleTool, ToolCallID: "call_1", Name: "read_file", Content: "ok"},
 		},
 	})
-	if len(req.Messages) == 0 || req.Messages[0].ReasoningContent != "reasoned before tool call" {
+	if len(req.Messages) == 0 || req.Messages[0].ReasoningContent == nil || *req.Messages[0].ReasoningContent != "reasoned before tool call" {
 		t.Fatalf("reasoning_content was not round-tripped for DeepSeek: %+v", req.Messages)
 	}
 }
@@ -547,8 +549,8 @@ func TestNewDeepSeekThinkingDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	c := p.(*client)
-	if !c.deepseek || c.effort != "" {
-		t.Fatalf("deepseek=%v effort=%q, want true/empty auto", c.deepseek, c.effort)
+	if !c.deepseek || c.effort != "high" {
+		t.Fatalf("deepseek=%v effort=%q, want true/high", c.deepseek, c.effort)
 	}
 
 	p, err = New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com/v1", Model: "deepseek-v4", Extra: map[string]any{"effort": "max"}})
@@ -559,15 +561,15 @@ func TestNewDeepSeekThinkingDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("effort = %q, want max", got)
 	}
 
-	if _, err := New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", Extra: map[string]any{"effort": "medium"}}); err == nil {
+	if _, err := New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", Extra: map[string]any{"effort": "turbo"}}); err == nil {
 		t.Fatal("New should reject invalid DeepSeek effort")
 	}
 	p, err = New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", Extra: map[string]any{"effort": "off"}})
 	if err != nil {
 		t.Fatalf("New should migrate retired effort=off, not reject it: %v", err)
 	}
-	if got := p.(*client).effort; got != "" {
-		t.Fatalf("retired effort=off should fall back to auto, got %q", got)
+	if got := p.(*client).effort; got != "high" {
+		t.Fatalf("retired effort=off should fall back to default high, got %q", got)
 	}
 }
 

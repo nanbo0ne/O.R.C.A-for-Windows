@@ -1616,6 +1616,14 @@ func (a *App) startTabControllerBuild(tab *WorkspaceTab) {
 }
 
 func (a *App) buildTabController(tab *WorkspaceTab) {
+	if migrationErr := a.desktopModelError(tab); migrationErr != "" {
+		a.mu.Lock()
+		tab.StartupErr = migrationErr
+		tab.Ready = false
+		a.mu.Unlock()
+		a.emitReady(a.ctx)
+		return
+	}
 	done, err := a.beginAppWork()
 	if err != nil {
 		return
@@ -2486,26 +2494,31 @@ type desktopProjectFile struct {
 }
 
 type desktopTabEntry struct {
-	ID               string  `json:"id"`
-	Scope            string  `json:"scope"`
-	WorkspaceRoot    string  `json:"workspaceRoot"`
-	TopicID          string  `json:"topicId"`
-	SessionPath      string  `json:"sessionPath,omitempty"`
-	Model            string  `json:"model,omitempty"`
-	Effort           *string `json:"effort,omitempty"`
-	Mode             string  `json:"mode,omitempty"`
-	Goal             string  `json:"goal,omitempty"`
-	ToolApprovalMode string  `json:"toolApprovalMode,omitempty"`
-	AskWorkflow      bool    `json:"askWorkflowEnabled,omitempty"`
-	StepThinking     bool    `json:"stepThinkingEnabled,omitempty"`
-	PromptMode       string  `json:"promptMode,omitempty"`
-	EnhancedMode     bool    `json:"enhancedModeEnabled,omitempty"`
+	ID                   string  `json:"id"`
+	Scope                string  `json:"scope"`
+	WorkspaceRoot        string  `json:"workspaceRoot"`
+	TopicID              string  `json:"topicId"`
+	SessionPath          string  `json:"sessionPath,omitempty"`
+	Model                string  `json:"model,omitempty"`
+	Effort               *string `json:"effort,omitempty"`
+	Mode                 string  `json:"mode,omitempty"`
+	Goal                 string  `json:"goal,omitempty"`
+	ToolApprovalMode     string  `json:"toolApprovalMode,omitempty"`
+	AskWorkflow          bool    `json:"askWorkflowEnabled,omitempty"`
+	StepThinking         bool    `json:"stepThinkingEnabled,omitempty"`
+	PromptMode           string  `json:"promptMode,omitempty"`
+	EnhancedMode         bool    `json:"enhancedModeEnabled,omitempty"`
+	modelMigrationRecord json.RawMessage
 }
 
 type desktopTabsFile struct {
-	Tabs                    []desktopTabEntry       `json:"tabs"`
-	ActiveTab               string                  `json:"activeTab"`
-	RecentConversationPrefs recentConversationPrefs `json:"recentConversationPrefs,omitempty"`
+	DeepSeekModelVersion      int                     `json:"deepseekModelVersion,omitempty"`
+	DeepSeekPendingModelRoots []string                `json:"deepseekPendingModelRoots,omitempty"`
+	Tabs                      []desktopTabEntry       `json:"tabs"`
+	ActiveTab                 string                  `json:"activeTab"`
+	RecentConversationPrefs   recentConversationPrefs `json:"recentConversationPrefs,omitempty"`
+	modelMigrationProjects    map[string]string
+	modelMigrationSnapshot    *desktopModelSnapshot
 }
 
 func desktopConfigDir() string {
@@ -2518,6 +2531,11 @@ func desktopConfigDir() string {
 }
 
 func (a *App) saveTabsLocked() {
+	desktopModelStateMu.Lock()
+	defer desktopModelStateMu.Unlock()
+	if a.modelMigrationErr != "" {
+		return
+	}
 	dir := desktopConfigDir()
 	os.MkdirAll(dir, 0o755)
 	var entries []desktopTabEntry
@@ -2541,7 +2559,17 @@ func (a *App) saveTabsLocked() {
 			})
 		}
 	}
-	f := desktopTabsFile{Tabs: entries, ActiveTab: a.activeTabID, RecentConversationPrefs: a.recentPrefs}
+	f := desktopTabsFile{DeepSeekModelVersion: a.deepSeekModelVersion, Tabs: entries, ActiveTab: a.activeTabID, RecentConversationPrefs: a.recentPrefs}
+	f.DeepSeekPendingModelRoots = pendingDesktopModelRoots(a.modelMigrationProjects)
+	if a.modelMigrationSnapshot != nil {
+		if err := a.saveMigratedDesktopTabs(filepath.Join(dir, tabsFileName), f); err != nil {
+			a.modelMigrationErr = desktopModelStateError(err)
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "agent:ready")
+			}
+		}
+		return
+	}
 	b, _ := json.MarshalIndent(f, "", "  ")
 	path := filepath.Join(dir, tabsFileName)
 	tmp := path + ".tmp"

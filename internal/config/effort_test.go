@@ -1,9 +1,62 @@
 package config
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestDeepSeekV41EffortAcrossModelsAndStoredAliases(t *testing.T) {
+	for _, model := range []string{"deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"} {
+		for _, explicitLevels := range []bool{false, true} {
+			e := &ProviderEntry{Kind: "openai", BaseURL: "https://api.deepseek.com/v1", Model: model}
+			if explicitLevels {
+				e.SupportedEfforts = []string{"low", "high", "max"}
+			}
+			cap := EffortCapabilityForEntry(e)
+			if !reflect.DeepEqual(cap.Levels, []string{"auto", "low", "high", "max"}) || cap.Default != "high" || EffectiveEffort(e) != "high" {
+				t.Fatalf("model=%s explicit=%v cap=%+v effective=%s", model, explicitLevels, cap, EffectiveEffort(e))
+			}
+			for raw, want := range map[string]string{"minimal": "low", "low": "low", "medium": "high", "xhigh": "high", "ultra": "max", "high": "high", "max": "max"} {
+				got, err := NormalizeEffort(e, raw)
+				if err != nil || got != want {
+					t.Fatalf("%s: %q => %q/%v", model, raw, got, err)
+				}
+				e.Effort = raw
+				if EffectiveEffort(e) != want {
+					t.Fatalf("stored %q effective=%q, want %q", raw, EffectiveEffort(e), want)
+				}
+				normalizeProviderEffortFields(e)
+				if e.Effort != want {
+					t.Fatalf("stored %q normalized=%q", raw, e.Effort)
+				}
+			}
+		}
+	}
+}
+
+func TestDeepSeekEffortCustomDefaultsAndProtocolOverride(t *testing.T) {
+	e := &ProviderEntry{Kind: "openai", Model: "deepseek-flash", ReasoningProtocol: "deepseek", SupportedEfforts: []string{"minimal", "medium", "ultra"}, DefaultEffort: "xhigh"}
+	if cap := EffortCapabilityForEntry(e); cap.Default != "high" || !reflect.DeepEqual(cap.Levels, []string{"auto", "low", "high", "max"}) || EffectiveEffort(e) != "high" {
+		t.Fatalf("custom alias defaults=%+v effective=%s", cap, EffectiveEffort(e))
+	}
+	e.DefaultEffort = "minimal"
+	if EffectiveEffort(e) != "low" {
+		t.Fatal("explicit low default lost")
+	}
+	e.SupportedEfforts = nil
+	e.ReasoningProtocol = "openai"
+	if cap := EffortCapabilityForEntry(e); cap.Default != "auto" || !reflect.DeepEqual(cap.Levels, []string{"auto", "low", "medium", "high"}) {
+		t.Fatalf("explicit OpenAI protocol was overridden: %+v", cap)
+	}
+	if _, err := NormalizeEffort(e, "ultra"); err == nil {
+		t.Fatal("DeepSeek alias leaked to OpenAI")
+	}
+	e.ReasoningProtocol = "none"
+	if EffortCapabilityForEntry(e).Supported {
+		t.Fatal("none protocol exposes effort")
+	}
+}
 
 func TestIsMiniMaxEntry(t *testing.T) {
 	for _, tc := range []struct {

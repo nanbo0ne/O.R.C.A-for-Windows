@@ -225,3 +225,98 @@ func TestOfficialDeepSeekVisionFactsOverrideAutomaticProbe(t *testing.T) {
 		t.Fatalf("official Pro model = %+v, want unsupported metadata", got)
 	}
 }
+
+func TestOfficialDeepSeekAliasesRefreshCachedVisionAndPreserveManualOverride(t *testing.T) {
+	for _, model := range []string{"deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro", " DEEPSEEK-FLASH "} {
+		for _, override := range []string{OverrideAuto, Supported, Unsupported} {
+			t.Run(model+"/"+override, func(t *testing.T) {
+				entry := &config.ProviderEntry{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com/v1/", Model: model}
+				want, stale := Supported, Unsupported
+				if model == "deepseek-v4-pro" {
+					want, stale = Unsupported, Supported
+				}
+				path := filepath.Join(t.TempDir(), "vision.json")
+				store := Load(path)
+				if got := store.Get(entry); got.Status != want || got.AutomaticStatus != want || got.Source != SourceMetadata {
+					t.Fatalf("uncached official capability = %+v", got)
+				}
+				for _, source := range []string{SourceProbe, SourceMetadata} {
+					cached := Capability{Key: Key(entry), Status: stale, AutomaticStatus: stale, Source: source, Override: override, CheckedAt: 1234, ProbeVersion: CurrentProbeVersion}
+					if err := store.Put(cached); err != nil {
+						t.Fatal(err)
+					}
+					loaded := Load(path)
+					if got := loaded.Stored(entry); got.Status != want || got.AutomaticStatus != want || got.Source != SourceMetadata || got.Override != override || got.CheckedAt != 1234 {
+						t.Fatalf("cached %s automatic capability = %+v", source, got)
+					}
+					wantEffective, wantSource := want, SourceMetadata
+					if override != OverrideAuto {
+						wantEffective, wantSource = override, SourceManual
+					}
+					if got := loaded.Get(entry); got.Status != wantEffective || got.AutomaticStatus != want || got.Source != wantSource || got.Override != override {
+						t.Fatalf("cached %s effective capability = %+v", source, got)
+					}
+					if loaded.Items[Key(entry)] != cached {
+						t.Fatal("lookup mutated the original cached capability")
+					}
+					cleared := loaded.Stored(entry)
+					cleared.Override = OverrideAuto
+					if err := loaded.Put(cleared); err != nil {
+						t.Fatal(err)
+					}
+					if got := Load(path).Get(entry); got.Status != want || got.AutomaticStatus != want || got.Source != SourceMetadata {
+						t.Fatalf("clearing override restored stale vision: %+v", got)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestOfficialDeepSeekVisionPreservesCustomProviders(t *testing.T) {
+	for _, tt := range []struct{ name, kind, endpoint string }{
+		{"custom", "openai", "https://api.deepseek.com"},
+		{"deepseek-custom", "openai", "https://api.deepseek.com"},
+		{"deepseek", "anthropic", "https://api.deepseek.com"},
+		{"deepseek", "openai", "https://relay.example/v1"},
+		{"deepseek", "openai", "http://api.deepseek.com"},
+		{"deepseek", "openai", "https://api.deepseek.com:443"},
+		{"deepseek", "openai", "https://api.deepseek.com/custom"},
+		{"deepseek", "openai", "https://api.deepseek.com?route=custom"},
+		{"deepseek", "openai", "https://user@api.deepseek.com"},
+	} {
+		for _, model := range []string{"deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"} {
+			t.Run(tt.name+"/"+tt.kind+"/"+tt.endpoint+"/"+model, func(t *testing.T) {
+				entry := &config.ProviderEntry{Name: tt.name, Kind: tt.kind, BaseURL: tt.endpoint, Model: model}
+				path := filepath.Join(t.TempDir(), "vision.json")
+				store := Load(path)
+				if got := store.Get(entry); got.Status != Unknown || got.Source != "" {
+					t.Fatalf("custom provider inherited official vision: %+v", got)
+				}
+				for _, status := range []string{Supported, Unsupported} {
+					cached := Capability{Key: Key(entry), Status: status, AutomaticStatus: status, Source: SourceProbe, Override: OverrideAuto, ProbeVersion: CurrentProbeVersion}
+					if err := store.Put(cached); err != nil {
+						t.Fatal(err)
+					}
+					if got := Load(path).Get(entry); got.Status != status || got.AutomaticStatus != status || got.Source != SourceProbe {
+						t.Fatalf("custom cached capability changed: %+v", got)
+					}
+					cached.Override = Supported
+					if status == Supported {
+						cached.Override = Unsupported
+					}
+					if err := store.Put(cached); err != nil {
+						t.Fatal(err)
+					}
+					if got := Load(path).Get(entry); got.Status != cached.Override || got.AutomaticStatus != status || got.Source != SourceManual {
+						t.Fatalf("custom manual override changed: %+v", got)
+					}
+				}
+			})
+		}
+	}
+	entry := &config.ProviderEntry{Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-flash-custom"}
+	if got := Load(filepath.Join(t.TempDir(), "vision.json")).Get(entry); got.Status != Unknown {
+		t.Fatalf("unknown model inherited official vision: %+v", got)
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -67,11 +68,13 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	case protocol == "none":
 		effort = ""
 	case deepseek:
-		switch effort {
-		case "", "off": // auto/retired off: omit reasoning_effort and let DeepSeek choose high or max.
-		case "high", "max":
-		default:
-			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be high or max", name)
+		var err error
+		effort, err = NormalizeDeepSeekEffort(effort)
+		if err != nil {
+			return nil, fmt.Errorf("openai: provider %q: %w", name, err)
+		}
+		if effort == "" {
+			effort = "high"
 		}
 	case minimax:
 		// M3's knob is binary. The config effort layer normalises user input
@@ -102,12 +105,19 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("openai: network: %w", err)
 	}
+	model := cfg.Model
+	if IsDeepSeek(cfg.BaseURL) {
+		switch strings.ToLower(strings.TrimSpace(model)) {
+		case "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp":
+			model = "deepseek-flash"
+		}
+	}
 	return &client{
 		name:        name,
 		apiKey:      cfg.APIKey,
 		keyEnv:      keyEnv,
 		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
-		model:       cfg.Model,
+		model:       model,
 		deepseek:    deepseek,
 		minimax:     minimax,
 		effort:      effort,
@@ -159,6 +169,9 @@ var bufPool = sync.Pool{
 }
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	// A missing reasoning field does not establish that reasoning was lost:
+	// imported, non-thinking, and synthetic messages can legitimately omit it.
+	// Replay captured reasoning and let the provider validate unknown history.
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	if err := json.NewEncoder(buf).Encode(c.buildRequest(req)); err != nil {
@@ -181,12 +194,22 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	}
 	resp, err := provider.SendWithRetry(ctx, c.http, c.name, c.keyEnv, newReq)
 	if err != nil {
-		return nil, err
+		return nil, c.requestError(err)
 	}
 
 	out := make(chan provider.Chunk)
 	go c.streamWithReconnect(ctx, resp, newReq, out)
 	return out, nil
+}
+
+func (c *client) requestError(err error) error {
+	var apiErr *provider.APIError
+	if c.deepseek && errors.As(err, &apiErr) &&
+		(apiErr.Status == http.StatusBadRequest || apiErr.Status == http.StatusUnprocessableEntity) &&
+		strings.Contains(strings.ToLower(apiErr.Body), "reasoning_content") {
+		return &provider.ReasoningHistoryError{Provider: c.name, MessageIndex: -1, Err: err}
+	}
+	return err
 }
 
 // maxStreamReconnects bounds how many times a mid-stream connection drop is
@@ -229,12 +252,24 @@ func (c *client) streamWithReconnect(ctx context.Context, resp *http.Response, n
 		next, rerr := provider.SendWithRetry(ctx, c.http, c.name, c.keyEnv, newReq)
 		if rerr != nil {
 			if ctx.Err() == nil {
-				_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: rerr})
+				_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: c.requestError(rerr)})
 			}
 			return
 		}
 		resp = next
 	}
+}
+
+func protocolReasoning(m provider.Message) *string {
+	if m.ProtocolReasoningContent != nil {
+		return m.ProtocolReasoningContent
+	}
+	// Older sessions only have this field. Never invent reasoning for a missing
+	// block; retain existing legacy content when no separate original was saved.
+	if m.ReasoningContent != "" {
+		return &m.ReasoningContent
+	}
+	return nil
 }
 
 func (c *client) buildRequest(req provider.Request) chatRequest {
@@ -244,17 +279,13 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	src := provider.SanitizeToolPairing(req.Messages)
 	msgs := make([]chatMessage, len(src))
 	for i, m := range src {
-		// Plain assistant reasoning_content is display/archive data and should
-		// not be echoed into later requests. DeepSeek tool-call assistant turns
-		// are the narrow exception because the provider may require that assistant
-		// message to be reconstructed exactly with its tool_calls.
 		cm := chatMessage{
 			Role:       string(m.Role),
 			ToolCallID: m.ToolCallID,
 			Name:       m.Name,
 		}
-		if c.deepseek && m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 && strings.TrimSpace(m.ReasoningContent) != "" {
-			cm.ReasoningContent = m.ReasoningContent
+		if c.deepseek && len(req.Tools) > 0 && m.Role == provider.RoleAssistant {
+			cm.ReasoningContent = protocolReasoning(m)
 		}
 		for _, tc := range m.ToolCalls {
 			wire := chatToolCall{ID: tc.ID, Type: "function"}
@@ -307,6 +338,9 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		// Ordinary turns keep thinking enabled; isolated host classifiers can
 		// opt out without mutating the active conversation's provider settings.
 		out.Thinking = &thinkingMode{Type: "enabled"}
+		if out.ReasoningEffort == "" {
+			out.ReasoningEffort = "high"
+		}
 	case c.minimax:
 		// M3 uses a single `thinking.type` field with two valid values:
 		// "adaptive" (default, thinking on) and "disabled" (off). Reasoning
@@ -405,7 +439,11 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			return emitted, fmt.Errorf("%s: decode stream: %w", c.name, err)
 		}
 		if sr.Error != nil {
-			return emitted, fmt.Errorf("%s: %s", c.name, sr.Error.Message)
+			err := fmt.Errorf("%s: %s", c.name, sr.Error.Message)
+			if c.deepseek && strings.Contains(strings.ToLower(sr.Error.Message), "reasoning_content") {
+				return emitted, &provider.ReasoningHistoryError{Provider: c.name, MessageIndex: -1, Err: err}
+			}
+			return emitted, err
 		}
 		if len(sr.Choices) > 0 && sr.Choices[0].FinishReason != nil && *sr.Choices[0].FinishReason != "" {
 			lastFinishReason = *sr.Choices[0].FinishReason
@@ -423,9 +461,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		}
 
 		delta := sr.Choices[0].Delta
-		if delta.ReasoningContent != "" {
+		if delta.ReasoningContent != nil {
 			emitted = true
-			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: delta.ReasoningContent}) {
+			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: *delta.ReasoningContent}) {
 				return emitted, ctx.Err()
 			}
 		}
@@ -586,7 +624,7 @@ type chatMessage struct {
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
 	Name             string         `json:"name,omitempty"`
-	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ReasoningContent *string        `json:"reasoning_content,omitempty"`
 	// DeepSeek thinking mode requires assistant reasoning_content to be round-tripped.
 }
 
@@ -625,7 +663,7 @@ type streamResponse struct {
 	Choices []struct {
 		Delta struct {
 			Content          string         `json:"content"`
-			ReasoningContent string         `json:"reasoning_content"`
+			ReasoningContent *string        `json:"reasoning_content"`
 			ToolCalls        []chatToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`

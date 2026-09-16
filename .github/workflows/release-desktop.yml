@@ -73,7 +73,7 @@ jobs:
         run: go test ./... -count=1 -p=1
 
       - name: Test changed concurrency boundaries
-        run: go test -race ./internal/agent ./internal/control ./internal/billing ./internal/localai -count=1 -p=1
+        run: go test -race ./internal/agent ./internal/control ./internal/billing ./internal/localai ./internal/config -count=1 -p=1
 
       - name: Generate frontend bindings
         run: |
@@ -352,6 +352,10 @@ jobs:
           "$seven_zip" t dist/O.R.C.A-for-Windows-windows-amd64-installer.exe
           "$seven_zip" t dist/O.R.C.A-for-Windows-windows-amd64.zip
 
+      # Published upgrade baseline: desktop-v3.0.4.
+      # Asset: O.R.C.A-for-Windows-windows-amd64-installer.exe
+      # SHA256: 3bb58aab89011e36210521b28ac8620bb6a4a372759db5df4a94aa1d843519a2
+      # The acceptance script checks both this pin and published SHA256SUMS.txt.
       - name: Test Windows installer upgrade and data retention
         if: runner.os == 'Windows'
         shell: pwsh

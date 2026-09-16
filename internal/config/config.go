@@ -65,7 +65,9 @@ type Config struct {
 
 	// env is scoped to this loaded workspace. It is deliberately private so
 	// project .env values do not become process-wide state.
-	env map[string]string
+	env               map[string]string
+	loadErr           error
+	providersFromFile bool
 }
 
 // Env looks up an environment value with host-process variables taking
@@ -796,7 +798,7 @@ const (
 	VisionSubagentRole = "vision"
 	// OfficialDeepSeekVisionModel is the provider-qualified model used as the
 	// built-in vision fallback when an official DeepSeek entry exposes it.
-	OfficialDeepSeekVisionModel = "deepseek-v4-flash-vision-exp"
+	OfficialDeepSeekVisionModel = OfficialDeepSeekFlashModel
 )
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
@@ -915,6 +917,13 @@ func IsLikelyChatModel(model string) bool {
 // diagnostics, or model-fetch editing.
 func (e *ProviderEntry) ChatModelList() []string {
 	raw := e.ModelList()
+	if IsDeepSeekV41OfficialProvider(e) {
+		var models []string
+		for _, model := range raw {
+			models = mergeModelLists(models, []string{canonicalDeepSeekFlash(model)})
+		}
+		raw = models
+	}
 	if len(raw) == 0 {
 		return nil
 	}
@@ -941,7 +950,13 @@ func (e *ProviderEntry) DefaultModel() string {
 
 // HasModel reports whether m is one of the provider's models.
 func (e *ProviderEntry) HasModel(m string) bool {
+	if IsDeepSeekV41OfficialProvider(e) {
+		m = canonicalDeepSeekFlash(m)
+	}
 	for _, x := range e.ModelList() {
+		if IsDeepSeekV41OfficialProvider(e) {
+			x = canonicalDeepSeekFlash(x)
+		}
 		if x == m {
 			return true
 		}
@@ -1285,11 +1300,11 @@ const ActiveLanguagePolicy = `Reply in the language used by the user's latest me
 // presets live in the provider catalog and are materialised only when selected.
 func Default() *Config {
 	return &Config{
-		ConfigVersion: 11,
+		ConfigVersion: 12,
 		// DeepSeek remains a usable built-in default for existing and unattended
 		// CLI configurations, but first launch no longer requires its key: the
 		// desktop onboarding overlay can replace this choice before sending.
-		DefaultModel: "deepseek-flash",
+		DefaultModel: "deepseek/deepseek-flash",
 		UI:           UIConfig{Theme: "auto"},
 		Desktop:      DesktopConfig{Language: "zh", Theme: "light", ThemeStyle: "slate", UIStyle: DesktopUIStyleModern, CheckUpdates: boolPtr(true), VisionMode: VisionModeAuto, ActivityIndicator: true, ConversationMode: "assistant"},
 		LocalAI:      LocalAIConfig{IdleUnloadMinutes: 10, VRAMReserveMiB: 2048},
@@ -1341,6 +1356,7 @@ func Default() *Config {
 			Weixin:     WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
 		},
 		Providers: []ProviderEntry{
+			deepSeekPreset().Entry,
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: officialDeepSeekModelPricing(&ProviderEntry{Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com"}, "deepseek-v4-flash")},
 			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: officialDeepSeekModelPricing(&ProviderEntry{Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com"}, "deepseek-v4-pro")},
 		},
@@ -1444,6 +1460,10 @@ func LoadForRoot(root string) (*Config, error) {
 	normalizeActivityIndicatorPreference(cfg)
 	normalizeConversationProfiles(cfg)
 	normalizeV11ProductSettings(cfg)
+	normalizeDeepSeekV41Catalog(cfg)
+	if cfg.ConfigVersion < 12 {
+		cfg.ConfigVersion = 12
+	}
 	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
 	bindProviderEnv(cfg)
@@ -1462,7 +1482,7 @@ func LoadForRoot(root string) (*Config, error) {
 // untouched. Narrowly scoped to the official DeepSeek endpoint (which is known to
 // serve pro) so a custom flash-only deployment isn't given an entry that 404s.
 func backfillDeepSeekPro(c *Config) {
-	const flashModel, proModel = "deepseek-v4-flash", "deepseek-v4-pro"
+	const flashModel, proModel = OfficialDeepSeekFlashModel, "deepseek-v4-pro"
 	var flash *ProviderEntry
 	for i := range c.Providers {
 		p := &c.Providers[i]
@@ -1473,8 +1493,8 @@ func backfillDeepSeekPro(c *Config) {
 			switch m {
 			case proModel:
 				return // pro already reachable
-			case flashModel:
-				if strings.Contains(p.BaseURL, "api.deepseek.com") {
+			case flashModel, "deepseek-v4-flash":
+				if IsDeepSeekV41OfficialProvider(p) {
 					flash = p
 				}
 			}
@@ -1595,7 +1615,11 @@ func LoadForEdit(path string) *Config {
 		}
 	}
 	if err := mergeFile(cfg, path); err != nil {
-		slog.Warn("config: load for edit failed, using defaults", "path", path, "err", err)
+		slog.Warn("config: load for edit failed; saving disabled", "path", path, "err", err)
+		// A failed migration must not let a subsequent settings save replace
+		// the source with defaults. Preserve readable values and reject writes.
+		_, _ = toml.DecodeFile(path, cfg)
+		cfg.loadErr = err
 	}
 	bindProviderEnv(cfg)
 	normalizePluginCommandLines(cfg)
@@ -1611,6 +1635,10 @@ func LoadForEdit(path string) *Config {
 	normalizeActivityIndicatorPreference(cfg)
 	normalizeConversationProfiles(cfg)
 	normalizeV11ProductSettings(cfg)
+	normalizeDeepSeekV41Catalog(cfg)
+	if cfg.ConfigVersion < 12 {
+		cfg.ConfigVersion = 12
+	}
 	normalizeEffortConfig(cfg)
 	bindProviderEnv(cfg)
 	return cfg
@@ -1755,12 +1783,46 @@ func normalizeV11ProductSettings(c *Config) {
 // mergeFile decodes a TOML file onto cfg if it exists. An absent file is not an error.
 func mergeFile(cfg *Config, path string) error {
 	if _, err := os.Stat(path); err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read config %s: %w", path, err)
+	}
+	if err := migrateDeepSeekV41File(path, cfg); err != nil {
+		return fmt.Errorf("migrate DeepSeek model settings %s: %w", path, err)
+	}
+	previous := *cfg
+	var source Config
+	if _, err := toml.DecodeFile(path, &source); err != nil {
+		return fmt.Errorf("config %s: %w", path, err)
 	}
 	if _, err := toml.DecodeFile(path, cfg); err != nil {
 		return fmt.Errorf("config %s: %w", path, err)
 	}
+	cfg.Providers = providerCatalogForSource(&previous, source.Providers)
+	cfg.providersFromFile = previous.providersFromFile || len(source.Providers) > 0
 	return nil
+}
+
+func providerCatalogForSource(inherited *Config, source []ProviderEntry) []ProviderEntry {
+	if len(source) > 0 && !inherited.providersFromFile {
+		return append([]ProviderEntry(nil), source...)
+	}
+	merged := append([]ProviderEntry(nil), inherited.Providers...)
+	for _, entry := range source {
+		found := false
+		for i := range merged {
+			if merged[i].Name == entry.Name {
+				merged[i] = entry
+				found = true
+				break
+			}
+		}
+		if !found {
+			merged = append(merged, entry)
+		}
+	}
+	return merged
 }
 
 // normalizeLegacyMCPTiers keeps loaded legacy config files on the new product
@@ -1860,7 +1922,7 @@ func normalizeLegacyProviderModels(c *Config) {
 func legacyOfficialProviderModel(name string) string {
 	switch strings.TrimSpace(name) {
 	case "deepseek-flash":
-		return "deepseek-v4-flash"
+		return OfficialDeepSeekFlashModel
 	case "deepseek-pro":
 		return "deepseek-v4-pro"
 	case "mimo-api", "mimo-pro":
@@ -1987,16 +2049,16 @@ func ensureDeepSeekOfficialProvider(c *Config) {
 		Name:          "deepseek",
 		Kind:          "openai",
 		BaseURL:       "https://api.deepseek.com",
-		Models:        []string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"},
-		Default:       "deepseek-v4-flash",
+		Models:        []string{OfficialDeepSeekFlashModel, "deepseek-v4-pro"},
+		Default:       OfficialDeepSeekFlashModel,
 		APIKeyEnv:     "DEEPSEEK_API_KEY",
 		BalanceURL:    "https://api.deepseek.com/user/balance",
 		ContextWindow: 1_000_000,
 	}
 	if old, ok := c.Provider("deepseek-flash"); ok {
 		entry = officialProviderFromLegacy(entry, old)
-		entry.Models = mergeModelLists([]string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"}, old.ModelList())
-		entry.Default = firstKnownModel(entry.Default, entry.Models, "deepseek-v4-flash")
+		entry.Models = mergeModelLists([]string{OfficialDeepSeekFlashModel, "deepseek-v4-pro"}, old.ModelList())
+		entry.Default = firstKnownModel(entry.Default, entry.Models, OfficialDeepSeekFlashModel)
 	}
 	c.Providers = append(c.Providers, entry)
 }
@@ -2112,13 +2174,13 @@ func firstKnownModel(current string, models []string, fallback string) string {
 }
 
 func retargetDesktopOfficialRefs(c *Config, access map[string]bool) {
-	c.DefaultModel = retargetDesktopOfficialRef(c.DefaultModel, access)
-	c.Bot.Model = retargetDesktopOfficialRef(c.Bot.Model, access)
-	c.Agent.PlannerModel = retargetDesktopOfficialRef(c.Agent.PlannerModel, access)
-	c.Agent.SubagentModel = retargetDesktopOfficialRef(c.Agent.SubagentModel, access)
-	c.Agent.AutoPlanClassifier = retargetDesktopOfficialRef(c.Agent.AutoPlanClassifier, access)
+	c.DefaultModel = c.retargetOfficialRef(c.DefaultModel, access)
+	c.Bot.Model = c.retargetOfficialRef(c.Bot.Model, access)
+	c.Agent.PlannerModel = c.retargetOfficialRef(c.Agent.PlannerModel, access)
+	c.Agent.SubagentModel = c.retargetOfficialRef(c.Agent.SubagentModel, access)
+	c.Agent.AutoPlanClassifier = c.retargetOfficialRef(c.Agent.AutoPlanClassifier, access)
 	for skill, ref := range c.Agent.SubagentModels {
-		c.Agent.SubagentModels[skill] = retargetDesktopOfficialRef(ref, access)
+		c.Agent.SubagentModels[skill] = c.retargetOfficialRef(ref, access)
 	}
 }
 
@@ -2134,7 +2196,7 @@ func retargetDesktopOfficialRef(ref string, access map[string]bool) string {
 			return ref
 		}
 		if !hasModel || strings.TrimSpace(model) == "" {
-			model = "deepseek-v4-flash"
+			model = OfficialDeepSeekFlashModel
 		}
 		return "deepseek/" + model
 	case "deepseek-pro":
@@ -2392,6 +2454,9 @@ func SourcePathForRoot(root string) string {
 
 // WriteFile writes the configuration to path as annotated TOML.
 func (c *Config) WriteFile(path string) error {
+	if c.loadErr != nil {
+		return c.loadErr
+	}
 	return os.WriteFile(path, []byte(RenderTOMLForScope(c, renderScopeForPath(path))), 0o644)
 }
 
@@ -2421,7 +2486,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 	}
 	access := desktopProviderAccessMap(c.Desktop.ProviderAccess)
 	if len(access) > 0 {
-		ref = retargetDesktopOfficialRef(ref, access)
+		ref = c.retargetOfficialRef(ref, access)
 	}
 	if providerName, _, hasModel := strings.Cut(ref, "/"); hasModel &&
 		(providerName == "mimo-flash" || providerName == "mimo-pro") &&
@@ -2439,6 +2504,9 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 			// access list points at the canonical preset, model pickers and bare
 			// resolution must not expose every historical alias as a duplicate.
 			if name != canonical {
+				if canonical == "deepseek" && !c.HiddenDeepSeekCompatibilityEntry(e) {
+					return true
+				}
 				if _, curated := ProviderPresetByID(canonical); curated {
 					return false
 				}
@@ -2452,6 +2520,9 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		return !curated
 	}
 	resolved := func(e *ProviderEntry, model string) (*ProviderEntry, bool) {
+		if IsDeepSeekV41OfficialProvider(e) {
+			model = canonicalDeepSeekFlash(model)
+		}
 		if !allowed(e) || !e.HasModel(model) {
 			return nil, false
 		}
@@ -2472,6 +2543,9 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 	if e, found := c.Provider(ref); found && allowed(e) {
 		cp := *e
 		cp.Model = e.DefaultModel()
+		if IsDeepSeekV41OfficialProvider(e) {
+			cp.Model = canonicalDeepSeekFlash(cp.Model)
+		}
 		applyResolvedModelPricing(&cp)
 		return &cp, true
 	}
@@ -2522,13 +2596,23 @@ func (c *Config) ResolveVisionModelRef() string {
 	var fallback string
 	for i := range c.Providers {
 		entry := &c.Providers[i]
-		if !IsOfficialDeepSeekEntry(entry) || !entry.HasModel(OfficialDeepSeekVisionModel) {
+		if !IsOfficialDeepSeekEntry(entry) {
+			continue
+		}
+		model := ""
+		for _, candidate := range []string{OfficialDeepSeekVisionModel, "deepseek-v4-flash-vision-exp", "deepseek-v4-flash"} {
+			if entry.HasModel(candidate) {
+				model = candidate
+				break
+			}
+		}
+		if model == "" {
 			continue
 		}
 		if len(access) > 0 && !access[canonicalDesktopOfficialProviderName(entry.Name)] {
 			continue
 		}
-		ref := strings.TrimSpace(entry.Name) + "/" + OfficialDeepSeekVisionModel
+		ref := strings.TrimSpace(entry.Name) + "/" + model
 		if strings.TrimSpace(entry.Name) == "deepseek" {
 			return ref
 		}

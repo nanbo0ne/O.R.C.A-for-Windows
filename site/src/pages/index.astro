@@ -4,9 +4,9 @@ import community from '../data/community.json';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const repo = 'https://github.com/nanbo0ne/O.R.C.A-for-Windows';
-const R2 = 'https://orca.aichat.diy/releases/desktop-v3.0.4';
 
-const desktopVer = '3.0.4';
+const desktopVer = '3.0.5';
+const R2 = `https://orca.aichat.diy/releases/desktop-v${desktopVer}`;
 
 const fmtN = (n) => Number(n).toLocaleString('en-US');
 const avClass = (i) => 'av' + (i % 5 === 2 ? ' sm' : i % 7 === 3 ? ' lg' : '');
@@ -14,7 +14,7 @@ const half = Math.ceil(community.list.length / 2);
 const rowA = community.list.slice(0, half);
 const rowB = community.list.slice(half);
 
-const desc = "Open Reasoning & Computing Agent: a workspace for coding, everyday work, Vision attachments, and cloud providers. Managed local AI and Computer Use remain temporarily disabled on all platforms in 3.0.4.";
+const desc = "Open Reasoning & Computing Agent: a workspace for coding, everyday work, Vision attachments, and cloud providers. Managed local AI and Computer Use remain temporarily disabled on all platforms in 3.0.5.";
 const ld = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -59,7 +59,7 @@ const ld = {
   <section class="hero">
     <canvas class="hero-dots"></canvas>
     <div class="wrap">
-      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">Cloud or local · Vision attachments · MIT</span><span class="l-zh">云端或本地 · Vision 附件识图 · MIT</span></div>
+      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">Cloud or external local · Vision attachments · MIT</span><span class="l-zh">云端或外部本地服务 · Vision 附件识图 · MIT</span></div>
       <h1 class="reveal" style="--d:0.06s">
         <span class="l-en"><span class="grad">Open Reasoning</span><br />& Computing Agent.</span>
         <span class="l-zh"><span class="grad">开放推理</span>与<br />计算智能体。</span>
@@ -68,7 +68,7 @@ const ld = {
         <span class="l-en">Choose cloud providers, then use O.R.C.A to code, research, analyze images you attach, and create work artifacts. External compatible local services remain available when configured.</span>
         <span class="l-zh">自由选择云端供应商，使用 O.R.C.A 编程、调研、分析你附上的图片和制作办公产物；已配置的外部兼容本地服务仍可使用。</span>
       </p>
-      <p class="reveal"><span class="l-en">In 3.0.4, managed local AI and Computer Use remain temporarily disabled on Windows, macOS, and Linux: no computer-control tools, screen captures, or native input. Code and configuration remain available for later restoration. Ordinary attachments, default Vision, and external compatible local services remain supported. See the <a href={`${repo}/blob/main/docs/audits/2026-09-08-v3.0.4-release-validation.md`}>validation report</a> for DPI and remaining test scope.</span><span class="l-zh">3.0.4 在 Windows、macOS、Linux 所有平台继续暂时禁用托管本地 AI 与电脑操控，不注册电脑工具、不截图、不执行原生输入。代码和配置保留，后续可恢复；普通附件、默认 Vision 识图和外部兼容本地服务仍支持。DPI 与其余测试范围见<a href={`${repo}/blob/main/docs/audits/2026-09-08-v3.0.4-release-validation.md`}>验证报告</a>。</span></p>
+      <p class="reveal"><span class="l-en">3.0.5 is in release preparation. Assistant, Coding, ORCA Agent, files, artifacts, and custom providers remain available; official DeepSeek defaults move to V4.1 Flash with native vision. Managed local AI and Computer Use stay disabled on every platform. See the <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.5.md`}>release notes and pending acceptance</a>.</span><span class="l-zh">3.0.5 正在发布准备中。助手、编程、ORCA Agent、文件、产物与自定义供应商继续保留；官方 DeepSeek 默认值升级为原生视觉的 V4.1 Flash。托管本地 AI 与电脑操控在所有平台继续禁用。详见<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.5.md`}>发布说明与待验收项</a>。</span></p>
       <div class="hero-cta reveal" style="--d:0.18s">
         <a class="btn btn-dark" data-os-dl data-goto="desktop" href="#start"><span class="l-en">Download for <span class="os-name">macOS</span></span><span class="l-zh">下载 <span class="os-name">macOS</span> 版</span></a>
         <span class="install"><span class="ps1">$</span>npm i -g orca-agent<button data-copy="npm i -g orca-agent">Copy</button></span>
@@ -77,11 +77,11 @@ const ld = {
       <div class="also reveal" style="--d:0.22s"><span class="l-en">Also via <a href="#start" data-goto="brew">Homebrew</a> and <a href="#start" data-goto="desktop">desktop apps</a> · macOS / Windows / Linux</span><span class="l-zh">也可通过 <a href="#start" data-goto="brew">Homebrew</a> 与<a href="#start" data-goto="desktop">桌面端</a>安装 · macOS / Windows / Linux</span></div>
 
       <div class="term-stage reveal" style="--d:0.26s">
-        <div class="fig"><span class="l-en">fig. 01 — a live session, cache still warm</span><span class="l-zh">图 01 —— 一场实时会话,缓存依然温热</span></div>
+        <div class="fig"><span class="l-en">fig. 01 — illustrative session, not a measured benchmark or bill</span><span class="l-zh">图 01：会话示意，不代表实测速率、命中率或账单</span></div>
         <div class="term">
           <div class="term-bar"><i></i><i></i><i></i><span class="title">~/app — orca chat</span></div>
           <div class="term-body"><span class="tl"><span class="t-acc">◆</span> orca <span class="t-dim">v<span class="rxv">{desktopVer}</span> · qwen3.8-27b · ~/app</span></span><span class="tl"><span class="t-vio">›</span> add retry with backoff to the http client</span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client.go</span>  <span class="t-add">+24 −3</span></span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client_test.go</span>  <span class="t-add">+41 −0</span></span><span class="tl"><span class="t-ok">✓</span> run <span class="t-dim">go test ./internal/net/</span>  <span class="t-ok">ok</span> <span class="t-dim">(0.21s)</span></span><span class="tl"><span class="t-warm">●</span> <span class="t-dim">provider · local · work tools</span></span><span class="tl"><span class="t-vio">›</span> <span class="caret"></span></span></div>
-          <div class="term-stat"><span>cache <b data-cnt="95.1" data-dec="1" data-suf="% hit">95.1% hit</b></span><span>session <b data-cnt="18" data-suf="m">18m</b></span><span>model <b>deepseek-v4-flash</b></span><span>cost <b data-cnt="0.043" data-dec="3" data-pre="$">$0.043</b></span></div>
+          <div class="term-stat"><span>cache <b data-cnt="95.1" data-dec="1" data-suf="% hit">95.1% hit</b></span><span>session <b data-cnt="18" data-suf="m">18m</b></span><span>model <b>deepseek-flash</b></span><span>cost <b data-cnt="0.043" data-dec="3" data-pre="$">$0.043</b></span></div>
         </div>
       </div>
     </div>
@@ -140,16 +140,16 @@ const ld = {
         <div class="wrap">
           <div class="sec-head center reveal">
             <span class="kicker"><span class="l-en">How it works</span><span class="l-zh">工作原理</span></span>
-            <h2><span class="l-en">Every turn reuses <span class="em">the last.</span></span><span class="l-zh">每一轮都复用<span class="em">上一轮。</span></span></h2>
-            <p><span class="l-en">Each request replays the exact same byte-for-byte prefix, so the model only computes what's new. Long sessions get cheaper per turn — not more expensive.</span><span class="l-zh">每次请求都逐字节重放完全相同的前缀,模型只计算新增部分。会话越长,每轮越便宜——而不是越贵。</span></p>
+            <h2><span class="l-en">Stable prefixes support <span class="em">cache reuse.</span></span><span class="l-zh">稳定前缀支持<span class="em">缓存复用。</span></span></h2>
+            <p><span class="l-en">Matching prefixes can reuse provider caches. Compaction, configuration changes, and cache availability affect hits; cost depends on actual input/output tokens and current prices. Neither savings nor faster replies are guaranteed.</span><span class="l-zh">匹配的前缀可复用供应商缓存。压缩、配置变化及缓存可用性影响命中；费用取决于实际输入、输出 token 和当时价格，不保证固定节省或更快回复。</span></p>
           </div>
           <div class="cache-panel reveal">
             <div class="cache-grid">
               <div class="cache-steps">
                 <span class="cap" data-step="1"><span class="n">01</span><span class="l-en">Cold start — everything is computed</span><span class="l-zh">冷启动——全部需要计算</span></span>
-                <span class="cap" data-step="2"><span class="n">02</span><span class="l-en">The previous turn replays from cache</span><span class="l-zh">上一轮全部从缓存重放</span></span>
-                <span class="cap" data-step="3"><span class="n">03</span><span class="l-en">Only the new request is computed</span><span class="l-zh">只计算新增的请求</span></span>
-                <span class="cap" data-step="4"><span class="n">04</span><span class="l-en">90%+ cache hit — cheaper every turn</span><span class="l-zh">命中 90%+——越跑越便宜</span></span>
+                <span class="cap" data-step="2"><span class="n">02</span><span class="l-en">An available matching prefix can be reused</span><span class="l-zh">可用且匹配的前缀可复用</span></span>
+                <span class="cap" data-step="3"><span class="n">03</span><span class="l-en">New or changed tokens use the cache-miss rate</span><span class="l-zh">新增或变化的 token 按未命中价计费</span></span>
+                <span class="cap" data-step="4"><span class="n">04</span><span class="l-en">Check actual usage; no fixed hit rate</span><span class="l-zh">核对实际用量，不承诺固定命中率</span></span>
               </div>
               <div class="cache-rows-wrap">
                 <div class="cache-row"><span class="lbl">turn 1</span><span class="blk new"></span><span class="blk new"></span><span class="blk new"></span></div>
@@ -158,7 +158,7 @@ const ld = {
                 <div class="cache-row"><span class="lbl">turn 4</span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk new"></span><span class="blk new"></span></div>
                 <div class="cache-legend">
                   <span><i style="background: var(--accent);"></i><span class="l-en">new tokens — computed</span><span class="l-zh">新 token——需要计算</span></span>
-                  <span><i style="background: color-mix(in oklch, var(--accent) 12%, transparent); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);"></i><span class="l-en">cached prefix — replayed, billed at ~1/5</span><span class="l-zh">缓存前缀——重放,约 1/5 计费</span></span>
+                  <span><i style="background: color-mix(in oklch, var(--accent) 12%, transparent); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);"></i><span class="l-en">cached prefix — provider cache-hit rate</span><span class="l-zh">缓存前缀：按供应商缓存命中价计费</span></span>
                 </div>
               </div>
             </div>
@@ -237,10 +237,11 @@ const ld = {
 
   <section class="cta" id="start">
     <h2 class="reveal"><span class="l-en">Start a session that <span class="em">lasts.</span></span><span class="l-zh">开启一场<span class="em">不会中断</span>的会话。</span></h2>
-    <p class="reveal" style="--d:0.08s"><span class="l-en">Open source under MIT. Bring a provider key or run a local model; you choose where model requests are processed.</span><span class="l-zh">MIT 开源。使用自己的供应商密钥或本地模型，由你决定模型请求在哪里处理。</span></p>
+    <p class="reveal" style="--d:0.08s"><span class="l-en">Open source under MIT. Bring a provider key or connect an external compatible local service; you choose where model requests are processed.</span><span class="l-zh">MIT 开源。使用自己的供应商密钥或连接外部兼容本地服务，由你决定模型请求在哪里处理。</span></p>
 
     <div class="dl reveal" style="--d:0.14s">
-      <p class="dl-note"><span class="l-en">Desktop 3.0.4 downloads and verification files are listed on the <a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>desktop Release page</a>. This release includes streaming, generated-image delegation, and download controls; managed local AI and Computer Use remain temporarily disabled, while custom providers remain available.</span><span class="l-zh">桌面版 3.0.4 的下载与校验文件见<a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>桌面端 Release 页</a>。本版本包含流式显示、生成图片委派与下载控制；托管本地 AI 和电脑操控继续暂时禁用，自定义供应商保留。</span></p>
+      <p class="dl-note"><span class="l-en">Desktop 3.0.5 links below are publication targets, pending verified assets on the <a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>Release page</a>. The published baseline is <a href={`${repo}/releases/tag/desktop-v3.0.4`}>3.0.4</a>. Flash uses <code>deepseek/deepseek-flash</code>: native vision, 1M context, up to 384K output, tools, and JSON. Old Flash/Vision names are aliases; Pro remains text-only.</span><span class="l-zh">以下桌面版 3.0.5 链接为发布目标，须待<a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>Release 页</a>提供已校验资产后才可下载；已发布基线为 <a href={`${repo}/releases/tag/desktop-v3.0.4`}>3.0.4</a>。Flash 使用 <code>deepseek/deepseek-flash</code>，支持原生视觉、1M 上下文、最大 384K 输出、工具及 JSON；旧 Flash/Vision 名称为别名，Pro 保持文本模型。</span></p>
+      <p class="dl-note"><span class="l-en">Official defaults, roles, and saved session model choices receive a one-time Flash upgrade; custom providers and later Pro choices are preserved. Effort: low/high/max, auto = high. <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.5.md`}>Bilingual notes, RMB pricing, and acceptance status</a>.</span><span class="l-zh">已有官方默认值、角色与保存的会话模型选择一次性升级至 Flash；自定义供应商及迁移后重新选择的 Pro 保留。思考强度为 low/high/max，auto = high。详见<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.5.md`}>双语说明、人民币价格及验收状态</a>。</span></p>
       <div class="dl-tabs" role="tablist">
         <button class="dl-tab active" type="button" data-pane="npm" role="tab">npm</button>
         <button class="dl-tab" type="button" data-pane="brew" role="tab">Homebrew</button>
@@ -252,7 +253,7 @@ const ld = {
         <div class="chan">
           <div class="chan-row rec">
             <code>npm i -g orca-agent</code><span class="v">CLI</span>
-            <span class="s"><span class="l-en">CLI channel · separate from desktop 3.0.4 · one binary · actively developed</span><span class="l-zh">CLI 渠道 · 与桌面版 3.0.4 独立 · 单二进制 · 主力开发中</span></span>
+            <span class="s"><span class="l-en">CLI channel · separate from desktop 3.0.5 · one binary · actively developed</span><span class="l-zh">CLI 渠道 · 与桌面版 3.0.5 独立 · 单二进制 · 主力开发中</span></span>
             <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
           </div>
           <div class="chan-row">
@@ -261,12 +262,12 @@ const ld = {
             <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
           </div>
         </div>
-        <div class="dl-note"><span class="l-en">CLI is a separate release channel from desktop 3.0.4. Install the current CLI channel from npm, or use <span class="mono">@next</span> for the preview channel. See the <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm package</a>.</span><span class="l-zh">CLI 与桌面版 3.0.4 是独立发布渠道。请从 npm 安装当前 CLI，或使用 <span class="mono">@next</span> 获取预览渠道。详见 <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm 包</a>。</span></div>
+        <div class="dl-note"><span class="l-en">CLI is a separate release channel from desktop 3.0.5. Install the current CLI channel from npm, or use <span class="mono">@next</span> for the preview channel. See the <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm package</a>.</span><span class="l-zh">CLI 与桌面版 3.0.5 是独立发布渠道。请从 npm 安装当前 CLI，或使用 <span class="mono">@next</span> 获取预览渠道。详见 <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm 包</a>。</span></div>
       </div>
 
       <div class="dl-pane" data-pane="brew">
         <span class="install"><span class="ps1">$</span>brew install nanbo0ne/O.R.C.A-for-Windows/orca-agent<button data-copy="brew install nanbo0ne/O.R.C.A-for-Windows/orca-agent">Copy</button></span>
-        <div class="dl-note"><span class="l-en">CLI channel · macOS &amp; Linux · update with <span class="mono">brew upgrade</span>; CLI releases are separate from desktop 3.0.4.</span><span class="l-zh">CLI 渠道 · macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新；CLI 与桌面版 3.0.4 独立发布。</span></div>
+        <div class="dl-note"><span class="l-en">CLI channel · macOS &amp; Linux · update with <span class="mono">brew upgrade</span>; CLI releases are separate from desktop 3.0.5.</span><span class="l-zh">CLI 渠道 · macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新；CLI 与桌面版 3.0.5 独立发布。</span></div>
       </div>
 
       <div class="dl-pane" data-pane="desktop">

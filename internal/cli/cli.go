@@ -1444,6 +1444,11 @@ func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 	for _, m := range cfg.Agent.SubagentModels {
 		referenced[m] = true
 	}
+	for ref := range referenced {
+		if p, ok := cfg.ResolveModel(ref); ok {
+			referenced[p.Name] = true
+		}
+	}
 	var out []config.ProviderEntry
 	for _, p := range cfg.Providers {
 		if referenced[p.Name] && p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) == "" {

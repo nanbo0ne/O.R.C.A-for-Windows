@@ -70,13 +70,17 @@ type App struct {
 
 	// mu protects the tab map, tabOrder, activeTabID, and per-tab fields that are read
 	// from bound methods. All bound methods that touch a controller use activeCtrl().
-	mu                sync.RWMutex
-	tabs              map[string]*WorkspaceTab
-	tabOrder          []string
-	activeTabID       string
-	recentPrefs       recentConversationPrefs
-	readyHook         func()
-	runtimeSwitchHook func(RuntimeSwitchProgress)
+	mu                     sync.RWMutex
+	tabs                   map[string]*WorkspaceTab
+	tabOrder               []string
+	activeTabID            string
+	recentPrefs            recentConversationPrefs
+	deepSeekModelVersion   int
+	modelMigrationErr      string
+	modelMigrationProjects map[string]string
+	modelMigrationSnapshot *desktopModelSnapshot
+	readyHook              func()
+	runtimeSwitchHook      func(RuntimeSwitchProgress)
 
 	forceQuit           atomic.Bool
 	backgroundMaximised atomic.Bool
@@ -457,6 +461,12 @@ func backgroundRestoreShouldMaximise(goos string, wasMaximised bool) bool {
 // restoreOrBuildTabs restores the tabs from the last session, or creates a
 // default independent-workspace tab on first launch.
 func (a *App) restoreOrBuildTabs() {
+	cfg, err := config.Load()
+	if err != nil {
+		a.stopDesktopModelStartup(err)
+		return
+	}
+	startupConfig := *cfg
 	ctx := a.ctx
 	ensureWorkspace()
 	leakedTestTopics := a.cleanupLeakedBootReviewSessions()
@@ -466,27 +476,27 @@ func (a *App) restoreOrBuildTabs() {
 	}
 
 	mainAutomationTopic, _ := a.ensureAutomationMainTopic()
-	var startupConfig config.Config
 	// Load i18n from the first available config.
 	// Prefer DesktopLanguage (desktop UI setting) over Language (CLI setting),
 	// so the user's language choice in desktop settings takes effect.
-	if cfg, err := config.Load(); err == nil {
-		startupConfig = *cfg
-		lang := cfg.DesktopLanguage()
-		if lang == "" {
-			lang = cfg.Language
-		}
-		i18n.DetectLanguage(lang)
+	lang := cfg.DesktopLanguage()
+	if lang == "" {
+		lang = cfg.Language
 	}
+	i18n.DetectLanguage(lang)
 
 	f := loadTabsFile()
 	if migrateMimoCredentialsV10(&startupConfig, f) {
 		// Re-read the process-visible credentials after the one-time split so the
 		// controllers built below never observe the legacy shared key.
-		if cfg, err := config.Load(); err == nil {
-			startupConfig = *cfg
+		cfg, err = config.Load()
+		if err != nil {
+			a.stopDesktopModelStartup(err)
+			return
 		}
+		startupConfig = *cfg
 	}
+	a.migrateDesktopModels(&f, &startupConfig)
 	normalizeLegacyMimoDesktopState(&startupConfig, &f, currentMimoCredentialSource())
 	if len(leakedTestTopics) > 0 {
 		kept := f.Tabs[:0]
@@ -503,6 +513,7 @@ func (a *App) restoreOrBuildTabs() {
 	}
 	a.mu.Lock()
 	a.recentPrefs = f.RecentConversationPrefs
+	a.deepSeekModelVersion = f.DeepSeekModelVersion
 	if !a.recentPrefs.ModeInitialized {
 		a.recentPrefs.PromptMode = promptModeAssistant
 		a.recentPrefs.ModeInitialized = true
@@ -515,6 +526,7 @@ func (a *App) restoreOrBuildTabs() {
 		for _, entry := range f.Tabs {
 			a.mu.Lock()
 			id := a.restoredTabIDLocked(entry.ID)
+			a.trackDesktopModelTabRestore(entry, id)
 			a.mu.Unlock()
 
 			var tab *WorkspaceTab
@@ -2645,7 +2657,7 @@ func (a *App) Meta() Meta {
 func (a *App) MetaForTab(tabID string) Meta {
 	tab := a.tabByID(tabID)
 	if tab == nil {
-		return Meta{EventChannel: eventChannel}
+		return Meta{EventChannel: eventChannel, StartupErr: a.desktopModelError(nil)}
 	}
 	cwd := tab.WorkspaceRoot
 	if cwd == "" {
@@ -2659,10 +2671,14 @@ func (a *App) MetaForTab(tabID string) Meta {
 	if cfg, err := config.Load(); err == nil {
 		automationApproved = cfg.Desktop.AutomationFullAccess
 	}
+	startupErr := tab.StartupErr
+	if migrationErr := a.desktopModelError(tab); migrationErr != "" {
+		startupErr = migrationErr
+	}
 	return Meta{
 		Label:                        tab.Label,
 		Ready:                        tab.Ready,
-		StartupErr:                   tab.StartupErr,
+		StartupErr:                   startupErr,
 		EventChannel:                 eventChannel,
 		Cwd:                          cwd,
 		AutoApproveTools:             autoApproveTools,
@@ -4319,6 +4335,9 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 	metadataStore := modelmeta.Load("")
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
+		if cfg.HiddenDeepSeekCompatibilityEntry(p) {
+			continue
+		}
 		if !modelProviderAccessAllowed(access, p.Name) || !p.Configured() {
 			continue
 		}

@@ -20193,6 +20193,20 @@ a[href] {
   container-type: inline-size;
   container-name: statusbar;
 }
+
+/* Metrics keep their intrinsic width; only the model label absorbs pressure. */
+:root[data-ui-style="classic"] .statusbar__group {
+  flex-shrink: 0;
+}
+
+:root[data-ui-style="classic"] .statusbar__group--model,
+:root[data-ui-style="classic"] .statusbar__group--model > .tooltip-trigger {
+  flex-shrink: 1;
+}
+
+:root[data-ui-style="classic"] .statusbar__group--model > .tooltip-trigger {
+  max-width: 100%;
+}
 .statusbar__details--classic {
   display: none;
 }
@@ -20245,6 +20259,24 @@ a[href] {
 
 .statusbar:has(.statusbar__details--classic[open]) {
   overflow: visible;
+}
+
+@container statusbar (max-width: 1000px) {
+  :root[data-ui-style="classic"] .statusbar__group + .statusbar__group {
+    margin-left: 8px;
+    padding-left: 8px;
+  }
+
+  :root[data-ui-style="classic"] .statusbar__details--classic {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 24px;
+  }
+
+  :root[data-ui-style="classic"] .statusbar__group--primary > .tooltip-trigger:has(.statusbar__avg),
+  :root[data-ui-style="classic"] .statusbar__group--context > .tooltip-trigger:has(.statusbar__compact) {
+    display: none;
+  }
 }
 
 @container statusbar (max-width: 900px) {
@@ -21905,6 +21937,36 @@ a[href] {
 
 :root[data-ui-style="classic"] .app-chrome__tools {
   margin-right: 0;
+}
+
+/* Keep the fixed-height Classic header on one line, including narrow windows. */
+:root[data-ui-style="classic"] .app-chrome__actions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+:root[data-ui-style="classic"] .app-chrome__action {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+:root[data-ui-style="classic"] .app-chrome__action svg {
+  flex-shrink: 0;
+}
+
+:root[data-ui-style="classic"] .app-chrome__action span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 820px) {
+  :root[data-ui-style="classic"] .app-chrome__action--tertiary span {
+    display: none;
+  }
 }
 
 :root[data-ui-style="classic"] .sidebar,

@@ -2,12 +2,35 @@ package control
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/i18n"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
 )
+
+func TestExplainReasoningHistoryErrorBeforeWrappedAPIError(t *testing.T) {
+	previous := i18n.M
+	t.Cleanup(func() { i18n.M = previous })
+	for _, tc := range []struct {
+		language string
+		want     string
+	}{
+		{"zh", "DeepSeek 无法使用这段对话的推理记录。请带上摘要新建对话，原对话会保留。"},
+		{"en", "DeepSeek cannot use this conversation's reasoning history. Start a new conversation with a summary; the original is kept."},
+	} {
+		t.Run(tc.language, func(t *testing.T) {
+			i18n.DetectLanguage(tc.language)
+			for _, cause := range []error{nil, &provider.APIError{Provider: "test", Status: 400, Body: `{"error":{"message":"invalid reasoning_content at message 7"}}`}, errors.New("stream: missing reasoning_content")} {
+				err := fmt.Errorf("request: %w", &provider.ReasoningHistoryError{Provider: "test", MessageIndex: -1, Err: cause})
+				if got := explainError(err).Error(); got != tc.want {
+					t.Fatalf("localized history error=%q, want %q", got, tc.want)
+				}
+			}
+		})
+	}
+}
 
 func TestExplainError(t *testing.T) {
 	if explainError(nil) != nil {
