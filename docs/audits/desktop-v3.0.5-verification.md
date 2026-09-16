@@ -63,13 +63,45 @@ Local evidence: `.tmp/v305-live-results-funded2.json`,
 
 ## Release Checks
 
-Native Windows/macOS/Linux builds, Linux race tests, hosted Windows 3.0.4-to-3.0.5
-installation/upgrade, archive checks, Minisign verification, and public update
-delivery are release gates. Their final run IDs and results belong in the
-[release runbook](../build/desktop-v3.0.5.md).
+Release source: `db3b3b5c9a4ca81cc310dd8dfc9a42188df87e75`.
+[Workflow 35131853347](https://github.com/nanbo0ne/O.R.C.A-for-Windows/actions/runs/35131853347)
+passed the core suite, frontend checks, Linux race tests (agent, control, billing,
+local AI, configuration), and native Windows/macOS/Linux builds and tests.
 
-Modern and Classic browser checks use Chinese/English and narrow/full-width
-viewports. Native DPI, computer control, and managed local AI are outside this
+Hosted Windows installer acceptance passed installation of the pinned 3.0.4
+baseline, upgrade to 3.0.5 using the stored installation path, a separate explicit
+installation directory, payload comparisons, and uninstall. Synthetic configuration,
+session, and model markers were retained. The user's installation was not changed.
+
+All 17 downloaded release files matched GitHub size/digest metadata; 16 checksum
+records and all eight payload/manifest Minisign signatures passed. All seven
+package archives passed 7-Zip integrity checks. The final CI installer is
+88,804,245 bytes with NSIS CRC `2c072443`; installer and portable executable bytes
+match and report version `3.0.5.0`. This supersedes the local candidate's size/CRC.
+Final delivery details are in the [release runbook](../build/desktop-v3.0.5.md).
+
+After publication, the public manifest and signature matched the release assets.
+The application's actual updater detected 3.0.5 from version 3.0.4 and downloaded
+the complete Windows installer from the Mac source, verifying its signature and
+SHA-256. Independent public downloads also verified the Windows portable ZIP,
+macOS DMG, and Linux DEB; missing update and package URLs returned 404. This probe
+used an isolated directory and did not install or restart the user's application.
+
+## Rendered Interface Checks
+
+The final rendered regression passed 224 scenarios and 1,148 assertions across
+Modern/Classic, Chinese/English, widths 760/900/1024/1180/1181/1366/1920, official
+and long custom model labels, and four sidebar combinations. Classic header
+clipping and status collisions found during this run were fixed with scoped CSS.
+There were no remaining measured overlaps/clipped controls or browser errors.
+Evidence: `.tmp/v305-ui/layout-fix/results.json` and its screenshots.
+
+The frontend suite passed with 578 PASS lines; production build passed. Its main
+bundle remains 991.96 kB (284.26 kB gzip), above the 600 kB build warning threshold.
+Rendered checks used isolated mock data, 900px height, and DPR 1; they are separate
+from the live API and native platform tests above.
+
+Native DPI, computer control, and managed local AI are outside this
 release's test scope; the latter two remain disabled. Minisign authenticates
 updates and must not be described as a Windows publisher signature or macOS
 notarization.
