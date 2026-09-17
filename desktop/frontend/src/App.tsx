@@ -2989,6 +2989,7 @@ export default function App() {
               onClearGoal={() => applyGoal("")}
               onSwitchModel={switchModel}
               onSetEffort={(level) => void switchEffort(level)}
+              onConfigureEffort={() => setSettingsTarget("providers")}
               insertRequest={composerInsertRequest}
               pasteRequest={composerPasteRequest}
               disabled={state.meta?.ready === false || state.meta?.readOnly === true || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}

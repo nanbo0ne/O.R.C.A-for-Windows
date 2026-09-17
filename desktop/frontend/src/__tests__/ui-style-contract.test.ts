@@ -48,7 +48,7 @@ if (!chrome.includes('className="app-chrome__window-controls app-chrome__window-
 if (!css.includes(':root[data-ui-style="modern"] .modern-chrome')) {
   throw new Error("modern shell CSS must be scoped to the modern branch");
 }
-if (!css.includes(':root[data-ui-style="modern"] .composer-card__actions--modern') || !css.includes(':root[data-ui-style="modern"] .composer-modern-parameters')) {
+if (!css.includes(':root[data-ui-style="modern"] .composer-wrap--modern .composer-card__actions--modern') || !css.includes(':root[data-ui-style="modern"] .composer-wrap--modern .composer-modern-parameters')) {
   throw new Error("modern Composer controls must have an authoritative scoped layout");
 }
 if (!css.includes(':root[data-ui-style="classic"] .composer-meta--classic')) {
@@ -71,7 +71,7 @@ if (css.includes('--app-chrome-height: 46px')) {
 if (!css.includes('height: var(--app-chrome-height)') || !css.includes('padding: 10px 10px calc(8px + var(--statusbar-height))')) {
   throw new Error("modern header and sidebar must reserve the visible chrome and status bar");
 }
-if (!css.includes('.composer-modern-parameter > .modelsw') || !css.includes('min-width: 68px')) {
+if (!css.includes('.composer-modern-parameter > .modelsw') || !css.includes('flex: 0 0 var(--composer-hit-size)')) {
   throw new Error("narrow model wrappers must shrink without squeezing the two run controls");
 }
 if (!chrome.includes('t("topbar.windowMinimize")') || !chrome.includes('t("topbar.windowClose")')) {

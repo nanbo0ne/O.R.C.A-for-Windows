@@ -1,6 +1,6 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([string]$ExpectedVersion = '3.0.7')
+param([string]$ExpectedVersion = '3.0.8')
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

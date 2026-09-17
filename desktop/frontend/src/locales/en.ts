@@ -426,6 +426,8 @@ export const en = {
   "status.modelSwitchFailed": "Model switch failed: {err}",
   "status.effort": "effort {level}",
   "status.effortTitle": "Reasoning effort",
+  "status.effortModelDefault": "Model default",
+  "status.effortModelDefaultHint": "This connection has no selectable effort levels. The model default is used. You can configure supported levels in provider settings.",
   "status.effortAutoTitle": "Reasoning effort: auto (model default: {def})",
   "status.switchFolder": "{cwd}\nClick to switch project folder",
   "status.tokens": "tokens",

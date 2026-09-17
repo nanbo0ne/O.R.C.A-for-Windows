@@ -427,6 +427,8 @@ export const zh: Record<DictKey, string> = {
   "status.modelSwitchFailed": "模型切换失败：{err}",
   "status.effort": "effort {level}",
   "status.effortTitle": "推理力度",
+  "status.effortModelDefault": "模型默认",
+  "status.effortModelDefaultHint": "当前接入未提供可选强度，沿用模型默认设置。可在供应商设置中配置支持的等级。",
   "status.effortAutoTitle": "推理力度：auto（模型默认：{def}）",
   "status.switchFolder": "{cwd}\n点击切换项目目录",
   "status.tokens": "tokens",

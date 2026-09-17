@@ -146,12 +146,12 @@ check(
   "narrow Composer retains model access and collapses mode trigger to one icon",
 );
 check(
-  css.includes(':root[data-ui-style="modern"] .composer-card {\n  grid-template-columns: minmax(0, 1fr) max-content;') &&
-    css.includes("max-width: min(360px, 42cqw);") &&
+  css.includes('grid-template-areas: "input input input" "meta status actions";') &&
+    css.includes("grid-template-columns: max-content minmax(0, 1fr) max-content;") &&
     css.includes("@container (max-width: 320px)") &&
-    css.includes(':root[data-ui-style="modern"] .composer-card__actions--modern {\n  display: flex;') &&
-    css.includes("width: max-content;\n  max-width: min(100%, calc(100cqw - 88px));\n  min-width: 0;\n  justify-self: end;"),
-  "Modern footer uses a content-sized right-aligned action track",
+    css.includes(':root[data-ui-style="modern"] .composer-wrap--modern .composer-card__actions--modern {\n  display: flex;') &&
+    composer.indexOf('composer-modern-parameter--effort') < composer.indexOf('composer-modern-parameter--model'),
+  "Modern footer separates flexible status from right-aligned effort/model actions",
 );
 check(
   css.includes(':root[data-ui-style="modern"] .transcript {\n  width: 100%;\n  max-width: none;') &&
@@ -159,9 +159,10 @@ check(
   "Modern transcript keeps a full-width scroll viewport around the reading column",
 );
 check(
-  css.includes("width: auto;\n  max-width: min(280px, 34cqw);") &&
-    css.includes("max-width: 148px;\n  flex: 0 1 auto;"),
-  "Modern run status uses intrinsic width so controls remain grouped at the right edge",
+  composer.includes('className="composer-modern-status" role="status"') &&
+    css.includes("grid-area: status;") &&
+    !css.includes("max-width: 148px;\n  flex: 0 1 auto;"),
+  "Modern run status owns flexible space independently of the fixed buttons",
 );
 check(
   css.includes(':root[data-ui-style="classic"] .composer-runstatus {\n  width: min(360px, 40cqw);'),

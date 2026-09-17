@@ -1,22 +1,22 @@
 **English** | [简体中文](README.md)
 
-# O.R.C.A. 3.0.7
+# O.R.C.A. 3.0.8
 
 **O.R.C.A.** (**Open Reasoning & Computing Agent**) is an open-source workspace for real work. It brings model conversations, Assistant, Coding, research, files and images, engineering tools, memory, and automation into one pausable, inspectable, recoverable application.
 
-> **3.0.7: Windows installation and upgrade fixes.** Detect background processes, close the target installation before replacement, block on file locks or access failures, and prevent skipped files. Save tasks before manual upgrades. Classic and other features remain; managed local AI and Computer Use stay disabled. See [release notes](docs/releases/desktop-v3.0.7.md) and [verification](docs/audits/desktop-v3.0.7-verification.md).
+> **3.0.8: Modern chat polish.** Center the turn rail around its contents, constrain and center the Composer and auxiliary areas, and give running status its own space. Reorder effort, model, and run controls, improve keyboard menus, and provide a settings path for unknown effort. Classic is unchanged; managed local AI and Computer Use stay disabled. See [release notes](docs/releases/desktop-v3.0.8.md), the [UI audit](docs/audits/2026-09-18-modern-chat-polish.md), and [release verification](docs/audits/desktop-v3.0.8-verification.md). Release acceptance is still pending.
 
 ## Downloads
 
-Download files, signatures and SHA-256 checksums from the 3.0.7 Release below. New builds omit old-brand duplicate assets while retaining installer upgrade compatibility.
+The links below target 3.0.8. Packages, signatures, and SHA-256 checksums become authoritative when the verified Release is public; release preparation is in progress. New builds omit old-brand duplicate assets while retaining installer upgrade compatibility.
 
 | Platform | Package | Notes |
 | --- | --- | --- |
-| Windows x64 | [Installer](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.7/O.R.C.A-for-Windows-windows-amd64-installer.exe) · [Portable ZIP](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.7/O.R.C.A-for-Windows-windows-amd64.zip) | Cloud features; managed local AI and Computer Use temporarily disabled |
-| macOS 12+ Universal | [DMG](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.7/O.R.C.A-macos-universal.dmg) | Intel and Apple Silicon; managed local AI and Computer Use temporarily disabled |
-| Linux x64 | [DEB](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.7/O.R.C.A-linux-amd64.deb) | Debian / Ubuntu; requires a matching WebKitGTK runtime; managed local AI and Computer Use temporarily disabled |
+| Windows x64 | [Installer](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.8/O.R.C.A-for-Windows-windows-amd64-installer.exe) · [Portable ZIP](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.8/O.R.C.A-for-Windows-windows-amd64.zip) | Cloud features; managed local AI and Computer Use temporarily disabled |
+| macOS 12+ Universal | [DMG](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.8/O.R.C.A-macos-universal.dmg) | Intel and Apple Silicon; managed local AI and Computer Use temporarily disabled |
+| Linux x64 | [DEB](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.8/O.R.C.A-linux-amd64.deb) | Debian / Ubuntu; requires a matching WebKitGTK runtime; managed local AI and Computer Use temporarily disabled |
 
-- [3.0.7 release page, checksums, and release notes](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.7)
+- [3.0.8 release page, checksums, and release notes](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.8)
 - Check the version, platform, and filename when downloading.
 - Never commit an API key to documentation; official packages ship with no provider key.
 
@@ -34,13 +34,13 @@ Modes are stored per session. Switching preserves visible history and rebuilds t
 
 ### Providers, Models, and Roles
 
-- First run asks for a DeepSeek key, validation, or skip. New installations default to `deepseek/deepseek-flash` (DeepSeek V4.1 Flash); ordinary subagents inherit the main model unless configured separately. Adding a provider offers DeepSeek or custom OpenAI-compatible/Anthropic-compatible access. Existing providers, separate keys, and custom roles remain. Older official DeepSeek choices retain the migration introduced in 3.0.5; 3.0.7 does not repeat completed migration.
+- First run asks for a DeepSeek key, validation, or skip. New installations default to `deepseek/deepseek-flash` (DeepSeek V4.1 Flash); ordinary subagents inherit the main model unless configured separately. Adding a provider offers DeepSeek or custom OpenAI-compatible/Anthropic-compatible access. Existing providers, separate keys, and custom roles remain. Older official DeepSeek choices retain the migration introduced in 3.0.5; 3.0.8 does not repeat completed migration.
 - Provider IDs, base URLs, credential slots, and fully qualified `provider/model` references are isolated. Same-name models do not silently cross-resolve to another endpoint.
-- The 3.0.7 provider correction keeps the displayed protocol and saved value aligned: OpenAI-compatible must not silently save Anthropic because it is first in the alphabetically sorted registry. Backend Agent endpoints are normalized, and protocol/endpoint mismatches give actionable guidance to check the protocol and Base URL without switching credentials to another provider.
+- Provider corrections from 3.0.6/3.0.7 remain: the displayed protocol matches the saved value, backend Agent endpoints are normalized, and protocol/endpoint mismatches give actionable guidance to check the protocol and Base URL without switching credentials to another provider. These are not new protocol fixes in 3.0.8.
 - The main conversation, planner, subagent, and Orca/automation roles can be selected independently. Computer Use role configuration is retained but does not run in this version. A role is not a guarantee of model capability: context, pricing, tool calling, and vision still depend on the actual model and its checks.
 - **Official models:** `deepseek/deepseek-flash` is the canonical reference for DeepSeek V4.1 Flash: native vision, a 1M-token context, up to 384K output tokens, tool calls, and JSON Output. The old `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` names are compatibility aliases routed by the official service to V4.1 Flash, not separate models. `deepseek/deepseek-v4-pro` remains selectable and text-only, without image support.
 - **Vision role:** explicit configuration takes precedence, followed by the confirmed vision-capable current model and then the official `deepseek/deepseek-flash` default candidate. Sending still checks the target provider and image permissions; images never silently cross providers, and explicitly disabling vision stays effective. Flash vision capability does not automatically give subagents images or upload permission.
-- **3.0.5 migration compatibility:** upgrades from older versions retain the previously introduced one-time migration of official DeepSeek defaults, model roles, and saved session selections to V4.1 Flash, including old official Pro choices. 3.0.7 does not repeat completed migration, and deliberate Pro selections made afterward remain. Custom providers, proxy endpoints, separate credentials, and non-official model choices stay isolated. Matching model names alone never trigger cross-provider migration; historical messages and stored amounts are not rewritten.
+- **3.0.5 migration compatibility:** upgrades from older versions retain the previously introduced one-time migration of official DeepSeek defaults, model roles, and saved session selections to V4.1 Flash, including old official Pro choices. 3.0.8 does not repeat completed migration, and deliberate Pro selections made afterward remain. Custom providers, proxy endpoints, separate credentials, and non-official model choices stay isolated. Matching model names alone never trigger cross-provider migration; historical messages and stored amounts are not rewritten.
 - **Reasoning effort:** official DeepSeek supports `low` / `high` / `max`, with `auto` resolving to `high`. The thinking toggle and effort are separate; Compact/Detailed only changes reasoning visibility. Missing credentials or failed capability checks should produce a visible reason and a configuration path, not a false success.
 - When pricing, balance, or context metadata is unreliable, the UI hides it or marks it unknown instead of displaying a misleading zero. Provider data retention, billing, and training policies remain provider-specific.
 
@@ -88,13 +88,13 @@ Peak periods are fixed at Monday-Friday 09:00-12:00 and 14:00-18:00 in UTC+8. Ot
 
 ### Local AI
 
-3.0.7 keeps O.R.C.A.-managed `llama.cpp` and model downloads temporarily disabled on every platform. Pages, onboarding routes, and startup switches are hidden. Backend installation, download, resume, and automatic startup are also blocked. Stop, cancel, and cleanup interfaces remain; existing files and configuration are not automatically deleted.
+3.0.8 keeps O.R.C.A.-managed `llama.cpp` and model downloads temporarily disabled on every platform. Pages, onboarding routes, and startup switches are hidden. Backend installation, download, resume, and automatic startup are also blocked. Stop, cancel, and cleanup interfaces remain; existing files and configuration are not automatically deleted.
 
 External OpenAI-compatible local services may still be configured manually. The app does not take over LM Studio. Hardware detection, download, and loading implementations are retained for later independent acceptance.
 
 ### Computer Use: Temporarily Disabled
 
-3.0.7 keeps Computer Use disabled on **Windows, macOS, and Linux**. It registers no computer-control tools, captures no screens, and performs no native mouse, keyboard, or window-control actions. ORCA Agent, automation, bots, and subtasks cannot start this feature.
+3.0.8 keeps Computer Use disabled on **Windows, macOS, and Linux**. It registers no computer-control tools, captures no screens, and performs no native mouse, keyboard, or window-control actions. ORCA Agent, automation, bots, and subtasks cannot start this feature.
 
 Its code and configuration remain for restoration after validation in a later version. Existing consent, Full access, and control-model settings cannot enable it in this release. Default Vision, images you explicitly provide, and ordinary file attachments remain supported. Ask the assistant to analyze attachments or organize files; desktop operation is unavailable.
 
@@ -110,7 +110,9 @@ Earlier native test records remain part of the acceptance requirements for resto
 ### Modern and Classic
 
 - Running tool groups and stage replies appear in their actual order; received text fragments render incrementally. Compact/Detailed labels are retained. Compact hides provider reasoning by default and Detailed shows it; both show progress and tools, without changing model reasoning effort.
-- 3.0.7 focuses on the Modern navigation gutter and compact turn rail without crowding the transcript. Consecutive tool summaries merge while retaining actual stage text and its order, without generic status replacements or lost intermediate replies. This patch does not redesign the layout or change Classic.
+- **3.0.8 navigation and width:** the Modern turn rail centers vertically around its contents and grows to 240px before scrolling internally. The Composer and queue/approval areas are centered with an 884px maximum width; the transcript scroll viewport still fills the chat pane. Fix narrow approval-area height and the position offset caused by restored-history entrance animation.
+- **3.0.8 bottom controls:** access stays on the left, running status occupies its own middle track, and the right side orders effort, model, pause/resume, and send/stop. Lighter selectors keep the controls on one row in narrow Composers. Modern always shows effort; unknown capability displays "Model default" with a provider-settings entry, without inventing supported levels. Model and effort menus support arrow keys, Home/End, and focus restoration on close.
+- Tool-summary merging from 3.0.6/3.0.7 continues to retain actual stage text and order, without generic replacements or lost intermediate replies. 3.0.8 does not reimplement that logic or change the Classic layout and control arrangement.
 - Completed process details fold into a light bordered header with state, elapsed time, turn tokens, and verifiable official DeepSeek cost. The final answer stays outside. Request-deduplicated totals include associated subagents and risk review; unknown, unsettled, or missing-usage costs stay hidden. Reasoning is not added to output tokens twice.
 - Turn navigation sits at the left chat edge. Todo is a small independent floating control above the Composer, with transparent, non-intercepting sides. The fixed conversation is labeled ORCA Agent; its history and ID stay unchanged.
 - **Modern** is the default lightweight interface with compact menus, a timeline, a single-row Composer, model/effort controls, and responsive layout.
@@ -137,13 +139,15 @@ Windows requires WebView2; macOS uses system WebKit; Linux requires GTK/WebKitGT
 3. On Linux, install the DEB after preparing matching WebKitGTK/GTK dependencies. Use the system package manager or a source build when the distribution lacks the required library.
 4. Compare the package with the signature, SHA-256, and manifest from the Release page.
 
+Windows publisher-signing and macOS notarization limitations continue: Windows packages lack Authenticode publisher signing, and macOS packages are not notarized. Minisign verifies update integrity; it is not operating-system publisher certification.
+
 ### In-App Updates
 
 - The stable channel first checks [`https://orca.aichat.diy/updates/stable/latest.json`](https://orca.aichat.diy/updates/stable/latest.json). If it fails, it falls back to GitHub's signed manifest and matching signed payload. Manifest, payload, version, and SHA-256 must agree; a failed signature must never be installed.
 - An installed Windows build offers **explicit download -> user confirms exit -> run the installer**. It never downloads or installs in the background. The app should save sessions and drafts before exit and leave the existing installation in place if the operation fails.
 - Downloads show source, measured speed, and estimated time remaining. Sustained low speed suggests another source: cancel, select, and retry to resume a valid partial file. The alternative must match the signed version, size, and digest; switching never relaxes verification. Throughput depends on the network and server, and GitHub is not guaranteed to be faster.
 - macOS/Linux show the available version and integrity details and open the matching download page/package. Cross-platform in-place updating is not presented as complete. The macOS check uses the URL above as its primary source, with GitHub as fallback.
-- Older versions without a working in-app update path need one manual installation from a published Release page. Do not edit the config version or replace credential files by hand to force an upgrade. The Windows installer acceptance target is 3.0.5 to 3.0.7; configuring this baseline does not establish a passed installation test.
+- Older versions without a working in-app update path need one manual installation from a published Release page. Do not edit the config version or replace credential files by hand to force an upgrade. Background-process detection, closure before replacement, lock/access checks, and prevention of skipped files remain from 3.0.7; save tasks before manual upgrades. Actual 3.0.8 upgrade and data-retention results await release verification and cannot inherit a previous version's pass.
 
 ## Configuration and Migration
 
@@ -151,7 +155,7 @@ Windows requires WebView2; macOS uses system WebKit; Linux requires GTK/WebKitGT
 - User configuration is normally `os.UserConfigDir()/orca/config.toml`; the same root holds `credentials`, `sessions`, `archive`, `cache`, and memory data. On Windows this resolves through the system `AppData`, commonly `%APPDATA%\\orca\\`. Local models and runtimes use a separate local data root; use Settings for the actual path.
 - Configuration merges in priority order: explicit flags/parameters, project `orca.toml`, user configuration, and built-in defaults. Project `.mcp.json` can also provide MCP. Workspaces resolve their own config, `.env`, MCP, and sessions.
 - Before migration, close the app and back up the `orca` and legacy V2 user roots, plus project config, `.orca/`, attachments, and instruction files. Migration should preserve sessions, attachments, provider references, credentials references, memory, Skills, MCP, bots, and telemetry; keep the old root as rollback material.
-- Migration cannot undo external side effects or infer one provider's key for another. 3.0.7 introduces no new official DeepSeek migration and does not repeat the completed 3.0.5 migration; custom role/model settings and deliberate post-upgrade selections are preserved. Computer Use code and configuration remain; migration does not re-enable the feature. On failure, fall back to compatibility reads and the backup; do not delete the source files.
+- Migration cannot undo external side effects or infer one provider's key for another. 3.0.8 introduces no new official DeepSeek migration and does not repeat the completed 3.0.5 migration; custom role/model settings and deliberate post-upgrade selections are preserved. Computer Use code and configuration remain; migration does not re-enable the feature. On failure, fall back to compatibility reads and the backup; do not delete the source files.
 
 ## Build From Source
 
@@ -180,12 +184,12 @@ Run `wails dev` in `desktop` for development. Running `npm run dev` alone uses a
 | Image rejected | Format/size/count, vision mode, current role, and model capability; text subagents do not gain vision automatically |
 | Artifact generated but preview fails | Renderer dependency or unverified layout; structural validation is not visual acceptance; check Poppler and the target Office reader |
 | Tool blocked | Ask/Auto/Full access, deny rules, workspace path, sandbox, and tool-library switches; do not disable security boundaries to resolve an unknown error |
-| Local AI is missing | Managed runtime and downloads remain temporarily disabled in 3.0.7; old configuration cannot enable them. Files remain and custom external services still work |
+| Local AI is missing | Managed runtime and downloads remain temporarily disabled in 3.0.8; old configuration cannot enable them. Files remain and custom external services still work |
 | Computer Use is missing or requests are refused | It remains temporarily disabled; consent or model settings cannot enable it. Ordinary Vision image analysis and file attachments remain supported |
 | Blank window or frame issue | WebView2/WebKitGTK/GTK versions, GPU driver, and Modern/Classic selection; restart and collect logs before classifying it as a native defect |
 | Updater does nothing | Primary manifest, GitHub fallback, signature/version fields, and system proxy; on Windows manually download and exit to install rather than expecting a background install |
 
-See the [3.0.7 build checklist](docs/build/desktop-v3.0.7.md) and [acceptance record](docs/audits/desktop-v3.0.7-verification.md) for pending checks. The [3.0.5 verification](docs/audits/desktop-v3.0.5-verification.md), [3.0.4 validation report](docs/audits/2026-09-08-v3.0.4-release-validation.md), and [historical download measurements](docs/audits/2026-09-08-download-diagnosis.md) describe earlier results, not 3.0.7 acceptance. [desktop/README.md](desktop/README.md) and the [artifact runtime boundary](docs/ARTIFACT_RUNTIME.md) provide focused details.
+See the [3.0.8 build checklist](docs/build/desktop-v3.0.8.md) and [release acceptance record](docs/audits/desktop-v3.0.8-verification.md) for pending checks. The [UI audit](docs/audits/2026-09-18-modern-chat-polish.md) records 362 cases and 3990 assertions with no failures, including 60 English/Chinese Classic CSS geometry/computed-style comparisons with no differences; attachments passed a separate 24 assertions. These do not establish installation, real-provider, or three-platform release acceptance. The [3.0.7 verification](docs/audits/desktop-v3.0.7-verification.md), [3.0.5 verification](docs/audits/desktop-v3.0.5-verification.md), [3.0.4 validation report](docs/audits/2026-09-08-v3.0.4-release-validation.md), and [historical download measurements](docs/audits/2026-09-08-download-diagnosis.md) describe earlier results. [desktop/README.md](desktop/README.md) and the [artifact runtime boundary](docs/ARTIFACT_RUNTIME.md) provide focused details.
 
 ## License
 

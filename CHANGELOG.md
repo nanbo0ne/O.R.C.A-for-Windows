@@ -1,5 +1,12 @@
 # Changelog
 
+## Desktop 3.0.8 / 桌面版 3.0.8
+
+- Modern: center the turn rail and Composer, keep controls on one row with effort before model, and give progress text its own space. Refine neutral buttons and keyboard menus; fix narrow approval sizing and restored-history navigation.
+- Modern：修复输入区过宽、控件拥挤、权限入口隐藏和历史定位偏移，统一轻量选择器与运行按钮；Classic 保持不变。
+- [Release notes / 发布说明](docs/releases/desktop-v3.0.8.md)
+- [Verification / 验收](docs/audits/desktop-v3.0.8-verification.md)
+
 ## Desktop 3.0.7 / 桌面版 3.0.7
 
 - Windows: detect 64-bit background processes, close target runtimes before replacement,

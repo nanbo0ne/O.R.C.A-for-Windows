@@ -403,6 +403,7 @@ export function Composer({
   onClearGoal,
   onSwitchModel,
   onSetEffort,
+  onConfigureEffort,
   insertRequest,
   pasteRequest = 0,
   disabled,
@@ -450,6 +451,7 @@ export function Composer({
   onClearGoal: () => void;
   onSwitchModel: (name: string, displayLabel?: string) => void;
   onSetEffort: (level: string) => void;
+  onConfigureEffort?: () => void;
   insertRequest?: ComposerInsertRequest | null;
   pasteRequest?: number;
   disabled?: boolean;
@@ -2416,14 +2418,21 @@ export function Composer({
             )}
           </div>
         </div>
+        {uiStyle === "modern" && (
+          <div className="composer-modern-status" role="status" aria-live="polite">
+            {runActivity && <Tooltip label={runActivity} fill>
+              <span className="composer-modern-status__text" tabIndex={0}>{runActivity}</span>
+            </Tooltip>}
+          </div>
+        )}
         <div className={`composer-card__actions${uiStyle === "modern" ? " composer-card__actions--modern" : " composer-card__actions--classic"}`}>
           {uiStyle === "modern" && <div className="composer-modern-parameters">
-            <div className="composer-modern-parameter composer-modern-parameter--model">
-              <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
+            <div className="composer-modern-parameter composer-modern-parameter--effort">
+              <EffortSwitcher effort={effort} disabled={Boolean(disabled)} onPick={onSetEffort} onConfigure={onConfigureEffort} showDefault />
             </div>
-            {hasEffort && <div className="composer-modern-parameter composer-modern-parameter--effort">
-              <EffortSwitcher effort={effort} disabled={Boolean(disabled)} onPick={onSetEffort} />
-            </div>}
+            <div className="composer-modern-parameter composer-modern-parameter--model">
+              <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} showTooltip />
+            </div>
           </div>}
 		  {uiStyle === "classic" && promptModes.length > 0 && <div className="composer-enhanced">
             <Tooltip label={promptModeLabel}>
@@ -2445,14 +2454,16 @@ export function Composer({
             </Tooltip>
 		  </div>}
           {runActivity ? (
-            <div className="composer-runstatus" role="status" aria-live="polite">
+            <div className="composer-runstatus" role={uiStyle === "classic" ? "status" : undefined} aria-live={uiStyle === "classic" ? "polite" : undefined}>
               <Tooltip label={paused ? t("composer.resume") : t("composer.pause")}>
                 <button className="composer-runstatus__pause" type="button" onClick={onTogglePause} disabled={!onTogglePause} aria-label={paused ? t("composer.resume") : t("composer.pause")}>
-                  {paused ? <Play size={14} strokeWidth={2.2} /> : <Pause size={15} strokeWidth={2.2} />}
+                  {paused ? <Play size={14} strokeWidth={uiStyle === "modern" ? 1.7 : 2.2} /> : <Pause size={15} strokeWidth={uiStyle === "modern" ? 1.7 : 2.2} />}
                 </button>
               </Tooltip>
-              <span className="composer-runstatus__dot" />
-              <span className="composer-runstatus__text">{runActivity}</span>
+              {uiStyle === "classic" && <>
+                <span className="composer-runstatus__dot" />
+                <span className="composer-runstatus__text">{runActivity}</span>
+              </>}
               <Tooltip label={hasDraftContent ? t("composer.send") : t("composer.stop")}>
                 <button
                   className={`composer-runstatus__primary composer-runstatus__primary--${hasDraftContent ? "send" : "stop"}${cancelRequested && !hasDraftContent ? " composer-runstatus__primary--stopping" : ""}`}
