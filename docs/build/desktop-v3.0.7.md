@@ -1,5 +1,12 @@
 # O.R.C.A. Desktop 3.0.7 Release Runbook
 
+Published on GitHub at 2026-09-17T13:22:09Z, followed by the Mac site and signed
+stable manifest switch. Immutable release source/tag:
+`ee0c92f6cb9888b12f312937d4ac3a195cc981c5`.
+Mac directory: `20260917-orca307/orca`; prior `20260917-orca306/orca` retained.
+The earlier unsigned 3.0.6 local-fix attachment is superseded by this signed
+3.0.7 release. Historical assets and tags were not replaced.
+
 Use the native release-desktop workflow on the exact reviewed commit. All tests,
 three-platform builds, Windows installer acceptance, archive checks, and Minisign
 signatures must pass before publishing the generated draft.
