@@ -24,6 +24,12 @@ function check(value: boolean, label: string) {
 }
 
 console.log("\nresponsive layout safeguards");
+check(
+  css.includes(':root[data-ui-style="modern"] .transcript-shell:has(> .jump-bar) > .transcript') &&
+    css.includes("padding-inline: 48px;") &&
+    css.includes(':root[data-ui-style="modern"] .jump-item {') && css.includes("max-width: 20px;"),
+  "modern navigation has a reserved gutter and hover markers cannot grow into text",
+);
 check(!css.includes("padding: 5px 120px"), "composer has no fixed right-side reservation");
 check(!css.includes(".composer-card__actions {\n    right:"), "composer actions stay in grid flow");
 check(chrome.includes("function ClassicAppChrome") && chrome.includes("function ModernAppChrome"), "chrome uses explicit presentation branches");

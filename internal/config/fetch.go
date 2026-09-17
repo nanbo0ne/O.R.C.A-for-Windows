@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider/openai"
 )
 
@@ -49,7 +50,7 @@ func (e *ProviderEntry) FetchModelMetadata(ctx context.Context) ([]openai.ModelM
 	}
 	var lastErr error
 	for _, u := range candidates {
-		models, err := openai.FetchModelMetadata(ctx, u, key)
+		models, err := openai.FetchModelMetadataURL(ctx, u, key)
 		if err == nil {
 			return models, nil
 		}
@@ -66,11 +67,18 @@ func (e *ProviderEntry) FetchModelMetadata(ctx context.Context) ([]openai.ModelM
 // {base}/v1/models shape used by many aggregators.
 func BuildModelFetchURLs(baseURL, override string) ([]string, error) {
 	if trimmed := strings.TrimSpace(override); trimmed != "" {
-		return []string{trimmed}, nil
+		u, err := provider.ParseRequestURL(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("fetch models: models_url: %w", err)
+		}
+		return []string{u.String()}, nil
 	}
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
+	if strings.TrimSpace(baseURL) == "" {
 		return nil, fmt.Errorf("fetch models: base_url is required")
+	}
+	base, err := openai.NormalizeBaseURL(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetch models: base_url: %w", err)
 	}
 	var candidates []string
 	if endsWithVersionSegment(base) {

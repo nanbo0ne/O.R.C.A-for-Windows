@@ -69,27 +69,29 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
+	u, err := provider.ParseEndpointURL(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: provider %q: %w", name, err)
+	}
+	path := strings.TrimRight(u.EscapedPath(), "/")
+	if strings.HasSuffix(path, "/chat/completions") || strings.HasSuffix(path, "/responses") || strings.HasSuffix(path, "/api/v1/chat") {
+		return nil, fmt.Errorf("anthropic: provider %q selected Anthropic Messages (POST /v1/messages), but base_url points to another protocol; for an OpenAI-compatible endpoint choose kind=\"openai\" and its API base_url (typically /v1)", name)
+	}
+	// Accept a root, versioned base, or full Messages endpoint without changing
+	// a proxy prefix (including its original percent encoding).
+	if strings.HasSuffix(path, "/v1/messages") {
+		path = strings.TrimSuffix(path, "/v1/messages")
+	} else {
+		path = strings.TrimSuffix(path, "/v1")
+	}
+	u.Path, u.RawPath = "", ""
+	root := u.String() + path
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	thinking, _ := cfg.Extra["thinking"].(string)
 	effort, _ := cfg.Extra["effort"].(string)
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: network: %w", err)
-	}
-	// Anthropic's API surface is at {root}/v1/messages, so c.baseURL stores
-	// the *root* — without any trailing /v1. The setup wizard, however, lets
-	// users paste a full OpenAI-compatible URL (e.g.
-	// "https://proxy.example.com/v1") because that's what /models probes
-	// expect. Stripping the trailing /v1 here makes both forms land on the
-	// same endpoint without forcing users to remember Anthropic's quirky
-	// root-vs-versioned split. Without this, a user pasting
-	// "https://proxy.example.com/v1" would probe /v1/models successfully
-	// but get the chat client concatenating onto
-	// "https://proxy.example.com/v1/v1/messages" — a 404.
-	root := strings.TrimRight(baseURL, "/")
-	root = strings.TrimSuffix(root, "/v1")
-	if root == "" {
-		root = defaultBaseURL
 	}
 	return &client{
 		name:        name,
@@ -153,6 +155,9 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	}
 	resp, err := provider.SendWithRetry(ctx, c.http, c.name, c.keyEnv, newReq)
 	if err != nil {
+		if endpointErr := provider.ClassifyEndpointError(err, "anthropic", c.baseURL+"/v1/messages"); endpointErr != nil {
+			return nil, endpointErr
+		}
 		return nil, err
 	}
 

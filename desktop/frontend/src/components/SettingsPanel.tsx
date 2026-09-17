@@ -3216,7 +3216,7 @@ function ProviderEditor({
 }) {
   const t = useT();
   const [name, setName] = useState(initial?.name ?? "");
-  const [kind, setKind] = useState(initial?.kind ?? kinds[0] ?? "openai");
+  const [kind, setKind] = useState(initial?.kind || "openai");
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
   const [models, setModels] = useState((initial?.models ?? []).join(", "));
   const [modelsUrl] = useState(initial?.modelsUrl ?? "");
@@ -3283,7 +3283,7 @@ function ProviderEditor({
         name: name.trim() || t("settings.newProviderDraftName"),
         builtIn: initial?.builtIn ?? false,
         added: initial?.added ?? true,
-        kind: kind.trim() || kinds[0] || "openai",
+        kind: kind.trim() || "openai",
         baseUrl: baseUrl.trim(),
         modelsUrl,
         models: [],
@@ -3321,7 +3321,7 @@ function ProviderEditor({
       name: name.trim(),
       builtIn: initial?.builtIn ?? false,
       added: initial?.added ?? true,
-      kind: kind.trim() || kinds[0] || "openai",
+      kind: kind.trim() || "openai",
       baseUrl: baseUrl.trim(),
       models: ms,
       default: ms[0] ?? "",

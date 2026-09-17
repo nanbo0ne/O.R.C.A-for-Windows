@@ -702,6 +702,7 @@ func (a *App) rebuild() error {
 		carried = oldCtrl.History()
 	}
 	model := tab.model
+	effortOverride := cloneStringPtr(tab.effort)
 	if cfg, err := config.LoadForRoot(tab.WorkspaceRoot); err == nil {
 		if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
 			if fallback && strings.TrimSpace(model) != "" {
@@ -709,13 +710,16 @@ func (a *App) rebuild() error {
 			}
 			model = resolved
 		}
+		if entry, ok := cfg.ResolveModel(model); ok {
+			effortOverride = compatibleTabEffort(entry, effortOverride)
+		}
 	}
 	ctrl, err := a.buildController(a.bootContext(), boot.Options{
 		Model: model, RequireKey: false,
 		Sink:                    tab.sink,
 		WorkspaceRoot:           tab.WorkspaceRoot,
 		SessionDir:              tabSessionDir(tab),
-		EffortOverride:          cloneStringPtr(tab.effort),
+		EffortOverride:          effortOverride,
 		RuntimeProfile:          currentTabPromptMode(tab),
 		MemoryProfile:           conversationMemoryProfile(currentTabPromptMode(tab)),
 		AssistantMemoryStoreDir: assistantStoreDirForMode(currentTabPromptMode(tab)),
@@ -754,6 +758,7 @@ func (a *App) rebuild() error {
 	}
 	tab.Ctrl = ctrl
 	tab.model = model
+	tab.effort = cloneStringPtr(effortOverride)
 	tab.Label = ctrl.Label()
 	tab.StartupErr = ""
 	tab.Ready = true
@@ -975,6 +980,7 @@ func (a *App) SaveProvider(p ProviderView) error {
 				break
 			}
 		}
+		previousKind := e.Kind
 		e.Name = p.Name
 		e.Kind = p.Kind
 		e.BaseURL = p.BaseURL
@@ -997,6 +1003,14 @@ func (a *App) SaveProvider(p ProviderView) error {
 			if len(models) > 1 {
 				e.Models = models
 				e.Default = providerDefaultForModels(p.Default, models)
+			}
+		}
+		if previousKind != "" && previousKind != e.Kind {
+			e.Thinking = ""
+			if effort, err := config.NormalizeEffort(&e, config.EffortDisplay(&e)); err == nil {
+				e.Effort = effort
+			} else {
+				e.Effort = ""
 			}
 		}
 		if err := c.UpsertProvider(e); err != nil {

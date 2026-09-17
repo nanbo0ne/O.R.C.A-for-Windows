@@ -5,7 +5,7 @@ import community from '../data/community.json';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const repo = 'https://github.com/nanbo0ne/O.R.C.A-for-Windows';
 
-const desktopVer = '3.0.5';
+const desktopVer = '3.0.6';
 const R2 = `https://orca.aichat.diy/releases/desktop-v${desktopVer}`;
 
 const fmtN = (n) => Number(n).toLocaleString('en-US');
@@ -14,7 +14,7 @@ const half = Math.ceil(community.list.length / 2);
 const rowA = community.list.slice(0, half);
 const rowB = community.list.slice(half);
 
-const desc = "Open Reasoning & Computing Agent: a workspace for coding, everyday work, Vision attachments, and cloud providers. Managed local AI and Computer Use remain temporarily disabled on all platforms in 3.0.5.";
+const desc = "O.R.C.A. 3.0.6: a workspace for coding, everyday work, Vision attachments, and cloud providers, with navigation, tool-summary, and custom-provider corrections. Managed local AI and Computer Use remain temporarily disabled on all platforms.";
 const ld = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -68,7 +68,7 @@ const ld = {
         <span class="l-en">Choose cloud providers, then use O.R.C.A to code, research, analyze images you attach, and create work artifacts. External compatible local services remain available when configured.</span>
         <span class="l-zh">自由选择云端供应商，使用 O.R.C.A 编程、调研、分析你附上的图片和制作办公产物；已配置的外部兼容本地服务仍可使用。</span>
       </p>
-      <p class="reveal"><span class="l-en">3.0.5 is in release preparation. Assistant, Coding, ORCA Agent, files, artifacts, and custom providers remain available; official DeepSeek defaults move to V4.1 Flash with native vision. Managed local AI and Computer Use stay disabled on every platform. See the <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.5.md`}>release notes and pending acceptance</a>.</span><span class="l-zh">3.0.5 正在发布准备中。助手、编程、ORCA Agent、文件、产物与自定义供应商继续保留；官方 DeepSeek 默认值升级为原生视觉的 V4.1 Flash。托管本地 AI 与电脑操控在所有平台继续禁用。详见<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.5.md`}>发布说明与待验收项</a>。</span></p>
+      <p class="reveal"><span class="l-en">3.0.6 focuses on the Modern navigation gutter and compact rail, merged tool summaries that retain actual stage text, and consistent custom-provider protocols with normalized Agent endpoints and actionable mismatch errors. Assistant, Coding, ORCA Agent, files, and artifacts remain. No layout redesign; Classic is unchanged. Managed local AI and Computer Use stay disabled. See the <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.6.md`}>release notes</a>.</span><span class="l-zh">3.0.6 聚焦 Modern 导航留白与紧凑导航条、保留真实阶段文本的工具摘要合并，以及自定义供应商协议一致性、Agent 端点规范化与明确的不匹配错误。助手、编程、ORCA Agent、文件与产物继续保留。无布局重设计，Classic 不变；托管本地 AI 与电脑操控继续禁用。详见<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.6.md`}>发布说明</a>。</span></p>
       <div class="hero-cta reveal" style="--d:0.18s">
         <a class="btn btn-dark" data-os-dl data-goto="desktop" href="#start"><span class="l-en">Download for <span class="os-name">macOS</span></span><span class="l-zh">下载 <span class="os-name">macOS</span> 版</span></a>
         <span class="install"><span class="ps1">$</span>npm i -g orca-agent<button data-copy="npm i -g orca-agent">Copy</button></span>
@@ -240,8 +240,8 @@ const ld = {
     <p class="reveal" style="--d:0.08s"><span class="l-en">Open source under MIT. Bring a provider key or connect an external compatible local service; you choose where model requests are processed.</span><span class="l-zh">MIT 开源。使用自己的供应商密钥或连接外部兼容本地服务，由你决定模型请求在哪里处理。</span></p>
 
     <div class="dl reveal" style="--d:0.14s">
-      <p class="dl-note"><span class="l-en">Desktop 3.0.5 links below are publication targets, pending verified assets on the <a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>Release page</a>. The published baseline is <a href={`${repo}/releases/tag/desktop-v3.0.4`}>3.0.4</a>. Flash uses <code>deepseek/deepseek-flash</code>: native vision, 1M context, up to 384K output, tools, and JSON. Old Flash/Vision names are aliases; Pro remains text-only.</span><span class="l-zh">以下桌面版 3.0.5 链接为发布目标，须待<a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>Release 页</a>提供已校验资产后才可下载；已发布基线为 <a href={`${repo}/releases/tag/desktop-v3.0.4`}>3.0.4</a>。Flash 使用 <code>deepseek/deepseek-flash</code>，支持原生视觉、1M 上下文、最大 384K 输出、工具及 JSON；旧 Flash/Vision 名称为别名，Pro 保持文本模型。</span></p>
-      <p class="dl-note"><span class="l-en">Official defaults, roles, and saved session model choices receive a one-time Flash upgrade; custom providers and later Pro choices are preserved. Effort: low/high/max, auto = high. <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.5.md`}>Bilingual notes, RMB pricing, and acceptance status</a>.</span><span class="l-zh">已有官方默认值、角色与保存的会话模型选择一次性升级至 Flash；自定义供应商及迁移后重新选择的 Pro 保留。思考强度为 low/high/max，auto = high。详见<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.5.md`}>双语说明、人民币价格及验收状态</a>。</span></p>
+      <p class="dl-note"><span class="l-en">Desktop 3.0.6 packages, signatures, and checksums are listed on the <a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>Release page</a>. Flash uses <code>deepseek/deepseek-flash</code>: native vision, 1M context, up to 384K output, tools, and JSON. Old Flash/Vision names are aliases; Pro remains text-only.</span><span class="l-zh">桌面版 3.0.6 安装包、签名与校验表见 <a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>Release 页</a>。Flash 使用 <code>deepseek/deepseek-flash</code>，支持原生视觉、1M 上下文、最大 384K 输出、工具及 JSON；旧 Flash/Vision 名称为别名，Pro 保持文本模型。</span></p>
+      <p class="dl-note"><span class="l-en">3.0.6 does not repeat completed 3.0.5 Flash migration; custom providers and deliberate Pro choices are preserved. Effort remains low/high/max, auto = high. <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.6.md`}>Bilingual notes</a>, <a href={`${base}/docs/`}>model and RMB pricing reference</a>, and <a href={`${repo}/blob/main/docs/audits/desktop-v3.0.6-verification.md`}>verification</a>.</span><span class="l-zh">3.0.6 不重复 3.0.5 已完成的 Flash 迁移，自定义供应商及主动选择的 Pro 保留。思考强度仍为 low/high/max，auto = high。详见<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.6.md`}>双语说明</a>、<a href={`${base}/docs/`}>模型与人民币价格参考</a>及<a href={`${repo}/blob/main/docs/audits/desktop-v3.0.6-verification.md`}>验收记录</a>。</span></p>
       <div class="dl-tabs" role="tablist">
         <button class="dl-tab active" type="button" data-pane="npm" role="tab">npm</button>
         <button class="dl-tab" type="button" data-pane="brew" role="tab">Homebrew</button>
@@ -253,7 +253,7 @@ const ld = {
         <div class="chan">
           <div class="chan-row rec">
             <code>npm i -g orca-agent</code><span class="v">CLI</span>
-            <span class="s"><span class="l-en">CLI channel · separate from desktop 3.0.5 · one binary · actively developed</span><span class="l-zh">CLI 渠道 · 与桌面版 3.0.5 独立 · 单二进制 · 主力开发中</span></span>
+            <span class="s"><span class="l-en">CLI channel · separate from desktop 3.0.6 · one binary · actively developed</span><span class="l-zh">CLI 渠道 · 与桌面版 3.0.6 独立 · 单二进制 · 主力开发中</span></span>
             <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
           </div>
           <div class="chan-row">
@@ -262,12 +262,12 @@ const ld = {
             <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
           </div>
         </div>
-        <div class="dl-note"><span class="l-en">CLI is a separate release channel from desktop 3.0.5. Install the current CLI channel from npm, or use <span class="mono">@next</span> for the preview channel. See the <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm package</a>.</span><span class="l-zh">CLI 与桌面版 3.0.5 是独立发布渠道。请从 npm 安装当前 CLI，或使用 <span class="mono">@next</span> 获取预览渠道。详见 <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm 包</a>。</span></div>
+        <div class="dl-note"><span class="l-en">CLI is a separate release channel from desktop 3.0.6. Install the current CLI channel from npm, or use <span class="mono">@next</span> for the preview channel. See the <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm package</a>.</span><span class="l-zh">CLI 与桌面版 3.0.6 是独立发布渠道。请从 npm 安装当前 CLI，或使用 <span class="mono">@next</span> 获取预览渠道。详见 <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm 包</a>。</span></div>
       </div>
 
       <div class="dl-pane" data-pane="brew">
         <span class="install"><span class="ps1">$</span>brew install nanbo0ne/O.R.C.A-for-Windows/orca-agent<button data-copy="brew install nanbo0ne/O.R.C.A-for-Windows/orca-agent">Copy</button></span>
-        <div class="dl-note"><span class="l-en">CLI channel · macOS &amp; Linux · update with <span class="mono">brew upgrade</span>; CLI releases are separate from desktop 3.0.5.</span><span class="l-zh">CLI 渠道 · macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新；CLI 与桌面版 3.0.5 独立发布。</span></div>
+        <div class="dl-note"><span class="l-en">CLI channel · macOS &amp; Linux · update with <span class="mono">brew upgrade</span>; CLI releases are separate from desktop 3.0.6.</span><span class="l-zh">CLI 渠道 · macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新；CLI 与桌面版 3.0.6 独立发布。</span></div>
       </div>
 
       <div class="dl-pane" data-pane="desktop">

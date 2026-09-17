@@ -17,6 +17,18 @@ func explainError(err error) error {
 	if err == nil {
 		return nil
 	}
+	var endpointErr *provider.EndpointError
+	if errors.As(err, &endpointErr) {
+		if i18n.M == i18n.Chinese {
+			hint := "请核对服务商的 OpenAI-compatible base_url 和 Chat Completions 路径。"
+			if endpointErr.Protocol == "anthropic" {
+				hint = "当前选择的是 Anthropic Messages。若服务商仅提供 OpenAI 兼容接口，请在设置中选择 OpenAI-compatible (kind=\"openai\") 并填写对应的 base_url；若应使用 Anthropic，请核对 Messages 接口路径。"
+			}
+			return fmt.Errorf("服务商 %q 报告当前接口或协议不受支持 (HTTP %d, %s)：已选择 kind=%q，请求 POST %s。\n%s 不会自动切换协议或重发请求。\n服务端原因：%s",
+				endpointErr.Provider, endpointErr.Status, endpointErr.Code, endpointErr.Protocol, endpointErr.Path, hint, endpointErr.Reason)
+		}
+		return errors.New(endpointErr.Error())
+	}
 	// This wrapper also contains an APIError; handle it before the generic HTTP
 	// mapping so the recovery guidance is not replaced by the raw server body.
 	var historyErr *provider.ReasoningHistoryError

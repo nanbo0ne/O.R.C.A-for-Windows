@@ -221,16 +221,21 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`Preinstalled WebView2 is required`,
 		},
 		"official_baseline": {
-			`https://api.github.com/repos/nanbo0ne/O.R.C.A-for-Windows/releases/tags/desktop-v3.0.4`,
-			`https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.4/`,
-			`$release.tag_name -cne 'desktop-v3.0.4' -or $release.draft -or $release.prerelease`,
+			`https://api.github.com/repos/nanbo0ne/O.R.C.A-for-Windows/releases/tags/desktop-v3.0.5`,
+			`https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.5/`,
+			`$release.tag_name -cne 'desktop-v3.0.5' -or $release.draft -or $release.prerelease`,
 			`$assetName = 'O.R.C.A-for-Windows-windows-amd64-installer.exe'`,
 			`@($assetName, 'SHA256SUMS.txt')`,
 			`$assets.Count -ne 1`,
 			`$checksumRows.Count -ne 1`,
 			`[regex]::Escape($assetName)`,
 			`$oldHash -ine $checksumRows[0].Groups[1].Value -or $oldHash -cne $pinnedOldHash`,
-			`3bb58aab89011e36210521b28ac8620bb6a4a372759db5df4a94aa1d843519a2`,
+			`$pinnedOldSize = 88804245`,
+			`$name -ceq $assetName -and [long]$assets[0].size -ne $pinnedOldSize`,
+			`$oldSize = (Get-Item -LiteralPath $oldInstaller).Length`,
+			`$oldSize -ne $pinnedOldSize`,
+			`ab824268dcf6b01807022ef3c606db67f11f32c72871069eac86dbe75c50bca3`,
+			`tag = $release.tag_name; size = $oldSize; sha256 = $oldHash`,
 			`Invoke-WebRequest -Uri $direct -OutFile $destination -TimeoutSec 120`,
 		},
 		"bounded_silent_processes": {
@@ -245,7 +250,7 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`$process.ExitCode -ne 0`,
 			`Owned-Path 'upgrade target with spaces'`,
 			`Owned-Path 'fresh target with spaces'`,
-			`Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir" 'install-304'`,
+			`Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir" 'install-305'`,
 			`Invoke-BoundedProcess $newInstaller '/S' 'upgrade-current'`,
 			`Invoke-BoundedProcess $newInstaller "/S /D=$freshDir" 'install-fresh'`,
 			`Invoke-BoundedProcess $uninstaller "/S _?=$target" $Label`,
@@ -267,7 +272,7 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`models\synthetic-tiny.gguf`,
 			`$markerHashes[$safe] = Get-SHA256 $safe`,
 			`(Get-SHA256 $path) -cne $markerHashes[$path]`,
-			`Assert-Markers 'installed-304'`,
+			`Assert-Markers 'installed-305'`,
 			`Assert-Markers 'upgraded-current'`,
 			`Assert-Markers $Label`,
 			`Invoke-DefaultUninstall $freshDir 'uninstall-fresh'`,
@@ -287,7 +292,7 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`$key.GetValue('DisplayVersion')`,
 			`GetVersionInfo($installedApp).ProductVersion`,
 			`$location -ine $target`,
-			`Assert-Installation $upgradeDir '3.0.4' 'installed-304'`,
+			`Assert-Installation $upgradeDir '3.0.5' 'installed-305'`,
 			`Assert-Installation $upgradeDir $productVersion 'upgraded-current'`,
 			`Assert-CurrentPayload $freshDir 'fresh-directory'`,
 			`Assert-CurrentPayload $upgradeDir 'upgraded-current'`,
@@ -317,9 +322,10 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 	guard := strings.Index(script, "$env:GITHUB_ACTIONS -cne 'true'")
 	functions := strings.Index(script, "function Get-PlainPath")
 	firstWrite := strings.Index(script, "[void][IO.Directory]::CreateDirectory($ownedRoot)")
-	checksum := strings.Index(script, "throw 'Official 3.0.4 installer SHA256 mismatch.'")
+	size := strings.Index(script, "throw 'Official 3.0.5 installer size mismatch.'")
+	checksum := strings.Index(script, "throw 'Official 3.0.5 installer SHA256 mismatch.'")
 	install := strings.Index(script, `Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir"`)
-	if guard < 0 || functions <= guard || firstWrite <= functions || checksum < 0 || install <= checksum {
+	if guard < 0 || functions <= guard || firstWrite <= functions || size < 0 || checksum <= size || install <= checksum {
 		t.Fatal("runner guards must precede side effects; baseline verification must precede installation")
 	}
 	restore := strings.LastIndex(script, "} finally {")

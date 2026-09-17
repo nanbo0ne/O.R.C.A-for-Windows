@@ -5,8 +5,37 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 )
+
+func TestFetchModelsEndpointNormalizationAndValidation(t *testing.T) {
+	for _, path := range []string{"/proxy/v1", "/proxy/v1/chat/completions/", "/proxy/v1/responses/", "/proxy/v1/models/"} {
+		t.Run(path, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.Method != http.MethodGet || r.RequestURI != "/proxy/v1/models" {
+					t.Errorf("unexpected models endpoint: %s %s", r.Method, r.RequestURI)
+				}
+				json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "custom-alias"}}})
+			}))
+			defer srv.Close()
+			got, err := FetchModels(context.Background(), srv.URL+path, "synthetic-key")
+			if err != nil || !reflect.DeepEqual(got, []string{"custom-alias"}) || calls.Load() != 1 {
+				t.Fatalf("models=%v err=%v calls=%d", got, err, calls.Load())
+			}
+			for _, suffix := range []string{"?token=secret-value", "?", "#secret-value", "#"} {
+				_, err := FetchModels(context.Background(), srv.URL+path+suffix, "synthetic-key")
+				if err == nil || strings.Contains(err.Error(), "secret-value") || calls.Load() != 1 {
+					t.Fatalf("unsafe URL must fail before request without leaking secrets: err=%v calls=%d", err, calls.Load())
+				}
+			}
+		})
+	}
+}
 
 func TestFetchModels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

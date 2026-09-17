@@ -259,6 +259,17 @@ func lastUsageTelemetryEvent(events []usageTelemetryEvent) (usageTelemetryEvent,
 	return usageTelemetryEvent{}, false
 }
 
+func compatibleTabEffort(entry *config.ProviderEntry, value *string) *string {
+	if value == nil {
+		return nil
+	}
+	normalized, err := config.NormalizeEffort(entry, config.EffortDisplay(&config.ProviderEntry{Effort: *value}))
+	if err != nil {
+		return nil
+	}
+	return &normalized
+}
+
 func cloneStringPtr(v *string) *string {
 	if v == nil {
 		return nil
@@ -1680,6 +1691,9 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 	a.mu.Lock()
 	tab.model = model
 	tab.Label = model
+	if entry, ok := cfg.ResolveModel(model); ok {
+		tab.effort = compatibleTabEffort(entry, tab.effort)
+	}
 	a.saveTabsLocked()
 	a.mu.Unlock()
 

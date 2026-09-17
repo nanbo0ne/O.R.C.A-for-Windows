@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,13 +67,30 @@ func FetchModels(ctx context.Context, baseURL, apiKey string) ([]string, error) 
 // FetchModelMetadata retains optional modality hints exposed by compatible
 // gateways while keeping FetchModels backward compatible for existing callers.
 func FetchModelMetadata(ctx context.Context, baseURL, apiKey string) ([]ModelMetadata, error) {
-	cli := &http.Client{Timeout: 10 * time.Second}
-	url := strings.TrimRight(baseURL, "/")
-	if !strings.HasSuffix(url, "/models") {
-		url += "/models"
+	u, err := provider.ParseEndpointURL(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetch models: %w", err)
 	}
+	endpoint := strings.TrimRight(u.String(), "/")
+	if !strings.HasSuffix(strings.TrimRight(u.EscapedPath(), "/"), "/models") {
+		endpoint, err = NormalizeBaseURL(baseURL)
+		if err != nil {
+			return nil, fmt.Errorf("fetch models: %w", err)
+		}
+		endpoint += "/models"
+	}
+	return FetchModelMetadataURL(ctx, endpoint, apiKey)
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// FetchModelMetadataURL requests an explicit catalog URL without changing its
+// path or query. Base URL callers should use FetchModelMetadata instead.
+func FetchModelMetadataURL(ctx context.Context, endpoint, apiKey string) ([]ModelMetadata, error) {
+	u, err := provider.ParseRequestURL(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("fetch models: %w", err)
+	}
+	cli := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("fetch models: build request: %w", err)
 	}
@@ -81,6 +99,9 @@ func FetchModelMetadata(ctx context.Context, baseURL, apiKey string) ([]ModelMet
 
 	resp, err := cli.Do(req)
 	if err != nil {
+		if requestErr, ok := err.(*url.Error); ok {
+			err = requestErr.Err
+		}
 		return nil, fmt.Errorf("fetch models: request failed: %w", err)
 	}
 	defer resp.Body.Close()

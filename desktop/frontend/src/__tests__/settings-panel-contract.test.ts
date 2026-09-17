@@ -74,6 +74,7 @@ await app.SetVisionModel(initialSettings.visionModel ?? "");
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const settings = readFileSync(join(root, "components", "SettingsPanel.tsx"), "utf8");
+check(settings.includes('useState(initial?.kind || "openai")') && !settings.includes('kind.trim() || kinds[0]'), "new custom access saves the OpenAI protocol it displays, regardless of registry order");
 const onboarding = readFileSync(join(root, "components", "OnboardingOverlay.tsx"), "utf8");
 const en = readFileSync(join(root, "locales", "en.ts"), "utf8");
 const zh = readFileSync(join(root, "locales", "zh.ts"), "utf8");

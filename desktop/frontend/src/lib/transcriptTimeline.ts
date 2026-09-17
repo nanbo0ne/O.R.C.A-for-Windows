@@ -106,8 +106,11 @@ function buildTurn(items: readonly Item[], completed: boolean): TimelineSegment[
     if (item.kind === "assistant") {
       // Live text lives outside items until Message arrives. Mount its consumer
       // even when this placeholder has no committed text or reasoning yet.
-      if (item.streaming || item.text.trim() || item.reasoning) {
+      if (item.streaming || item.text.trim()) {
         out.push({ kind: "assistant", item });
+      } else if (item.reasoning) {
+        // Settled reasoning is process detail, not a visible reply boundary.
+        pushProcess(out, item, completed);
       }
       return;
     }
@@ -161,7 +164,8 @@ export function buildTimelineSegments(items: readonly Item[], running: boolean):
       if (item.kind === "mode_switch") out.push({ kind: "mode_switch", item });
       else if (item.kind === "steer") out.push({ kind: "steer", item });
       else if (item.kind === "assistant") {
-        if (item.streaming || item.reasoning || item.text.trim()) out.push({ kind: "assistant", item });
+        if (item.streaming || item.text.trim()) out.push({ kind: "assistant", item });
+        else if (item.reasoning) pushProcess(out, item, true);
       } else if (visibleProcessItem(item)) pushProcess(out, item, true);
     }
   });

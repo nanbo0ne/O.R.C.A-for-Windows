@@ -1,22 +1,22 @@
 [English](README.en.md) | **简体中文**
 
-# O.R.C.A. 3.0.5
+# O.R.C.A. 3.0.6
 
 **O.R.C.A.**（**Open Reasoning & Computing Agent**）是面向真实工作的开源 AI 工作区：把模型对话、助手、编程、研究、文件与图片、工程工具、记忆和自动化放在同一个可暂停、可检查、可恢复的应用里。
 
-> **3.0.5 发布准备：面向真实工作的 AI 工作区。** 助手、编程、ORCA Agent、图片与文件、产物、多供应商、记忆和自动化继续构成完整工作流；官方 DeepSeek 默认模型更新为原生视觉的 V4.1 Flash。托管本地 AI 与电脑操控在所有平台继续暂时禁用，相关实现、配置和模型文件保留。当前变更不代表已构建、验收或发布；见[双语发布说明](docs/releases/desktop-v3.0.5.md)及[构建与验收清单](docs/build/desktop-v3.0.5.md)。
+> **3.0.6：导航、工具摘要与自定义供应商修正。** 本版聚焦 Modern 回合导航留白与紧凑导航条、保留真实阶段文本的连续工具摘要合并、自定义供应商协议选择一致性，以及后端 Agent 端点规范化与明确的配置错误。助手、编程、ORCA Agent、图片与文件、产物、多供应商、记忆和自动化继续保留，官方 DeepSeek 默认模型仍为 V4.1 Flash。无布局重设计，Classic 保持不变；托管本地 AI 与电脑操控在所有平台继续禁用，相关实现、配置和模型文件保留。见[双语发布说明](docs/releases/desktop-v3.0.6.md)与[验收记录](docs/audits/desktop-v3.0.6-verification.md)。
 
 ## 下载
 
-3.0.5 的目标下载地址如下，仅在正式发布后可用；当前已发布版本见 [3.0.4 Release](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.4)。新版本不生成旧品牌兼容副本，安装升级兼容逻辑仍保留。
+下载文件、签名和 SHA-256 校验表见下方 3.0.6 Release。新版本不生成旧品牌兼容副本，安装升级兼容逻辑仍保留。
 
 | 平台 | 包 | 说明 |
 | --- | --- | --- |
-| Windows x64 | [安装器](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.5/O.R.C.A-for-Windows-windows-amd64-installer.exe) · [便携版](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.5/O.R.C.A-for-Windows-windows-amd64.zip) | 云端功能；托管本地 AI 与电脑操控暂时禁用 |
-| macOS 12+ Universal | [DMG](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.5/O.R.C.A-macos-universal.dmg) | Intel 与 Apple Silicon；托管本地 AI 与电脑操控暂时禁用 |
-| Linux x64 | [DEB](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.5/O.R.C.A-linux-amd64.deb) | Debian / Ubuntu；需要匹配的 WebKitGTK 运行库，托管本地 AI 与电脑操控暂时禁用 |
+| Windows x64 | [安装器](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.6/O.R.C.A-for-Windows-windows-amd64-installer.exe) · [便携版](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.6/O.R.C.A-for-Windows-windows-amd64.zip) | 云端功能；托管本地 AI 与电脑操控暂时禁用 |
+| macOS 12+ Universal | [DMG](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.6/O.R.C.A-macos-universal.dmg) | Intel 与 Apple Silicon；托管本地 AI 与电脑操控暂时禁用 |
+| Linux x64 | [DEB](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.6/O.R.C.A-linux-amd64.deb) | Debian / Ubuntu；需要匹配的 WebKitGTK 运行库，托管本地 AI 与电脑操控暂时禁用 |
 
-- [3.0.5 目标发布页、校验文件与正式说明（待发布）](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.5)
+- [3.0.6 发布页、校验文件与更新说明](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.6)
 - 下载时核对版本、平台与文件名。
 - 不要在文档提交 API key；正式包不内置任何供应商密钥。
 
@@ -34,12 +34,13 @@
 
 ### Provider、模型与角色
 
-- 首次启动只需输入并验证 DeepSeek Key，也可以跳过。新安装默认使用 `deepseek/deepseek-flash`（DeepSeek V4.1 Flash）；未单独设置的普通子代理继承主模型。新增供应商入口保留 DeepSeek 和自定义 OpenAI-compatible、Anthropic-compatible 接入；已有供应商、独立密钥和自定义角色保留。旧官方 DeepSeek 选择按下述一次性迁移规则升级。
+- 首次启动只需输入并验证 DeepSeek Key，也可以跳过。新安装默认使用 `deepseek/deepseek-flash`（DeepSeek V4.1 Flash）；未单独设置的普通子代理继承主模型。新增供应商入口保留 DeepSeek 和自定义 OpenAI-compatible、Anthropic-compatible 接入；已有供应商、独立密钥和自定义角色保留。旧官方 DeepSeek 选择沿用 3.0.5 引入的迁移规则，3.0.6 不重复已完成的迁移。
 - Provider ID、Base URL、凭据槽和完整的 `provider/model` 引用相互隔离；同名模型不会自动跨端点串换。
+- 3.0.6 的供应商修复范围：自定义入口显示的协议与保存值保持一致，修正显示 OpenAI-compatible 却保存按字母排序首位的 Anthropic 类型的问题；后端规范化 Agent 请求端点，协议与端点不匹配时明确提示检查协议类型和 Base URL，不把凭据切换给其他供应商。
 - 可以分别设置主对话、planner、subagent 和 Orca/自动化角色；Computer Use 控制角色配置保留，但本版本不运行。角色不是“模型能力保证”：上下文窗口、价格、工具调用和视觉能力仍按实际模型与检测结果判断。
 - **官方模型：** `deepseek/deepseek-flash` 是统一的规范引用，对应 DeepSeek V4.1 Flash，支持原生视觉、1M token 上下文、最大 384K token 输出、工具调用与 JSON Output。旧 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 仅作兼容别名，官方服务已将其路由到 V4.1 Flash，不再是独立模型。`deepseek/deepseek-v4-pro` 仍可选择，保持文本模型，不支持图片。
 - **视觉角色：** 优先使用明确设置的视觉模型，其次是已确认支持图片的当前模型，再采用官方 `deepseek/deepseek-flash` 默认候选。发送图片前仍检查目标供应商与权限，不静默跨供应商上传；显式关闭视觉会保持关闭。新 Flash 的视觉能力不意味着子代理自动获得图片或上传权限。
-- **一次性升级：** 已有官方 DeepSeek 默认值、模型角色和保存的会话模型选择升级到 V4.1 Flash，包括原先使用官方 Pro 的选择；升级后仍可手动选择 Pro，后续启动不再强制改回。自定义供应商、代理端点、独立凭据与非官方模型选择保留，不因模型同名而跨供应商迁移；历史消息和已存金额不重写。
+- **3.0.5 迁移兼容：** 从更早版本升级时，沿用已引入的官方 DeepSeek 默认值、模型角色和保存的会话选择一次性升级到 V4.1 Flash 的规则，包括旧官方 Pro 选择。3.0.6 不重复已完成的迁移，之后主动选择的 Pro 保留。自定义供应商、代理端点、独立凭据与非官方模型选择保留，不因模型同名而跨供应商迁移；历史消息和已存金额不重写。
 - **思考强度：** 官方 DeepSeek 支持 `low` / `high` / `max`，`auto` 采用 `high`。思考模式开关与强度独立；简略/详细只影响 reasoning 的显示，不改变 effort。没有可用凭据或能力检测失败时，应用应显示原因并要求重新配置，而不是伪造成功。
 - 价格、余额和上下文信息没有可靠来源时会隐藏或标为未知，不显示误导性的零值。供应商计费和数据保留规则由供应商决定。
 
@@ -87,13 +88,13 @@ DeepSeek 模型与价格已于 2026-09-17 按[官方价格页](https://api-docs.
 
 ### 本地 AI
 
-3.0.5 在所有平台暂时禁用 O.R.C.A. 管理的 `llama.cpp` 和模型下载，隐藏页面、向导路线及启动开关。后端同时拒绝安装、下载、恢复下载和自动启动，不是仅隐藏按钮。停止、取消和清理接口保留，已有模型与配置不自动删除。
+3.0.6 在所有平台继续暂时禁用 O.R.C.A. 管理的 `llama.cpp` 和模型下载，隐藏页面、向导路线及启动开关。后端同时拒绝安装、下载、恢复下载和自动启动，不是仅隐藏按钮。停止、取消和清理接口保留，已有模型与配置不自动删除。
 
 这不禁止手动配置外部 OpenAI-compatible 本地服务；应用不会接管 LM Studio。托管运行时的硬件检测、下载与加载实现保留，待后续独立验收后恢复。
 
 ### Computer Use：本版本暂时禁用
 
-3.0.5 继续在 **Windows、macOS 和 Linux 所有平台**暂时禁用电脑操控：不注册电脑操控工具，不截取屏幕，不执行原生鼠标、键盘或窗口控制。ORCA Agent、自动化、机器人和子任务都不能启动这项功能。
+3.0.6 继续在 **Windows、macOS 和 Linux 所有平台**暂时禁用电脑操控：不注册电脑操控工具，不截取屏幕，不执行原生鼠标、键盘或窗口控制。ORCA Agent、自动化、机器人和子任务都不能启动这项功能。
 
 代码和配置仍然保留，待后续版本完成验收后恢复。已有授权、Full access 或修改控制模型配置均不能在本版本中启用它。默认 Vision、用户主动提供的图片及普通文件附件仍可使用；可以让助手分析附件或整理文件，但不能让它代操作桌面。
 
@@ -109,6 +110,7 @@ DeepSeek 模型与价格已于 2026-09-17 按[官方价格页](https://api-docs.
 ### Modern 与 Classic
 
 - 运行中的工具组和阶段性回复按实际发生顺序显示，收到的文本片段及时呈现。`简略 / 详细` 名称保留：简略默认隐藏供应商 reasoning，详细显示它；两者都显示进度和工具，不改变模型思考强度。
+- 3.0.6 聚焦 Modern 导航留白与紧凑回合导航条，避免导航挤占正文；连续工具摘要合并时保留真实阶段文本及其顺序，不用通用状态文案替换，不吞掉中间回复。此补丁不重设计布局，也不改动 Classic 界面。
 - 完成后过程折叠成轻量边框标题，显示状态、耗时、本轮 token，以及可确认的 DeepSeek 官方费用。最终答案位于框外。统计按请求去重，包含关联子代理与风险复核；未知、未结算或缺少用量的费用隐藏，reasoning 不重复计入输出 token。
 - 回合定位短线贴近聊天区左缘。Todo 是 Composer 上方的独立小浮层，两侧透明且不拦截正文操作。固定主对话显示名改为 ORCA Agent，历史与会话 ID 不变。
 - **Modern** 是默认的轻量界面：紧凑菜单、时间线、单行 Composer、模型/effort 控件和响应式布局。
@@ -139,9 +141,9 @@ Windows 需要 WebView2；macOS 使用系统 WebKit；Linux 需要 GTK/WebKitGTK
 
 - 稳定通道首先检查 [`https://orca.aichat.diy/updates/stable/latest.json`](https://orca.aichat.diy/updates/stable/latest.json)，失败时回退 GitHub 的签名 manifest 与对应签名 payload。manifest、payload、版本和 SHA-256 必须一致；签名失败不得安装。
 - Windows 已安装版本只提供“明确下载 → 用户确认退出 → 运行安装器”的流程；不会在后台自动下载或自动安装。关闭前保存会话和草稿，失败时保留原安装。
-- 3.0.5 下载界面显示来源、实测速度与预计剩余时间；持续低速时提示切源。先取消，再选择另一来源并重试，可继续有效断点。备用文件必须匹配签名清单中的版本、大小与摘要，切源不会放宽校验。速度取决于当前网络和服务器，不保证 GitHub 更快。
+- 下载界面显示来源、实测速度与预计剩余时间；持续低速时提示切源。先取消，再选择另一来源并重试，可继续有效断点。备用文件必须匹配签名清单中的版本、大小与摘要，切源不会放宽校验。速度取决于当前网络和服务器，不保证 GitHub 更快。
 - macOS/Linux 显示可用版本和校验信息，打开对应下载页/包；不把跨平台自更新当成已完成能力。macOS 的主检查地址如上，GitHub 是回退来源。
-- 无可用应用内更新流程的旧版本用户需从已发布的 Release 页手动下载并安装一次；不要修改配置版本或手工替换凭据文件来“强制升级”。3.0.5 的 Windows 安装升级验收目标是 3.0.4 → 3.0.5，设置基线并不等于已通过实际安装测试。
+- 无可用应用内更新流程的旧版本用户需从已发布的 Release 页手动下载并安装一次；不要修改配置版本或手工替换凭据文件来“强制升级”。3.0.6 的 Windows 安装升级验收目标是 3.0.5 → 3.0.6，设置基线并不等于已通过实际安装测试。
 
 ## 配置与迁移
 
@@ -149,7 +151,7 @@ Windows 需要 WebView2；macOS 使用系统 WebKit；Linux 需要 GTK/WebKitGTK
 - 用户配置通常位于 `os.UserConfigDir()/orca/config.toml`；同目录保存 `credentials`、`sessions`、`archive`、`cache` 和记忆数据。Windows 的实际根目录由系统 `AppData` 解析，常见位置是 `%APPDATA%\\orca\\`。本地模型/运行时使用独立的本地数据目录，具体路径以设置页为准。
 - 配置按优先级合并：命令行/显式参数、项目 `orca.toml`、用户配置、内置默认值；项目 `.mcp.json` 也可提供 MCP。不同工作区分别解析配置、`.env`、MCP 和会话。
 - 迁移前关闭应用并备份 `orca` 与 V2 用户目录，以及项目中的配置、`.orca/`、附件和说明文件。迁移应保留会话、附件、Provider、凭据引用、记忆、Skill、MCP、机器人和 telemetry；旧目录保留为回滚材料。
-- 迁移不能恢复外部副作用，也不能把一个 Provider 的 key 推断给另一个 Provider。3.0.5 仅对已识别的官方 DeepSeek 角色、会话选择与默认值执行一次性升级；自定义 role/model 和升级后的主动选择保留。Computer Use 代码和配置保留，迁移不会重新启用它。失败时回到旧数据和兼容读取，不要删除源文件。
+- 迁移不能恢复外部副作用，也不能把一个 Provider 的 key 推断给另一个 Provider。3.0.6 不新增或重复 3.0.5 已完成的官方 DeepSeek 一次性迁移；自定义 role/model 和升级后的主动选择保留。Computer Use 代码和配置保留，迁移不会重新启用它。失败时回到旧数据和兼容读取，不要删除源文件。
 
 ## 从源码构建
 
@@ -174,15 +176,16 @@ wails build
 | 现象 | 先检查 |
 | --- | --- |
 | 没有模型/请求失败 | Provider 是否启用、完整 `provider/model` 是否存在、凭据是否在本地、代理是否可达；视觉失败再检查该模型的能力检测 |
+| 自定义供应商协议或端点不匹配 | 核对 OpenAI-compatible / Anthropic-compatible 的实际选择、保存值与 Base URL，按明确的配置错误修正；不要把同一个 key 转给其他供应商 |
 | 图片被拒绝 | 格式/大小/数量、视觉模式、当前角色和模型能力；文本 subagent 不会自动获得视觉能力 |
 | 产物能生成但预览失败 | 这是渲染器缺失或版面未验收，不要把结构校验当视觉通过；检查 Poppler/目标 Office 阅读器 |
 | 工具被阻止 | Ask/Auto/Full access、deny 规则、工作区路径、sandbox 和工具库开关；不要用关闭安全边界解决未知错误 |
-| 找不到本地 AI | 3.0.5 暂时禁用托管运行时及模型下载，旧配置不能重新开启；文件保留，外部自定义服务仍可使用 |
+| 找不到本地 AI | 3.0.6 继续暂时禁用托管运行时及模型下载，旧配置不能重新开启；文件保留，外部自定义服务仍可使用 |
 | 找不到 Computer Use 或请求被拒绝 | 本版本继续暂时禁用电脑操控，授权或模型设置无法开启；普通 Vision 识图和文件附件仍可用 |
 | 白屏或窗口异常 | WebView2/WebKitGTK/GTK 版本、GPU 驱动、Modern/Classic 选择；先重启并收集日志，再判断是否为原生问题 |
 | 更新器无响应 | 先访问主 manifest，再检查 GitHub 回退、签名/版本字段和系统代理；Windows 手动下载并退出安装，不要期待后台安装 |
 
-3.0.5 的待验收范围见[构建清单](docs/build/desktop-v3.0.5.md)。[3.0.4 验证报告](docs/audits/2026-09-08-v3.0.4-release-validation.md)与[历史测速记录](docs/audits/2026-09-08-download-diagnosis.md)只说明当时结果，不构成 3.0.5 验收。桌面开发、打包和平台细节见 [desktop/README.md](desktop/README.md)；办公产物边界见 [docs/ARTIFACT_RUNTIME.md](docs/ARTIFACT_RUNTIME.md)。
+3.0.6 的待验收范围见[构建清单](docs/build/desktop-v3.0.6.md)和[验收记录](docs/audits/desktop-v3.0.6-verification.md)。[3.0.5 验证报告](docs/audits/desktop-v3.0.5-verification.md)、[3.0.4 验证报告](docs/audits/2026-09-08-v3.0.4-release-validation.md)与[历史测速记录](docs/audits/2026-09-08-download-diagnosis.md)只说明当时结果，不构成 3.0.6 验收。桌面开发、打包和平台细节见 [desktop/README.md](desktop/README.md)；办公产物边界见 [docs/ARTIFACT_RUNTIME.md](docs/ARTIFACT_RUNTIME.md)。
 
 ## 许可
 

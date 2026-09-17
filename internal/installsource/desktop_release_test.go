@@ -24,6 +24,7 @@ func TestDesktopReleaseVersionInputs(t *testing.T) {
 		name, channel, tag, base, run, want string
 	}{
 		{"stable", "stable", "desktop-v3.0.2", "", "", "version=v3.0.2"},
+		{"current desktop patch", "stable", "desktop-v3.0.6", "", "", "version=v3.0.6"},
 		{"prerelease", "stable", "desktop-v3.0.2-rc.1", "", "", "prerelease=true"},
 		{"wrong namespace", "stable", "v3.0.2", "", "", ""},
 		{"missing patch", "stable", "desktop-v3.0", "", "", ""},

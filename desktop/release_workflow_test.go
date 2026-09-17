@@ -156,37 +156,42 @@ func TestReleaseWorkflowRepackagesSignedPortablePayload(t *testing.T) {
 	}
 }
 
-func TestInstallerAcceptanceUsesPublished304Baseline(t *testing.T) {
+func TestInstallerAcceptanceUsesPublished305Baseline(t *testing.T) {
 	body, err := os.ReadFile("../scripts/test-desktop-installer.ps1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	script := string(body)
 	for _, want := range []string{
-		"$ExpectedVersion = '3.0.5'",
+		"$ExpectedVersion = '3.0.6'",
 		"$assetName = 'O.R.C.A-for-Windows-windows-amd64-installer.exe'",
-		"[version]$productVersion -le [version]'3.0.4'",
-		"releases/tags/desktop-v3.0.4",
-		"Assert-Installation $upgradeDir '3.0.4' 'installed-304'",
+		"[version]$productVersion -le [version]'3.0.5'",
+		"releases/tags/desktop-v3.0.5",
+		"Assert-Installation $upgradeDir '3.0.5' 'installed-305'",
 		"'SHA256SUMS.txt'",
-		"3bb58aab89011e36210521b28ac8620bb6a4a372759db5df4a94aa1d843519a2",
+		"$pinnedOldSize = 88804245",
+		"ab824268dcf6b01807022ef3c606db67f11f32c72871069eac86dbe75c50bca3",
 		"$oldHash -ine $checksumRows[0].Groups[1].Value -or $oldHash -cne $pinnedOldHash",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("installer acceptance is missing published-baseline check %q", want)
 		}
 	}
-	if strings.Contains(script, "3.0.3") {
-		t.Fatal("installer acceptance must not retain the 3.0.3 upgrade baseline")
-	}
-	if strings.Contains(script, "7437055c8680e564311c3455f5d6d1ddea06e9a1b69ee2e56d3e52960b9cc75b") {
-		t.Fatal("installer acceptance must not retain the 3.0.3 baseline hash")
+	for _, stale := range []string{
+		"3.0.3", "3.0.4", "install-304", "installed-304",
+		"7437055c8680e564311c3455f5d6d1ddea06e9a1b69ee2e56d3e52960b9cc75b",
+		"3bb58aab89011e36210521b28ac8620bb6a4a372759db5df4a94aa1d843519a2",
+	} {
+		if strings.Contains(script, stale) {
+			t.Errorf("installer acceptance must not retain old baseline pin %q", stale)
+		}
 	}
 	workflow := readDesktopReleaseWorkflow(t)
 	for _, want := range []string{
-		"# Published upgrade baseline: desktop-v3.0.4.",
+		"# Published upgrade baseline: desktop-v3.0.5.",
 		"# Asset: O.R.C.A-for-Windows-windows-amd64-installer.exe",
-		"# SHA256: 3bb58aab89011e36210521b28ac8620bb6a4a372759db5df4a94aa1d843519a2",
+		"# Size: 88804245 bytes",
+		"# SHA256: ab824268dcf6b01807022ef3c606db67f11f32c72871069eac86dbe75c50bca3",
 		`"$seven_zip" t dist/O.R.C.A-for-Windows-windows-amd64-installer.exe`,
 	} {
 		if !strings.Contains(workflow, want) {
@@ -212,8 +217,8 @@ func TestReleaseDesktopVersionMetadataAgrees(t *testing.T) {
 		} `json:"info"`
 	}
 	readJSON("wails.json", &wails)
-	if wails.Info.ProductVersion != "3.0.5" {
-		t.Fatalf("Wails version = %q, want 3.0.5", wails.Info.ProductVersion)
+	if wails.Info.ProductVersion != "3.0.6" {
+		t.Fatalf("Wails version = %q, want 3.0.6", wails.Info.ProductVersion)
 	}
 	var windows struct {
 		Fixed map[string]string            `json:"fixed"`
@@ -233,6 +238,57 @@ func TestReleaseDesktopVersionMetadataAgrees(t *testing.T) {
 	notes := "../docs/releases/desktop-v" + wails.Info.ProductVersion + ".md"
 	if body, err := os.ReadFile(notes); err != nil || len(body) == 0 {
 		t.Fatalf("release notes required for version %s: %v", wails.Info.ProductVersion, err)
+	}
+}
+
+func TestReleaseDesktopDocumentationMatchesVersion(t *testing.T) {
+	body, err := os.ReadFile("wails.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wails struct {
+		Info struct {
+			ProductVersion string `json:"productVersion"`
+		} `json:"info"`
+	}
+	if err := json.Unmarshal(body, &wails); err != nil {
+		t.Fatal(err)
+	}
+	version := wails.Info.ProductVersion
+	notes := "docs/releases/desktop-v" + version + ".md"
+	audit := "docs/audits/desktop-v" + version + "-verification.md"
+	build := "docs/build/desktop-v" + version + ".md"
+	for path, required := range map[string][]string{
+		"../README.md":                  {"# O.R.C.A. " + version, notes, audit, build},
+		"../README.en.md":               {"# O.R.C.A. " + version, notes, audit, build},
+		"../CHANGELOG.md":               {"## Desktop " + version, notes, audit},
+		"../site/src/pages/index.astro": {"const desktopVer = '" + version + "';", notes, audit},
+		"../site/src/pages/docs.astro":  {"const goVer = '" + version + "';", notes, audit, build},
+		"../" + notes:                   {"# O.R.C.A. Desktop " + version, "## English", "## \u7b80\u4f53\u4e2d\u6587"},
+		"../" + audit:                   {"# O.R.C.A. Desktop " + version + " Verification"},
+		"../" + build:                   {"# O.R.C.A. Desktop " + version + " Release Runbook"},
+	} {
+		t.Run(path, func(t *testing.T) {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(body)
+			for _, want := range required {
+				if !strings.Contains(text, want) {
+					t.Errorf("current desktop documentation is missing %q", want)
+				}
+			}
+			for _, stale := range []string{
+				"3.0.5 release preparation", "3.0.5 \u53d1\u5e03\u51c6\u5907",
+				"3.0.5 is in release preparation", "3.0.5 \u6b63\u5728\u53d1\u5e03\u51c6\u5907\u4e2d",
+				"3.0.5 is not yet published", "3.0.5 \u5c1a\u672a\u53d1\u5e03",
+			} {
+				if strings.Contains(text, stale) {
+					t.Errorf("current documentation retains stale publication wording %q", stale)
+				}
+			}
+		})
 	}
 }
 

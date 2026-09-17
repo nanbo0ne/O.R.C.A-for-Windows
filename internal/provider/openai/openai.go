@@ -50,6 +50,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if cfg.Model == "" {
 		return nil, fmt.Errorf("openai: model is required for provider %q", cfg.Name)
 	}
+	baseURL, err := NormalizeBaseURL(cfg.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("openai: provider %q: %w", cfg.Name, err)
+	}
 	name := cfg.Name
 	if name == "" {
 		name = "openai"
@@ -62,8 +66,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
-	deepseek := protocol == "deepseek" || (protocol == "" && IsDeepSeek(cfg.BaseURL))
-	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
+	deepseek := protocol == "deepseek" || (protocol == "" && IsDeepSeek(baseURL))
+	minimax := protocol == "" && IsMiniMax(baseURL)
 	switch {
 	case protocol == "none":
 		effort = ""
@@ -106,7 +110,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		return nil, fmt.Errorf("openai: network: %w", err)
 	}
 	model := cfg.Model
-	if IsDeepSeek(cfg.BaseURL) {
+	if IsDeepSeek(baseURL) {
 		switch strings.ToLower(strings.TrimSpace(model)) {
 		case "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp":
 			model = "deepseek-flash"
@@ -116,7 +120,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		name:        name,
 		apiKey:      cfg.APIKey,
 		keyEnv:      keyEnv,
-		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
+		baseURL:     baseURL,
 		model:       model,
 		deepseek:    deepseek,
 		minimax:     minimax,
@@ -203,6 +207,9 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 }
 
 func (c *client) requestError(err error) error {
+	if endpointErr := provider.ClassifyEndpointError(err, "openai", c.baseURL+"/chat/completions"); endpointErr != nil {
+		return endpointErr
+	}
 	var apiErr *provider.APIError
 	if c.deepseek && errors.As(err, &apiErr) &&
 		(apiErr.Status == http.StatusBadRequest || apiErr.Status == http.StatusUnprocessableEntity) &&

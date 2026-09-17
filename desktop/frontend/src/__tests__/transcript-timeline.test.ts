@@ -37,9 +37,113 @@ const adjacent: Item[] = [
 ];
 
 equal(
-  "reasoning and progress separate consecutive tool groups",
+  "settled reasoning joins activity while visible progress separates tool groups",
   timelineKinds(buildTimelineSegments(adjacent, true)),
-  ["user", "assistant", "process:tool:read,notice", "assistant", "process:tool:bash"],
+  ["user", "process:assistant,tool:read,notice", "assistant", "process:tool:bash"],
+);
+
+const consecutive: Item[] = [
+  { kind: "user", id: "cu", text: "check and run" },
+  { kind: "tool", id: "ct1", name: "read", args: "{}", readOnly: true, status: "done" },
+  { kind: "assistant", id: "cr1", text: "", reasoning: "inspect the result", streaming: false },
+  { kind: "phase", id: "cp1", text: "Checking" },
+  { kind: "tool", id: "ct2", name: "task", args: "{}", readOnly: false, status: "done" },
+  { kind: "tool", id: "child1", parentId: "ct2", name: "read", args: "{}", readOnly: true, status: "done" },
+  { kind: "tool", id: "child2", parentId: "ct2", name: "bash", args: "{}", readOnly: false, status: "done" },
+  { kind: "tool", id: "todo", name: "todo_write", args: "{}", readOnly: false, status: "done" },
+  { kind: "tool", id: "plan", name: "exit_plan_mode", args: "{}", readOnly: false, status: "done" },
+  { kind: "assistant", id: "empty", text: " \n", reasoning: "", streaming: false },
+  { kind: "notice", id: "cn", level: "info", text: "Check finished" },
+  { kind: "assistant", id: "cr2", text: " \n", reasoning: "verify once more", streaming: false },
+  { kind: "phase", id: "cp2", text: "Checking" },
+  { kind: "compaction", id: "cc", pending: false, trigger: "auto", messages: 10, summary: "context summary", archive: "" },
+  { kind: "tool", id: "ct3", name: "bash", args: "{}", readOnly: false, status: "running" },
+];
+const consecutiveKinds = ["user", "process:tool:read,assistant,phase,tool:task,notice,assistant,phase,compaction,tool:bash"];
+const consecutiveSegments = buildTimelineSegments(consecutive, true);
+equal("hidden reasoning and repeated phases do not fragment consecutive tool activity", timelineKinds(consecutiveSegments), consecutiveKinds);
+const consecutiveProcess = consecutiveSegments.find((segment) => segment.kind === "process");
+equal(
+  "process details retain chronological IDs including repeated phases",
+  consecutiveProcess?.kind === "process" ? consecutiveProcess.items.map((item) => item.id) : [],
+  ["ct1", "cr1", "cp1", "ct2", "cn", "cr2", "cp2", "cc", "ct3"],
+);
+equal(
+  "tool totals exclude nested subcalls and hidden workflow tools",
+  consecutiveProcess?.kind === "process" ? consecutiveProcess.items.filter((item) => item.kind === "tool").length : 0,
+  3,
+);
+const firstActivity = buildTimelineSegments(consecutive.slice(0, 3), true).find((segment) => segment.kind === "process");
+equal("appending reasoning, phases, and tools preserves the process expand-state key", consecutiveProcess?.id, firstActivity?.id);
+equal("timeline cache returns the same segments for unchanged items", buildTimelineSegments(consecutive, true) === consecutiveSegments, true);
+equal("grouping does not mutate an earlier cached process", firstActivity?.items.map((item) => item.id), ["ct1", "cr1"]);
+
+const stageReply: Item = { kind: "assistant", id: "stage1", text: "The check passed.", reasoning: "ready for the next phase", streaming: false };
+const repeatedStages: Item[] = [
+  ...consecutive,
+  stageReply,
+  { kind: "tool", id: "ct4", name: "read", args: "{}", readOnly: true, status: "done" },
+  { ...stageReply, id: "stage2" },
+  { kind: "tool", id: "ct5", name: "bash", args: "{}", readOnly: false, status: "done" },
+];
+equal(
+  "each real stage reply remains a hard boundary even when its text repeats",
+  timelineKinds(buildTimelineSegments(repeatedStages, true)),
+  [...consecutiveKinds, "assistant", "process:tool:read", "assistant", "process:tool:bash"],
+);
+equal(
+  "activity without a user item also merges only across settled reasoning",
+  timelineKinds(buildTimelineSegments(repeatedStages.slice(1), false)),
+  [...consecutiveKinds.slice(1), "assistant", "process:tool:read", "assistant", "process:tool:bash"],
+);
+equal(
+  "a new user turn starts a separate process group",
+  timelineKinds(buildTimelineSegments([...consecutive, { kind: "user", id: "cu2", text: "next" }, ...consecutive.slice(1, 3)], true)),
+  [...consecutiveKinds, "user", "process:tool:read,assistant"],
+);
+
+for (const outcome of ["failed", "cancelled", "interrupted"] as const) {
+  const terminal: Item[] = [
+    ...consecutive.map((item): Item => item.kind === "tool" && item.status === "running"
+      ? { ...item, status: outcome === "failed" ? "error" : "stopped", error: outcome === "failed" ? "verification failed" : undefined }
+      : item),
+    { kind: "turn_stats", id: `cs-${outcome}`, turnId: "ct", success: false, outcome },
+  ];
+  const terminalSegments = buildTimelineSegments(terminal, false);
+  equal(`${outcome} activity stays grouped without successful-turn folding`, timelineKinds(terminalSegments), ["user", "stats", ...consecutiveKinds.slice(1)]);
+  const terminalProcess = terminalSegments.find((segment) => segment.kind === "process");
+  equal(`${outcome} preserves the running group's expand-state key`, terminalProcess?.id, consecutiveProcess?.id);
+  equal(
+    `${outcome} retains the terminal tool status`,
+    terminalProcess?.items.filter((item) => item.kind === "tool").map((item) => item.status),
+    ["done", "done", outcome === "failed" ? "error" : "stopped"],
+  );
+}
+
+const placeholder: Item = { kind: "assistant", id: "stream", text: "", reasoning: "", streaming: true };
+for (const reasoning of ["", "uncommitted reasoning"]) {
+  equal(
+    "a live placeholder stays outside collapsible activity even without committed text",
+    timelineKinds(buildTimelineSegments([...consecutive, { ...placeholder, reasoning }, repeatedStages[repeatedStages.length - 1]], true)),
+    [...consecutiveKinds, "assistant", "process:tool:bash"],
+  );
+}
+let liveStage = { ...initialState, items: consecutive, running: true, turnActive: true };
+liveStage = reducer(liveStage, { type: "event", e: { kind: "reasoning", messageId: "stream", text: "consider the next step" } });
+const placeholderItems = liveStage.items;
+const mountedSegments = buildTimelineSegments(placeholderItems, true);
+equal("reasoning-only live events mount an assistant consumer before any text arrives", timelineKinds(mountedSegments), [...consecutiveKinds, "assistant"]);
+liveStage = reducer(liveStage, { type: "event", e: { kind: "text", messageId: "stream", text: "Visible stage" } });
+equal("text deltas leave placeholder items unchanged", liveStage.items === placeholderItems, true);
+equal("text deltas update live text independently of the cached timeline", liveStage.live?.text, "Visible stage");
+equal("the live text consumer survives timeline cache hits", buildTimelineSegments(liveStage.items, true) === mountedSegments, true);
+liveStage = reducer(liveStage, { type: "event", e: { kind: "message", messageId: "stream", text: "Visible stage" } });
+equal("committing live text preserves its chronological reply boundary", timelineKinds(buildTimelineSegments(liveStage.items, true)), [...consecutiveKinds, "assistant"]);
+const settledReasoning = [...consecutive, { ...placeholder, streaming: false, reasoning: "settled without text" }];
+equal(
+  "a reasoning-only placeholder joins activity when it settles",
+  timelineKinds(buildTimelineSegments(settledReasoning, true)),
+  ["user", `${consecutiveKinds[1]},assistant`],
 );
 
 const withStats: Item[] = [
@@ -52,6 +156,16 @@ equal(
   timelineKinds(buildTimelineSegments(withStats, false)),
   ["user", "completed:assistant,tool:read,assistant,tool:bash"],
 );
+
+const foldedActivity = buildTimelineSegments([
+  ...repeatedStages,
+  { kind: "assistant", id: "cf", turnId: "ct", text: "All done.", reasoning: "final check", streaming: false, final: true },
+  { kind: "turn_stats", id: "cs", turnId: "ct", success: true, outcome: "success" },
+], false);
+const folded = foldedActivity.find((segment) => segment.kind === "completed");
+equal("successful completion still folds grouped activity into one completed turn", foldedActivity.map((segment) => segment.kind), ["user", "completed"]);
+equal("completed details retain all intermediate items in order", folded?.hidden.map((item) => item.id), [...repeatedStages.slice(1).map((item) => item.id), "cf"]);
+equal("the completed final answer is separate from its reasoning", folded?.final, { kind: "assistant", id: "cf", turnId: "ct", text: "All done.", reasoning: "", streaming: false, final: true });
 
 const recoveredStats: Item[] = [
   { kind: "user", id: "ru1", text: "fix it" },

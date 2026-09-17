@@ -10,6 +10,39 @@ import (
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
 )
 
+func TestExplainEndpointErrorBeforeWrappedAPIError(t *testing.T) {
+	previous := i18n.M
+	t.Cleanup(func() { i18n.M = previous })
+	for _, language := range []string{"en", "zh"} {
+		for _, protocol := range []string{"openai", "anthropic"} {
+			t.Run(language+"/"+protocol, func(t *testing.T) {
+				i18n.DetectLanguage(language)
+				path := "/proxy/v1/chat/completions"
+				if protocol == "anthropic" {
+					path = "/proxy/v1/messages"
+				}
+				cause := &provider.APIError{Provider: "custom", Status: 400, Body: `{"error":{"type":"unsupported_feature","message":"此推理接口尚未支持"}}`}
+				endpointErr := provider.ClassifyEndpointError(cause, protocol, "https://relay.example"+path)
+				if endpointErr == nil {
+					t.Fatal("expected endpoint classification")
+				}
+				got := explainError(fmt.Errorf("request: %w", endpointErr)).Error()
+				for _, text := range []string{"custom", "HTTP 400", "unsupported_feature", protocol, path, "OpenAI-compatible", "base_url", "此推理接口尚未支持"} {
+					if !strings.Contains(got, text) {
+						t.Errorf("missing %q: %s", text, got)
+					}
+				}
+				if strings.Contains(got, i18n.M.ProviderErrBadRequest) || strings.Contains(got, "程序缺陷") || strings.Contains(got, "bug") {
+					t.Fatalf("route diagnosis replaced by generic bug message: %s", got)
+				}
+				if protocol == "anthropic" && (!strings.Contains(got, "Anthropic") || !strings.Contains(got, `kind="openai"`)) {
+					t.Fatalf("missing protocol selection guidance: %s", got)
+				}
+			})
+		}
+	}
+}
+
 func TestExplainReasoningHistoryErrorBeforeWrappedAPIError(t *testing.T) {
 	previous := i18n.M
 	t.Cleanup(func() { i18n.M = previous })

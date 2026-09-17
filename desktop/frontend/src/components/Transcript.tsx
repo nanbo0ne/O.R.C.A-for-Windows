@@ -165,20 +165,20 @@ function TimelineProcessGroup({
   activity?: ProcessActivityVisual;
 }) {
   const t = useT();
-  const live = useContext(LiveStreamContext);
   const visible = items.filter(isProcessItem);
   if (visible.length === 0) return null;
 
   let label = t("process.compact.thinking");
   const runningTool = [...visible].reverse().find((item): item is ToolItem => item.kind === "tool" && item.status === "running");
   const toolCount = visible.filter((item) => item.kind === "tool").length;
-  if (!completed && runningTool) label = runningTool.readOnly ? t("process.compact.reading") : t("process.compact.tool");
-  else if (!completed && visible.some((item) => item.kind === "compaction" && item.pending)) label = t("process.compact.compacting");
-  else if (!completed && live?.text?.trim()) label = t("process.compact.answering");
-  else if (toolCount === 1) label = t("process.timeline.oneTool");
+  if (toolCount === 1) label = t("process.timeline.oneTool");
   else if (toolCount > 1) label = t("process.timeline.tools", { n: toolCount });
+  else if (!completed && visible.some((item) => item.kind === "compaction" && item.pending)) label = t("process.compact.compacting");
   else if (visible.some((item) => item.kind === "compaction")) label = t("process.timeline.compaction");
   const running = visible.some(isProcessItemRunning);
+  const runningLabel = runningTool
+    ? t(runningTool.readOnly ? "process.compact.reading" : "process.compact.tool")
+    : t("process.compact.compacting");
 
   const toggle = () => onOpenChange(!open);
   return (
@@ -203,7 +203,7 @@ function TimelineProcessGroup({
           {toolCount > 0 ? <ProcessToolIcon size={13} /> : <ProcessBrainIcon size={13} />}
         </span>
         <span className="timeline-process-group__label">{label}</span>
-        {running && <ProcessStatusIcon state="running" label={label} />}
+        {running && <ProcessStatusIcon state="running" label={runningLabel} />}
         <ChevronRight className="timeline-process-group__chevron" size={13} aria-hidden="true" />
       </button>
       {open && (
@@ -602,7 +602,9 @@ function TimelineItems({
   activityIndicatorEnabled?: boolean;
   paused?: boolean;
 }) {
-  const segments = useMemo(() => buildTimelineSegments(items, running), [items, running]);
+  const segments = useMemo(() => buildTimelineSegments(items, running).filter((segment) =>
+    processDisplayMode === "detailed" || segment.kind !== "process" || segment.items.some((item) => item.kind !== "assistant"),
+  ), [items, running, processDisplayMode]);
   const [processOpenOverrides, setProcessOpenOverrides] = useState<Map<string, boolean>>(() => new Map());
   const activityPhase = activityIndicatorPhase(items, activityIndicatorEnabled, running, paused);
   const activity = useActivityPhaseTransition(activityPhase);

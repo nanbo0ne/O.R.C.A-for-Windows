@@ -4,6 +4,24 @@ All notable changes to the Go line (O.R.C.A 1.0+) are recorded here. The legacy
 `0.x` TypeScript history lives on the [`v1`](https://github.com/nanbo0ne/O.R.C.A-for-Windows/tree/v1)
 branch.
 
+## Desktop 3.0.6 / 桌面版 3.0.6 (Unreleased / 未发布)
+
+### 简体中文
+
+- 修正 Modern 回合导航留白与紧凑导航条，不重设计布局，Classic 保持不变。
+- 合并连续工具摘要，保留真实阶段文本及顺序，不替换为通用状态或吞掉中间回复。
+- 修正自定义供应商显示 OpenAI-compatible 却保存字母排序首位 Anthropic 类型的问题；后端规范化 Agent 端点，对协议不匹配给出明确的配置修正提示。
+- Windows 升级验收基线更新为已发布 3.0.5；3.0.6 验收待补充，不重复 3.0.5 已完成的官方模型迁移。托管本地 AI 与 Computer Use 继续禁用。
+
+### English
+
+- Correct the Modern navigation gutter and compact turn rail, without a layout redesign or changes to Classic.
+- Merge consecutive tool summaries while retaining actual stage text and order, without generic replacements or lost intermediate replies.
+- Correct custom-provider selection that displayed OpenAI-compatible but saved the alphabetically first Anthropic registration; normalize backend Agent endpoints and provide actionable protocol-mismatch errors.
+- Advance Windows upgrade acceptance to the published 3.0.5 baseline. 3.0.6 acceptance remains pending; completed 3.0.5 official-model migration is not repeated. Managed local AI and Computer Use remain disabled.
+
+[Release notes / 发布说明](docs/releases/desktop-v3.0.6.md) · [Pending verification / 待补充验收](docs/audits/desktop-v3.0.6-verification.md).
+
 ## [1.0.0] — 2026-06-03
 
 First stable release — a **ground-up rewrite in Go**. Not an upgrade of the `0.x`

@@ -9983,6 +9983,27 @@ a[href] {
   max-width: none;
 }
 
+/* Navigation owns the outer gutter, including its hover hit area. */
+:root[data-ui-style="modern"] .transcript-shell:has(> .jump-bar) > .transcript {
+  padding-inline: 48px;
+}
+
+:root[data-ui-style="modern"] .jump-bar {
+  width: 32px;
+  padding-inline: 6px;
+}
+
+:root[data-ui-style="modern"] .jump-item {
+  width: 20px;
+  justify-content: flex-start;
+}
+
+:root[data-ui-style="modern"] .jump-dot {
+  max-width: 20px;
+  height: 2px;
+  background: var(--fg-faint);
+}
+
 :root[data-ui-style="modern"] .settings-modal,
 :root[data-ui-style="modern"] .management-modal,
 :root[data-ui-style="modern"] .workspace-panel,

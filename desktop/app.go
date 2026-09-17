@@ -4443,15 +4443,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		return fmt.Errorf("model %q is not available because provider %q is not added", name, entry.Name)
 	}
 	name = entry.Name + "/" + entry.Model
-	effortOverride := cloneStringPtr(tab.effort)
-	if effortOverride != nil {
-		normalized, err := config.NormalizeEffort(entry, config.EffortDisplay(&config.ProviderEntry{Effort: *effortOverride}))
-		if err != nil {
-			effortOverride = nil
-		} else {
-			effortOverride = &normalized
-		}
-	}
+	effortOverride := compatibleTabEffort(entry, tab.effort)
 
 	var carried []provider.Message
 	prevPath := ""
@@ -5125,8 +5117,8 @@ func (a *App) currentProviderEntryForTab(tabID string) (*config.ProviderEntry, e
 	if !ok {
 		return nil, fmt.Errorf("unknown model %q", resolved)
 	}
-	if effortOverride != nil {
-		entry.Effort = *effortOverride
+	if normalized := compatibleTabEffort(entry, effortOverride); normalized != nil {
+		entry.Effort = *normalized
 	}
 	return entry, nil
 }
