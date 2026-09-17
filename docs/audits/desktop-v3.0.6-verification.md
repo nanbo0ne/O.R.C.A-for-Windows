@@ -81,12 +81,31 @@ Evidence: `.tmp/release-v306/{root-tests,desktop-tests-final,frontend-tests,fron
 and `.tmp/release-v306/ui/`. Browser tests use DPR 1, not native system DPI.
 The existing main-bundle size warning remains: 991.99 kB, 284.26 kB gzip.
 
-## Release Gates
+## Release Verification
 
-Three-platform native builds/tests, Linux race tests, hosted Windows 3.0.5 upgrade
-and uninstall/data-retention acceptance, package signatures/digests, and public
-update/download checks must pass before public activation. Final workflow and
-delivery results are recorded in the [release runbook](../build/desktop-v3.0.6.md).
+Release source: `058c9840899fe8abc4357e3759dabb35924ae893`.
+[Workflow 35183322814](https://github.com/nanbo0ne/O.R.C.A-for-Windows/actions/runs/35183322814)
+passed full core/frontend checks, Linux race tests, all three native builds/tests,
+and hosted Windows 3.0.5 upgrade/uninstall/data-retention acceptance. Synthetic
+configuration, sessions and model markers were preserved; the user's installation
+was not modified.
+
+All 17 release assets matched GitHub size/digest metadata, all 16 checksum records
+and eight payload/manifest signatures passed, and all seven package archives
+passed integrity checks. The CI installer is 88,807,663 bytes, NSIS CRC `f01d7746`,
+product version `3.0.6.0`. Its executable matches the portable package byte-for-byte.
+
+GitHub publication and Mac atomic activation completed on 2026-09-17. The public
+page matches the committed-source build. The application's actual updater detects
+3.0.6 from 3.0.5 and verifies a complete Mac-source installer download; transfer
+and verification took 83.136 seconds. The isolated probe did not launch an
+installer or restart the user's app. Final download details are recorded in the
+[release runbook](../build/desktop-v3.0.6.md).
+
+Public verification also downloaded the Windows portable ZIP, macOS universal
+DMG, and Linux DEB in full. Every payload and detached signature matched the
+verified release files; the public manifest/signature matched as well. Missing
+update and package paths returned HTTP 404 rather than the website home page.
 
 Windows remains without Authenticode signing and macOS remains unnotarized.
 Minisign verifies update integrity, not operating-system publisher trust.
