@@ -1,6 +1,6 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([string]$ExpectedVersion = '3.0.6')
+param([string]$ExpectedVersion = '3.0.7')
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -389,7 +389,24 @@ $ErrorActionPreference = 'Stop'
     Add-Marker (Join-Path $upgradeDir '.deepseek-orca\config.json') '{"synthetic":true}'
 
     # Omit /D for the upgrade to test the persisted InstallLocation fallback.
-    $null = Invoke-BoundedProcess $newInstaller '/S' 'upgrade-current'
+    # Keep a real 64-bit windowless process locking the installed executable.
+    # This fixture never loads user configuration or creates application tasks.
+    $fixtureSource = Owned-Path 'background.go'
+    [IO.File]::WriteAllText($fixtureSource, 'package main; import "time"; func main(){ for { time.Sleep(time.Hour) } }')
+    & go build -ldflags=-H=windowsgui -o (Join-Path $upgradeDir 'Orca.exe') $fixtureSource
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot build background upgrade fixture.' }
+    $backgroundInfo = [Diagnostics.ProcessStartInfo]::new()
+    $backgroundInfo.FileName = Assert-ChildPath (Join-Path $upgradeDir 'Orca.exe') $ownedRoot
+    $backgroundInfo.UseShellExecute = $false
+    $backgroundInfo.CreateNoWindow = $true
+    $background = [Diagnostics.Process]::Start($backgroundInfo)
+    try {
+        $null = Invoke-BoundedProcess $newInstaller '/S' 'upgrade-current'
+        if (-not $background.WaitForExit(5000)) { throw 'Upgrade left the target background process alive.' }
+    } finally {
+        if (-not $background.HasExited) { $background.Kill(); $background.WaitForExit() }
+        $background.Dispose()
+    }
     Assert-NoApplication
     Assert-Installation $upgradeDir $productVersion 'upgraded-current'
     Assert-CurrentPayload $upgradeDir 'upgraded-current'

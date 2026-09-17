@@ -163,7 +163,7 @@ func TestInstallerAcceptanceUsesPublished305Baseline(t *testing.T) {
 	}
 	script := string(body)
 	for _, want := range []string{
-		"$ExpectedVersion = '3.0.6'",
+		"$ExpectedVersion = '3.0.7'",
 		"$assetName = 'O.R.C.A-for-Windows-windows-amd64-installer.exe'",
 		"[version]$productVersion -le [version]'3.0.5'",
 		"releases/tags/desktop-v3.0.5",
@@ -217,8 +217,8 @@ func TestReleaseDesktopVersionMetadataAgrees(t *testing.T) {
 		} `json:"info"`
 	}
 	readJSON("wails.json", &wails)
-	if wails.Info.ProductVersion != "3.0.6" {
-		t.Fatalf("Wails version = %q, want 3.0.6", wails.Info.ProductVersion)
+	if wails.Info.ProductVersion != "3.0.7" {
+		t.Fatalf("Wails version = %q, want 3.0.7", wails.Info.ProductVersion)
 	}
 	var windows struct {
 		Fixed map[string]string            `json:"fixed"`

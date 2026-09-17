@@ -1,5 +1,13 @@
 # Changelog
 
+## Desktop 3.0.7 / 桌面版 3.0.7
+
+- Windows: detect 64-bit background processes, close target runtimes before replacement,
+  fail closed on unknown process paths or locked files, and disable skipped files.
+- Windows：修复后台进程检测与自动关闭，无法确认安全写入时阻止安装，禁止跳过文件。
+- [Release notes / 发布说明](docs/releases/desktop-v3.0.7.md)
+- [Verification / 验收](docs/audits/desktop-v3.0.7-verification.md)
+
 All notable changes to the Go line (O.R.C.A 1.0+) are recorded here. The legacy
 `0.x` TypeScript history lives on the [`v1`](https://github.com/nanbo0ne/O.R.C.A-for-Windows/tree/v1)
 branch.
