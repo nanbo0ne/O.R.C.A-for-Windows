@@ -1,0 +1,51 @@
+name: Recover 3.0.8 installer upload
+on:
+  push:
+    branches: [codex/recover-desktop-308]
+permissions:
+  actions: read
+  contents: write
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: 35254508087
+          name: dist-windows-amd64
+          path: dist
+      - name: Verify original installer and complete draft upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: nanbo0ne/O.R.C.A-for-Windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=O.R.C.A-for-Windows-windows-amd64-installer.exe
+          hash=708a94d7a97690ea1e5abd8e9fa6c0fcd4a0edf334ac5eb6f2c11b8e593c13b0
+          size=88808549
+          echo "$hash  dist/$name" | sha256sum --check
+          test "$(stat -c %s "dist/$name")" = "$size"
+          for attempt in 1 2 3 4 5 6; do
+            release=$(gh api repos/$GH_REPO/releases/390938754)
+            echo "$release" | jq -e '.draft == true and .tag_name == "desktop-v3.0.8" and .target_commitish == "0b2d30a7d48a675b45024a13bb73c729e99c9034"' >/dev/null
+            assets=$(gh api repos/$GH_REPO/releases/390938754/assets?per_page=100)
+            asset=$(echo "$assets" | jq --arg name "$name" '[.[] | select(.name == $name)] | first // empty')
+            if [ -n "$asset" ]; then
+              state=$(echo "$asset" | jq -r .state)
+              if [ "$state" = uploaded ]; then
+                echo "$asset" | jq -e --arg hash "sha256:$hash" --argjson size "$size" '.size == $size and .digest == $hash' >/dev/null
+                echo 'Verified original installer on GitHub; draft remains unpublished.'
+                exit 0
+              fi
+              test "$state" = starter
+              id=$(echo "$asset" | jq -r .id)
+              gh api --method DELETE repos/$GH_REPO/releases/assets/$id
+              sleep 10
+            fi
+            timeout 180 gh release upload desktop-v3.0.8 "dist/$name" || true
+          done
+          echo 'Installer upload did not complete within the bounded retry budget.' >&2
+          exit 1
