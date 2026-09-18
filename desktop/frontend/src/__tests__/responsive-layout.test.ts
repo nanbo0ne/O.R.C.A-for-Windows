@@ -3,18 +3,20 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const css = readFileSync(join(root, "styles.css"), "utf8");
-const statusBar = readFileSync(join(root, "components", "StatusBar.tsx"), "utf8");
-const chrome = readFileSync(join(root, "components", "AppChrome.tsx"), "utf8");
-const app = readFileSync(join(root, "App.tsx"), "utf8");
-const composer = readFileSync(join(root, "components", "Composer.tsx"), "utf8");
-const settings = readFileSync(join(root, "components", "SettingsPanel.tsx"), "utf8");
-const processCard = readFileSync(join(root, "components", "ProcessCard.tsx"), "utf8");
-const transcript = readFileSync(join(root, "components", "Transcript.tsx"), "utf8");
-const todoPanel = readFileSync(join(root, "components", "TodoPanel.tsx"), "utf8");
-const promptShelf = readFileSync(join(root, "components", "PromptShelf.tsx"), "utf8");
-const toolCard = readFileSync(join(root, "components", "ToolCard.tsx"), "utf8");
-const controller = readFileSync(join(root, "lib", "useController.ts"), "utf8");
+// Source contracts must not depend on Git's platform-specific checkout newlines.
+const readSource = (...path: string[]) => readFileSync(join(root, ...path), "utf8").replace(/\r\n/g, "\n");
+const css = readSource("styles.css");
+const statusBar = readSource("components", "StatusBar.tsx");
+const chrome = readSource("components", "AppChrome.tsx");
+const app = readSource("App.tsx");
+const composer = readSource("components", "Composer.tsx");
+const settings = readSource("components", "SettingsPanel.tsx");
+const processCard = readSource("components", "ProcessCard.tsx");
+const transcript = readSource("components", "Transcript.tsx");
+const todoPanel = readSource("components", "TodoPanel.tsx");
+const promptShelf = readSource("components", "PromptShelf.tsx");
+const toolCard = readSource("components", "ToolCard.tsx");
+const controller = readSource("lib", "useController.ts");
 
 let passed = 0;
 let failed = 0;
@@ -117,8 +119,8 @@ check(
     composer.includes("disabled={disabled || promptModeLocked}"),
   "Orca hides both the ordinary mode selector and redundant approval selector",
 );
-const chooser = readFileSync(join(root, "components", "NewSessionChooser.tsx"), "utf8");
-const projectTree = readFileSync(join(root, "components", "ProjectTree.tsx"), "utf8").replace(/\r\n/g, "\n");
+const chooser = readSource("components", "NewSessionChooser.tsx");
+const projectTree = readSource("components", "ProjectTree.tsx");
 check(
   !chooser.includes('choose("automation"') &&
     projectTree.includes('node.kind === "orca_topic"') &&
