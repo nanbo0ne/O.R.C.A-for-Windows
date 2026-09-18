@@ -1,0 +1,155 @@
+name: Installer preview
+
+on:
+  push:
+    branches: ['codex/installer-preview-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    name: Windows installer preview and acceptance
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Require GitHub-hosted Windows X64
+        run: |
+          if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
+              $env:RUNNER_OS -cne 'Windows' -or $env:RUNNER_ARCH -cne 'X64' -or
+              $env:GITHUB_RUN_ID -notmatch '^\d+$' -or -not $IsWindows -or -not [Environment]::Is64BitProcess) {
+            throw 'Installer preview requires a GitHub-hosted Windows X64 runner.'
+          }
+
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Prepare reports
+        run: New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\preview-dist\reports" | Out-Null
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            desktop/go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.23.2'
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+          run_install: false
+
+      - name: Install NSIS
+        run: |
+          choco install nsis -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed.' }
+          'C:\Program Files (x86)\NSIS' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          if ($LASTEXITCODE -ne 0) { throw 'Wails CLI installation failed.' }
+
+      - name: Install frontend dependencies
+        working-directory: desktop/frontend
+        run: |
+          npm ci 2>&1 | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\preview-dist\reports\frontend-install.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency installation failed.' }
+
+      - name: Generate frontend bindings
+        working-directory: desktop
+        run: |
+          wails generate module -nocolour 2>&1 | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\preview-dist\reports\bindings.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend binding generation failed.' }
+
+      - name: Test installer guard and IPC
+        working-directory: desktop
+        run: |
+          go test ./internal/installguard ./internal/installipc ./cmd/orca-install-guard -count=1 -timeout=5m -json 2>&1 |
+            Tee-Object -FilePath "$env:GITHUB_WORKSPACE\preview-dist\reports\guard-ipc-tests.jsonl"
+          if ($LASTEXITCODE -ne 0) { throw 'Installer guard or IPC tests failed.' }
+
+      - name: Test selected desktop contracts
+        working-directory: desktop
+        run: |
+          $selected = '^(TestInstaller|TestWindowsInstaller|TestWindowsProductNamePreservesUpgradeIdentifiers|TestWindowsPackaging|TestWindowsPortablePackage|TestWindowsArchiveVerification)'
+          go test . -run $selected -count=1 -timeout=5m -json 2>&1 |
+            Tee-Object -FilePath "$env:GITHUB_WORKSPACE\preview-dist\reports\desktop-tests.jsonl"
+          if ($LASTEXITCODE -ne 0) { throw 'Selected desktop tests failed.' }
+
+      - name: Test frontend
+        working-directory: desktop/frontend
+        run: |
+          npm run test:all 2>&1 | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\preview-dist\reports\frontend-tests.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend tests failed.' }
+
+      - name: Build preview installer
+        run: |
+          ./scripts/build-installer-preview.ps1 -OutputDirectory "$env:GITHUB_WORKSPACE\preview-dist" *>&1 |
+            Tee-Object -FilePath "$env:GITHUB_WORKSPACE\preview-dist\reports\preview-build.log"
+
+      - name: Stage candidate for acceptance
+        run: |
+          $copies = @(
+            @{ Source = 'preview-dist\app\amd64\Orca.exe'; Destination = 'desktop\build\bin\Orca.exe' },
+            @{ Source = 'preview-dist\O.R.C.A-for-Windows-v3.0.9-windows-amd64-preview-installer.exe'; Destination = 'dist\O.R.C.A-for-Windows-windows-amd64-installer.exe' }
+          )
+          $hashes = foreach ($copy in $copies) {
+            $source = Join-Path $env:GITHUB_WORKSPACE $copy.Source
+            $destination = Join-Path $env:GITHUB_WORKSPACE $copy.Destination
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+            Copy-Item -LiteralPath $source -Destination $destination -Force
+            $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash) {
+              throw "Candidate staging hash mismatch: $destination"
+            }
+            [ordered]@{ source = $copy.Source; destination = $copy.Destination; sha256 = $hash }
+          }
+          $hashes | ConvertTo-Json | Set-Content -LiteralPath "$env:GITHUB_WORKSPACE\preview-dist\reports\candidate-hashes.json" -Encoding utf8
+
+      - name: Test Windows installer upgrade and data retention
+        timeout-minutes: 15
+        run: |
+          ./scripts/test-desktop-installer.ps1 -ExpectedVersion '3.0.9' *>&1 |
+            Tee-Object -FilePath "$env:GITHUB_WORKSPACE\preview-dist\reports\acceptance.log"
+
+      - name: Collect acceptance and build reports
+        if: always() && runner.environment == 'github-hosted'
+        run: |
+          $reports = Join-Path $env:GITHUB_WORKSPACE 'preview-dist\reports'
+          New-Item -ItemType Directory -Force -Path $reports | Out-Null
+          foreach ($attempt in Get-ChildItem -LiteralPath $env:RUNNER_TEMP -Directory -Filter 'orca installer acceptance *') {
+            $evidence = Join-Path $attempt.FullName 'evidence'
+            if (Test-Path -LiteralPath $evidence -PathType Container) {
+              Copy-Item -LiteralPath $evidence -Destination (Join-Path $reports $attempt.Name) -Recurse -Force
+            }
+          }
+          $staging = Join-Path $env:GITHUB_WORKSPACE '.tmp\installer-preview'
+          if (Test-Path -LiteralPath $staging -PathType Container) {
+            foreach ($stage in Get-ChildItem -LiteralPath $staging -Directory) {
+              $log = Join-Path $stage.FullName 'build.log'
+              if (Test-Path -LiteralPath $log -PathType Leaf) {
+                Copy-Item -LiteralPath $log -Destination (Join-Path $reports "build-$($stage.Name).log")
+              }
+            }
+          }
+
+      # Access follows the repository's Actions artifact permissions.
+      - name: Upload preview candidate and reports
+        if: always() && runner.environment == 'github-hosted'
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-preview-3.0.9-windows-amd64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: preview-dist/
+          if-no-files-found: error
+          retention-days: 7

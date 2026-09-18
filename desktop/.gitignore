@@ -13,6 +13,7 @@
 !/build/windows/installer
 /build/windows/installer/*
 !/build/windows/installer/project.nsi
+!/build/windows/installer/installer_guard.nsh
 !/build/windows/installer/resources
 !/build/windows/installer/resources/*
 

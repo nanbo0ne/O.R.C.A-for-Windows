@@ -86,6 +86,7 @@ type App struct {
 	backgroundMaximised atomic.Bool
 	trayReady           bool
 	tray                *desktopTray
+	installerShutdown   installerShutdownListener
 
 	mediaTokens *mediaTokenStore
 	botInstalls map[string]*botInstallSession
@@ -344,6 +345,7 @@ func (a *App) startup(ctx context.Context) {
 	hosttools.SetAutomationWorkAdmission(a.beginAppWork)
 	installSystemQuitHook()
 	a.startTray()
+	a.startInstallerShutdownListener()
 
 	go a.restoreOrBuildTabs()
 	go a.startDesktopBotGatewayOnStartup()
@@ -730,6 +732,7 @@ func (a *App) snapshotAllTabs() {
 // shutdown closes application resources after beforeClose has handled the final
 // window-state capture.
 func (a *App) shutdown(context.Context) {
+	a.stopInstallerShutdownListener()
 	// OnShutdown runs after Wails has begun tearing down the native window. Close
 	// late frontend saves without querying that invalid window again.
 	a.closeWindowStateSaves()

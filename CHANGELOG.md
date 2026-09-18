@@ -1,5 +1,14 @@
 # Changelog
 
+## Desktop 3.0.9 / 桌面版 3.0.9
+
+- Windows: restore the standard NSIS / MUI2 wizard and replace PowerShell process detection with a native Go helper. Continue immediately when no target is running and files are replaceable; allow up to 5 seconds for graceful exit, then terminate only confirmed target remnants.
+- Windows：恢复标准 NSIS / MUI2 向导，用原生 Go 检查替代 PowerShell 进程检测。无目标进程且文件可替换时立即继续；正常退出最多等待 5 秒，再仅结束已确认目标残留。
+- The new shutdown channel saves drafts, attachments, and sessions before exit. Distinguish external file locks, write permissions, and detection failures; keep skipped files prohibited. Forced termination of older unresponsive versions cannot guarantee saving unsaved content.
+- 新版退出通道在退出前保存草稿、附件与会话；区分外部文件占用、写入权限和检测失败，继续禁止跳过文件。强制结束无响应旧版本不能保证保存尚未落盘的内容。
+- [Release notes / 发布说明](docs/releases/desktop-v3.0.9.md)
+- [Verification / 验收](docs/audits/desktop-v3.0.9-verification.md)
+
 ## Desktop 3.0.8 / 桌面版 3.0.8
 
 - Modern: center the turn rail and Composer, keep controls on one row with effort before model, and give progress text its own space. Refine neutral buttons and keyboard menus; fix narrow approval sizing and restored-history navigation.
