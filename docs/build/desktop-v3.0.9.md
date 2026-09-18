@@ -29,3 +29,10 @@ sites, old releases, tags, user data or the unrelated community data change.
 Preview evidence: Windows acceptance run 35320328576 passed on source
 4626f7047aa76132eac8e1dd87ab2a64fb760be6. That proves the preview only;
 formal build results are recorded separately in the release verification report.
+
+Completed production run: 35324032695, source
+`d96ff0637ad601c8394aca23e6d4ae992d597da0`. GitHub release ID 391323685 and
+the Mac stable manifest now serve 3.0.9. The Mac active directory is
+`/usr/local/aichat/srv/site-gateway/releases/20260918-orca309/orca`.
+See the [verification record](../audits/desktop-v3.0.9-verification.md) for
+checksums, installation coverage, public updater evidence and limitations.

@@ -2,6 +2,8 @@
 
 ## 简体中文
 
+- 正式构建 [35324032695](https://github.com/nanbo0ne/O.R.C.A-for-Windows/actions/runs/35324032695) 已通过三平台构建、回归及 Windows 安装升级验收。17 个发行文件摘要一致，GitHub 和 Mac 更新源已发布；公网下载及应用更新器的完整下载、签名校验通过。人工测试边界见下文。
+
 - Windows 安装器恢复标准 NSIS / MUI2 向导：欢迎、许可、安装目录、安装选项、进度和完成。保留品牌、中文字体、桌面快捷方式选项与默认折叠的详细日志；不改变主应用 Modern / Classic 布局。
 - 用随包分发的原生 Go 检查程序替代安装时的 PowerShell 进程检测。无目标进程且文件可替换时立即继续，不固定等待 5 秒。
 - 正常退出最多等待 5 秒，随后仅结束已确认属于所选安装目录的目标残留；退出后立即继续，强制结束后的等待上限为 2 秒。复核路径、启动时间、进程句柄和父进程关系，避免误结束其他安装副本或无关 Node。
@@ -14,6 +16,8 @@
 
 ## English
 
+- Production run [35324032695](https://github.com/nanbo0ne/O.R.C.A-for-Windows/actions/runs/35324032695) passed three-platform builds, regressions and Windows installation/upgrade acceptance. All 17 asset digests match; GitHub and Mac update sources are live. Public downloads and the application updater's full download/signature verification passed. Manual-testing boundaries remain as listed below.
+
 - Restore the standard Windows NSIS / MUI2 wizard: welcome, license, installation directory, options, progress, and completion. Retain branding, Chinese fonts, the desktop-shortcut option, and collapsed detail logs. The application's Modern / Classic layouts are unchanged.
 - Replace installation-time PowerShell process detection with a bundled native Go helper. Continue immediately when no target process is running and files are replaceable, without a fixed 5-second delay.
 - Allow up to 5 seconds for graceful exit, then terminate only confirmed target remnants belonging to the selected installation directory. Continue as soon as they exit, with at most 2 additional seconds of waiting after termination. Recheck paths, creation times, process handles, and parent relationships to avoid terminating other installations or unrelated Node processes.
@@ -24,4 +28,4 @@
 - Manual inspection covered pre-installation pages and cancellation in the preview package, not every progress, completion, or uninstall page, nor the complete draft-saving exit flow in a real Wails window. Windows ARM64, macOS, and Linux installer UIs are not claimed as tested. Draft-save handshake tests and synthetic data retention do not establish acceptance for every real workload.
 - Windows packages lack Authenticode publisher signing; macOS packages are not notarized. Minisign verifies update integrity, not operating-system publisher identity.
 
-[Release / 发布页](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.9) · [Verification / 验收记录](../audits/desktop-v3.0.9-verification.md) · [Build checklist / 构建清单](../build/desktop-v3.0.9.md)
+[Release / 发布页](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.9) · [Verification / 验收记录](https://github.com/nanbo0ne/O.R.C.A-for-Windows/blob/main/docs/audits/desktop-v3.0.9-verification.md) · [Build checklist / 构建清单](https://github.com/nanbo0ne/O.R.C.A-for-Windows/blob/main/docs/build/desktop-v3.0.9.md)
