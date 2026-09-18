@@ -171,16 +171,16 @@ check(
   "Classic run status follows the Composer width when both sidebars are open",
 );
 check(
-    composer.includes('composer-runstatus__primary--${showDraftSend ? "send" : "stop"}') &&
-    composer.includes("onClick={showDraftSend ? () => void submit() : handleCancel}") &&
-    composer.includes("showDraftSend ? (disabled || submitting || pendingPaste > 0 || !hasSendableContent) : cancelRequested && !cancelSlow") &&
-    composer.includes('showDraftSend ? <ArrowUp size={13} /> : <Square size={11} fill="currentColor" strokeWidth={1.8} />') &&
+    composer.includes('composer-runstatus__primary--stop${cancelRequested') &&
+    composer.includes("onClick={handleCancel}") &&
+    composer.includes("disabled={cancelRequested && !cancelSlow}") &&
+    composer.includes('<Square size={11} fill="currentColor" strokeWidth={1.8} />') &&
     css.includes(".composer-runstatus__primary {\n  --wails-draggable: no-drag;") &&
     css.includes("width: 34px;\n  min-width: 34px;\n  max-width: 34px;\n  height: 34px;") &&
     css.includes(".composer-runstatus__primary--send {") &&
     composerContract.includes(".composer-runstatus__primary {\n    width: 30px;\n    min-width: 30px;\n    max-width: 30px;") &&
     !composer.includes("composer-runstatus__primary-label"),
-  "running send replaces stop without changing the primary action geometry",
+  "running mouse action stays Stop with stable geometry while drafts use keyboard send",
 );
 check(
   composer.includes("Plain text always follows the textarea's native paste path") &&

@@ -71,3 +71,35 @@ func TestCancelRuntimeQueueCannotStartAfterRebuild(t *testing.T) {
 	}
 	app.RequestCancelTab(tab.ID)
 }
+
+func TestCancelTurnDoesNotAffectOtherTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	a := NewApp()
+	a.tabs = map[string]*WorkspaceTab{}
+	for _, id := range []string{"a", "b"} {
+		runner := &admissionBlockingRunner{started: make(chan context.Context, 1), release: make(chan struct{})}
+		ctrl := control.New(control.Options{Runner: runner, Sink: event.Discard})
+		t.Cleanup(ctrl.Close)
+		tab := testTab(id, t.TempDir())
+		tab.Ctrl = ctrl
+		a.tabs[id] = tab
+		ctrl.Send("synthetic concurrent task")
+		<-runner.started
+	}
+	first, second := a.tabs["a"].Ctrl, a.tabs["b"].Ctrl
+	firstID, secondID := first.TurnStatus().TurnID, second.TurnStatus().TurnID
+	if a.RequestCancelTurnForTab("b", firstID).Accepted {
+		t.Fatal("foreign turn ID accepted")
+	}
+	if !a.RequestCancelTurnForTab("a", firstID).Accepted {
+		t.Fatal("owned cancellation rejected")
+	}
+	waitNotRunning(t, first)
+	if status := second.TurnStatus(); !status.Running || status.CancelRequested || status.TurnID != secondID {
+		t.Fatalf("other tab changed: %+v", status)
+	}
+	if !a.RequestCancelTurnForTab("b", secondID).Accepted {
+		t.Fatal("other tab cannot stop independently")
+	}
+	waitNotRunning(t, second)
+}

@@ -2,6 +2,14 @@
 
 ## Scope and Current Status
 
+Latest pre-release checkpoint: the actual App passed 18/18 headless Modern/Classic
+scenarios and 176 assertions, plus 6 polling checks, after fixing three browser
+findings (cancel-error false idle, pending-submit draft loss, and missing mouse
+Stop with a draft). No external requests or browser errors. These tests use a
+controlled bridge and do not establish native-window behavior. The first CI run
+35362216984 passed core/race gates but was deliberately cancelled before packaging
+to include these fixes; it produced no release. Frontend full tests passed again.
+
 思考强度保存/请求生效、当前回合取消与生命周期隔离修复已实现。五项真实
 供应商请求通过；本机原生 Wails 构建通过。完整发布验收仍未完成，
 不将局部通过写成整版通过。标准 3.0.9 安装器和 Modern / Classic 保持。

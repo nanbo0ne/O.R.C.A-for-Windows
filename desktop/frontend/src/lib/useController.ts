@@ -822,7 +822,7 @@ export function reducer(s: State, a: Action): State {
     case "session_load_start": return { ...s, loading: true, hydrating: a.hydrating };
     case "session_primary_loaded": return { ...s, loading: false };
     case "session_hydrated": return s.hydrating ? { ...s, hydrating: false } : s;
-    case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
+    case "local_notice": return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
     case "runtime_switch": {
       const progress = a.progress;
       if (s.runtimeSwitch && progress.generation < s.runtimeSwitch.generation) return s;

@@ -2,6 +2,8 @@
 
 ## Desktop 3.0.10 / 桌面版 3.0.10
 
+- Keep Stop available while a next-turn draft exists, preserve drafts during pending-submit cancellation, and retain running state when a cancel request fails.
+- 有下一轮草稿时仍保留停止按钮；取消待发送内容不覆盖草稿，停止请求失败也不会误报为空闲。
 - Fix effort persistence/request behavior, current-turn cancellation and stale completion corrupting successor lifecycle state. Five live provider cases and the native Wails build passed; full regression, CI, platform packages and upgrade/publication acceptance are pending. Native-window interaction was not tested.
 - 修复思考强度保存与请求生效、当前回合取消及迟到完成事件影响新回合的问题。五项真实供应商验证与原生 Wails 构建通过；全量回归、CI、多平台发行包、升级发布验收待完成，原生窗口交互未测试。
 - Retain the standard Windows installer restored in 3.0.9; pin upgrade acceptance to the published 3.0.9 installer. No Modern / Classic redesign.

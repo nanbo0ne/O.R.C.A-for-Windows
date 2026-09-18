@@ -29,6 +29,20 @@ state = reducer(state, { type: "event", e: { kind: "turn_started", turnId: "b" }
 state = reducer(state, { type: "turn_status", status: { running: false, turnId: "a", outcome: "cancelled" } });
 assert.equal(state.running, true, "late status cannot stop successor");
 
+for (const turnActive of [false, true]) {
+  for (const cancelRequested of [false, true]) {
+    const before = { ...state, turnActive, cancelRequested, cancelSlow: cancelRequested };
+    const after = reducer(before, { type: "local_notice", level: "warn", text: "Stop status request timed out" });
+    assert.equal(after.running, true, "local notice cannot fabricate idle before authoritative completion");
+    assert.equal(after.turnActive, turnActive, "local notice preserves active-turn state");
+    assert.equal(after.cancelRequested, cancelRequested, "local notice preserves cancellation intent");
+    assert.equal(after.cancelSlow, cancelRequested, "local notice preserves stop retry feedback");
+    assert.equal(after.currentTurnId, before.currentTurnId);
+    assert.equal(after.turnEpoch, before.turnEpoch);
+    assert.ok(after.items.some((item) => item.kind === "notice" && item.text === "Stop status request timed out"));
+  }
+}
+
 for (const running of [true, false]) {
   const stopped = reducer({ ...state, running, cancelRequested: true, cancelSlow: true }, { type: "backend_status", running: false });
   assert.equal(stopped.running, false);

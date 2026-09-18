@@ -522,6 +522,7 @@ export function Composer({
   const consumedPasteRequestRef = useRef(0);
   const lastTransientDismissSignal = useRef(transientDismissSignal);
   const submittingRef = useRef(false);
+  const cancelledSubmissionRef = useRef(false);
   const draftSnapshotRef = useRef<ComposerDraftSnapshot>({ tabId, text, attachments, workspaceRefs, sessionRefs, pendingPaste });
   draftSnapshotRef.current = { tabId, text, attachments, workspaceRefs, sessionRefs, pendingPaste };
   useEffect(() => {
@@ -996,6 +997,7 @@ export function Composer({
     }
     setComposerPrompt(null);
     submittingRef.current = true;
+    cancelledSubmissionRef.current = false;
     setSubmitting(true);
     const submittedDraft = draftSnapshotRef.current;
     try {
@@ -1027,7 +1029,7 @@ export function Composer({
           return onSend(displayText, submitText);
         },
         () => {
-          if (!sameComposerDraft(submittedDraft, draftSnapshotRef.current)) return;
+          if (cancelledSubmissionRef.current || !sameComposerDraft(submittedDraft, draftSnapshotRef.current)) return;
           setText("");
           clearAttachments();
           setWorkspaceRefs([]);
@@ -1330,8 +1332,9 @@ export function Composer({
   // handleCancel stops the in-flight turn; if it was cancelled before the server
   // replied, the just-sent text is handed back so we drop it back into the input.
   const handleCancel = () => {
+    if (submittingRef.current) cancelledSubmissionRef.current = true;
     const restored = onCancel();
-    if (typeof restored === "string") setTextCaretEnd(restored);
+    if (typeof restored === "string" && !draftSnapshotRef.current.text.trim()) setTextCaretEnd(restored);
   };
 
   useEffect(() => {
@@ -1637,7 +1640,7 @@ export function Composer({
     : undefined;
   const composerAutoExpanded = textareaAutoHeight !== null && textareaAutoHeight > 40;
   const draftGoal = text.trim();
-  const { hasDraftContent, hasSendableContent } = composerDraftState({
+  const { hasSendableContent } = composerDraftState({
     text,
     attachmentCount: attachments.filter((attachment) => attachment.status === "ready").length,
     workspaceReferenceCount: workspaceRefs.length,
@@ -1714,7 +1717,6 @@ export function Composer({
       requestAnimationFrame(() => taRef.current?.focus());
     });
   };
-  const showDraftSend = hasDraftContent && !cancelRequested;
   const runActivity = cancelRequested
     ? t(cancelSlow ? "composer.stopWaiting" : "composer.stopping")
     : retry
@@ -2472,17 +2474,17 @@ export function Composer({
                 <span className="composer-runstatus__dot" />
                 <span className="composer-runstatus__text">{runActivity}</span>
               </>}
-              <Tooltip label={showDraftSend ? t("composer.send") : t(cancelSlow ? "composer.stopRetry" : "composer.stop")}>
+              <Tooltip label={t(cancelSlow ? "composer.stopRetry" : "composer.stop")}>
                 <button
-                  className={`composer-runstatus__primary composer-runstatus__primary--${showDraftSend ? "send" : "stop"}${cancelRequested ? " composer-runstatus__primary--stopping" : ""}`}
+                  className={`composer-runstatus__primary composer-runstatus__primary--stop${cancelRequested ? " composer-runstatus__primary--stopping" : ""}`}
                   type="button"
-                  onClick={showDraftSend ? () => void submit() : handleCancel}
-                  disabled={showDraftSend ? (disabled || submitting || pendingPaste > 0 || !hasSendableContent) : cancelRequested && !cancelSlow}
-                  aria-label={showDraftSend ? t("composer.send") : t(cancelSlow ? "composer.stopRetry" : "composer.stop")}
+                  onClick={handleCancel}
+                  disabled={cancelRequested && !cancelSlow}
+                  aria-label={t(cancelSlow ? "composer.stopRetry" : "composer.stop")}
                   aria-busy={cancelRequested}
                 >
                   <span className="composer-runstatus__primary-icon" aria-hidden="true">
-                    {showDraftSend ? <ArrowUp size={13} /> : <Square size={11} fill="currentColor" strokeWidth={1.8} />}
+                    <Square size={11} fill="currentColor" strokeWidth={1.8} />
                   </span>
                 </button>
               </Tooltip>
