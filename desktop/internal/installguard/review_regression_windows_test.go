@@ -47,9 +47,18 @@ type reviewTree struct {
 	child     windows.Handle
 }
 
+func reviewCanonicalPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := canonical(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
 func reviewStartTree(t *testing.T, childName string) reviewTree {
 	t.Helper()
-	base := t.TempDir()
+	base := reviewCanonicalPath(t, t.TempDir())
 	dir, other := filepath.Join(base, "installation"), filepath.Join(base, "other installation")
 	for _, path := range []string{dir, other} {
 		if err := os.Mkdir(path, 0700); err != nil {
@@ -126,7 +135,7 @@ func reviewRequireAlive(t *testing.T, handle windows.Handle) {
 
 func reviewOwnedProcesses(t *testing.T, dir string) map[uint32]process {
 	t.Helper()
-	processes, err := ownedProcesses(dir)
+	processes, err := ownedProcesses(reviewCanonicalPath(t, dir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +247,7 @@ func TestGuardRegressionLiveHandleAncestry(t *testing.T) {
 }
 
 func TestGuardRegressionDanglingJunctionRejected(t *testing.T) {
-	base := t.TempDir()
+	base := reviewCanonicalPath(t, t.TempDir())
 	dir := filepath.Join(base, "installation")
 	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -275,7 +284,7 @@ func TestGuardRegressionDanglingJunctionRejected(t *testing.T) {
 }
 
 func TestGuardRegressionMappedFileIsPreflightBoundary(t *testing.T) {
-	dir := t.TempDir()
+	dir := reviewCanonicalPath(t, t.TempDir())
 	path := filepath.Join(dir, "payload.dat")
 	const contents = "temporary mapped payload"
 	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {

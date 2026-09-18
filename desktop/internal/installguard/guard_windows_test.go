@@ -148,7 +148,11 @@ func TestExternalLockAndRetryPreserveFile(t *testing.T) {
 	}
 	r := Run(context.Background(), options(dir))
 	windows.CloseHandle(h)
-	if r.Code != Locked || r.File != path || r.SystemError != uint32(windows.ERROR_SHARING_VIOLATION) {
+	expectedPath, pathErr := canonical(path)
+	if pathErr != nil {
+		t.Fatal(pathErr)
+	}
+	if r.Code != Locked || r.File != expectedPath || r.SystemError != uint32(windows.ERROR_SHARING_VIOLATION) {
 		t.Fatalf("%+v", r)
 	}
 	body, _ := os.ReadFile(path)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -32,10 +33,14 @@ func run() int {
 		return installguard.DetectionFailed
 	}
 	defer log.Close()
+	var statusErr error
 	publish := func(r installguard.Result) {
 		_ = json.NewEncoder(log).Encode(r)
 		_ = log.Sync()
-		_ = writeStatus(*status, r)
+		statusErr = writeStatus(*status, r)
+		if statusErr != nil {
+			_ = json.NewEncoder(log).Encode(map[string]any{"phase": "status", "error": statusErr.Error()})
+		}
 	}
 	ctx, stop := context.WithTimeout(context.Background(), 12*time.Second)
 	defer stop()
@@ -91,6 +96,9 @@ func run() int {
 	}
 	result := installguard.Run(ctx, installguard.Options{Directory: *dir, Files: files, Progress: publish})
 	publish(result)
+	if statusErr != nil {
+		return installguard.DetectionFailed
+	}
 	return result.Code
 }
 
@@ -105,5 +113,15 @@ func writeStatus(path string, r installguard.Result) error {
 	if err := os.WriteFile(path+".tmp", data, 0600); err != nil {
 		return err
 	}
-	return os.Rename(path+".tmp", path)
+	// GetPrivateProfileString may briefly hold the previous status open without
+	// delete sharing. Keep publishing bounded while allowing that reader to finish.
+	var err error
+	for attempt := 0; attempt < 10; attempt++ {
+		err = os.Rename(path+".tmp", path)
+		if err == nil || (!errors.Is(err, windows.ERROR_SHARING_VIOLATION) && !errors.Is(err, windows.ERROR_ACCESS_DENIED)) {
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return err
 }
