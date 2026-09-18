@@ -12,12 +12,16 @@ export function EffortSwitcher({
   onPick,
   onConfigure,
   showDefault = false,
+  saving = false,
+  running = false,
 }: {
   effort?: EffortInfo;
   disabled: boolean;
-  onPick: (level: string) => void;
+  onPick: (level: string) => Promise<void> | void;
   onConfigure?: () => void;
   showDefault?: boolean;
+  saving?: boolean;
+  running?: boolean;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -28,6 +32,12 @@ export function EffortSwitcher({
   const levels = asArray(effort?.levels);
   const current = effort?.current || "auto";
   const supported = Boolean(effort?.supported && levels.length > 0);
+  const locked = disabled || saving || running;
+  const hint = saving ? t("status.effortSaving") : running ? t("status.effortRunningHint") : undefined;
+  const autoTitle = effort?.default && effort.default !== "auto"
+    ? t("status.effortAutoTitle", { def: effort.default })
+    : t("status.effortAutoOmittedTitle");
+  const title = !supported ? t("status.effortModelDefaultHint") : current === "auto" ? autoTitle : t("status.effortTitle");
 
   const clearCloseTimer = useCallback(() => {
     if (closeTimerRef.current === null) return;
@@ -36,10 +46,11 @@ export function EffortSwitcher({
   }, []);
 
   const openMenu = useCallback(() => {
+    if (locked) return;
     clearCloseTimer();
     setClosing(false);
     setOpen(true);
-  }, [clearCloseTimer]);
+  }, [clearCloseTimer, locked]);
 
   const closeMenu = useCallback((afterClose?: () => void) => {
     if (menuRef.current?.contains(document.activeElement)) triggerRef.current?.focus();
@@ -55,6 +66,13 @@ export function EffortSwitcher({
   }, [clearCloseTimer]);
 
   useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
+
+  useEffect(() => {
+    if (!locked) return;
+    clearCloseTimer();
+    setOpen(false);
+    setClosing(false);
+  }, [locked, clearCloseTimer]);
 
   useEffect(() => {
     if (!open || closing) return;
@@ -77,35 +95,39 @@ export function EffortSwitcher({
   };
 
   const pick = (level: string) => {
-    if (level !== current) onPick(level);
+    if (locked || closing) return;
     closeMenu();
+    // The parent owns pending state and reports save failures.
+    if (level !== current) return onPick(level);
   };
 
   if (!supported && !showDefault) return null;
 
   return (
-    <div className="modelsw effortsw">
+    <div className="modelsw effortsw" title={hint ? `${hint} ${title}` : title}>
       <button
         ref={triggerRef}
         type="button"
         className={`modelsw__trigger effortsw__trigger ${current !== "auto" ? "effortsw__trigger--explicit" : ""}`}
-        disabled={disabled}
-        title={!supported ? t("status.effortModelDefaultHint") : current === "auto" ? t("status.effortAutoTitle", { def: effort?.default || "auto" }) : t("status.effortTitle")}
+        disabled={locked}
+        title={hint ? `${hint} ${title}` : title}
+        aria-busy={saving}
+        aria-description={hint}
         aria-label={`${t("status.effortTitle")}: ${supported ? current : t("status.effortModelDefault")}`}
         aria-haspopup={supported ? "listbox" : "dialog"}
-        aria-expanded={open && !closing}
+        aria-expanded={open && !closing && !locked}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); openMenu(); }
         }}
         onClick={() => (open || closing ? closeMenu() : openMenu())}
       >
         <Gauge size={13} className="modelsw__kind" />
-        <span className="modelsw__label">{supported ? current : t("status.effortModelDefault")}</span>
+        <span className="modelsw__label">{saving ? t("status.effortSaving") : supported ? current : t("status.effortModelDefault")}</span>
         <ChevronsUpDown size={11} />
       </button>
       <AnchoredPopover
-        open={open && !disabled}
-        closing={closing}
+        open={open && !locked}
+        closing={closing && !locked}
         anchorRef={triggerRef}
         onClose={() => closeMenu()}
         className="modelsw__menu modelsw__menu--portal effortsw__menu"
@@ -118,6 +140,8 @@ export function EffortSwitcher({
               type="button"
               role="option"
               aria-selected={level === current}
+              disabled={locked || closing}
+              title={level === "auto" ? autoTitle : undefined}
               className={`modelsw__item ${level === current ? "modelsw__item--current" : ""}`}
               onClick={() => pick(level)}
             >
@@ -127,7 +151,7 @@ export function EffortSwitcher({
           ))}
         </div> : <div ref={menuRef} className="effortsw__default" role="dialog" aria-label={t("status.effortTitle")}>
           <p>{t("status.effortModelDefaultHint")}</p>
-          {onConfigure && <button type="button" className="modelsw__item" onClick={() => closeMenu(onConfigure)}>
+          {onConfigure && <button type="button" disabled={locked || closing} className="modelsw__item" onClick={() => closeMenu(onConfigure)}>
             {t("settings.modelsProviders")}
           </button>}
         </div>}

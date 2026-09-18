@@ -380,6 +380,8 @@ export function Composer({
   promptModeSwitching = false,
   runtimeSwitch,
   cancelRequested = false,
+  cancelSlow = false,
+  effortSaving = false,
   showToolApprovalControls = true,
   paused = false,
   goal,
@@ -426,6 +428,8 @@ export function Composer({
   promptModeSwitching?: boolean;
   runtimeSwitch?: RuntimeSwitchProgress;
   cancelRequested?: boolean;
+  cancelSlow?: boolean;
+  effortSaving?: boolean;
   showToolApprovalControls?: boolean;
   paused?: boolean;
   goal?: string;
@@ -1704,12 +1708,16 @@ export function Composer({
     });
   };
   const chooseEffortLevel = (level: string) => {
+    if (disabled || running || effortSaving) return;
     closeMoreMenu(() => {
       if (level !== currentEffort) onSetEffort(level);
       requestAnimationFrame(() => taRef.current?.focus());
     });
   };
-  const runActivity = retry
+  const showDraftSend = hasDraftContent && !cancelRequested;
+  const runActivity = cancelRequested
+    ? t(cancelSlow ? "composer.stopWaiting" : "composer.stopping")
+    : retry
     ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
     : running && turnStartAt
       ? (() => {
@@ -1933,7 +1941,7 @@ export function Composer({
                   aria-selected={level === currentEffort}
                   className={`composer-more-menu__item${level === currentEffort ? " composer-more-menu__item--active" : ""}`}
                   onClick={() => chooseEffortLevel(level)}
-                  disabled={disabled}
+                  disabled={disabled || running || effortSaving}
                 >
                   <Gauge size={14} />
                   <span>{level}</span>
@@ -2369,7 +2377,7 @@ export function Composer({
             </div>}
             {uiStyle === "classic" && hasEffort && (
               <div className="composer-meta__control composer-meta__control--effort">
-                <EffortSwitcher effort={effort} disabled={Boolean(disabled)} onPick={onSetEffort} />
+                <EffortSwitcher effort={effort} disabled={Boolean(disabled)} saving={effortSaving} running={running} onPick={onSetEffort} />
               </div>
             )}
             {uiStyle === "classic" && intentChips.length > 0 && (
@@ -2428,7 +2436,7 @@ export function Composer({
         <div className={`composer-card__actions${uiStyle === "modern" ? " composer-card__actions--modern" : " composer-card__actions--classic"}`}>
           {uiStyle === "modern" && <div className="composer-modern-parameters">
             <div className="composer-modern-parameter composer-modern-parameter--effort">
-              <EffortSwitcher effort={effort} disabled={Boolean(disabled)} onPick={onSetEffort} onConfigure={onConfigureEffort} showDefault />
+              <EffortSwitcher effort={effort} disabled={Boolean(disabled)} saving={effortSaving} running={running} onPick={onSetEffort} onConfigure={onConfigureEffort} showDefault />
             </div>
             <div className="composer-modern-parameter composer-modern-parameter--model">
               <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} showTooltip />
@@ -2464,17 +2472,17 @@ export function Composer({
                 <span className="composer-runstatus__dot" />
                 <span className="composer-runstatus__text">{runActivity}</span>
               </>}
-              <Tooltip label={hasDraftContent ? t("composer.send") : t("composer.stop")}>
+              <Tooltip label={showDraftSend ? t("composer.send") : t(cancelSlow ? "composer.stopRetry" : "composer.stop")}>
                 <button
-                  className={`composer-runstatus__primary composer-runstatus__primary--${hasDraftContent ? "send" : "stop"}${cancelRequested && !hasDraftContent ? " composer-runstatus__primary--stopping" : ""}`}
+                  className={`composer-runstatus__primary composer-runstatus__primary--${showDraftSend ? "send" : "stop"}${cancelRequested ? " composer-runstatus__primary--stopping" : ""}`}
                   type="button"
-                  onClick={hasDraftContent ? () => void submit() : handleCancel}
-                  disabled={hasDraftContent ? (disabled || submitting || pendingPaste > 0 || !hasSendableContent) : cancelRequested}
-                  aria-label={hasDraftContent ? t("composer.send") : t("composer.stop")}
-                  aria-busy={cancelRequested && !hasDraftContent}
+                  onClick={showDraftSend ? () => void submit() : handleCancel}
+                  disabled={showDraftSend ? (disabled || submitting || pendingPaste > 0 || !hasSendableContent) : cancelRequested && !cancelSlow}
+                  aria-label={showDraftSend ? t("composer.send") : t(cancelSlow ? "composer.stopRetry" : "composer.stop")}
+                  aria-busy={cancelRequested}
                 >
                   <span className="composer-runstatus__primary-icon" aria-hidden="true">
-                    {hasDraftContent ? <ArrowUp size={13} /> : <Square size={11} fill="currentColor" strokeWidth={1.8} />}
+                    {showDraftSend ? <ArrowUp size={13} /> : <Square size={11} fill="currentColor" strokeWidth={1.8} />}
                   </span>
                 </button>
               </Tooltip>

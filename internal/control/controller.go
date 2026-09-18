@@ -136,6 +136,8 @@ type Controller struct {
 	cancel          context.CancelFunc
 	running         bool
 	cancelRequested bool
+	activeTurnID    string
+	lastOutcome     event.TurnOutcome
 	paused          bool
 	pauseWait       chan struct{}
 	autosaveWG      sync.WaitGroup
@@ -534,7 +536,10 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		c.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := agent.WithParentTurn(context.Background())
+	c.activeTurnID, _ = agent.ParentTurn(ctx)
+	id := c.activeTurnID
+	c.lastOutcome = ""
 	c.cancel = cancel
 	c.running = true
 	c.cancelRequested = false
@@ -552,8 +557,10 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 				c.mu.Lock()
 				c.running = false
 				c.cancel = nil
+				c.resetCancelledStateLocked()
+				c.lastOutcome = event.TurnOutcomeFailed
 				c.mu.Unlock()
-				c.sink.Emit(event.Event{Kind: event.TurnDone, Outcome: event.TurnOutcomeFailed, Err: fmt.Errorf("internal error: %v", r)})
+				c.sink.Emit(event.Event{Kind: event.TurnDone, TurnID: id, Outcome: event.TurnOutcomeFailed, Err: fmt.Errorf("internal error: %v", r)})
 			}
 		}()
 		err := body(ctx)
@@ -561,15 +568,16 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		cancelled := c.cancelRequested
 		c.running = false
 		c.cancel = nil
-		c.cancelRequested = false
-		c.mu.Unlock()
 		outcome := event.TurnOutcomeSuccess
 		if cancelled || errors.Is(err, context.Canceled) {
 			outcome = event.TurnOutcomeCancelled
 		} else if err != nil {
 			outcome = event.TurnOutcomeFailed
 		}
-		c.sink.Emit(event.Event{Kind: event.TurnDone, Outcome: outcome, Err: explainError(err)})
+		c.lastOutcome = outcome
+		c.resetCancelledStateLocked()
+		c.mu.Unlock()
+		c.sink.Emit(event.Event{Kind: event.TurnDone, TurnID: id, Outcome: outcome, Err: explainError(err)})
 	}()
 }
 
@@ -614,8 +622,10 @@ func (c *Controller) runTurn(ctx context.Context, input string) error {
 // used by interactive frontends: auto-plan, transient memory/background-job
 // composition, checkpoints, hooks, and plan approval. It is for transports that
 // need a blocking request/response boundary, such as ACP session/prompt.
-func (c *Controller) RunTurn(ctx context.Context, input string) error {
+func (c *Controller) RunTurn(ctx context.Context, input string) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
+	ctx, endTurn := agent.WithParentTurn(ctx)
+	defer endTurn()
 	c.mu.Lock()
 	if c.running {
 		c.mu.Unlock()
@@ -624,12 +634,22 @@ func (c *Controller) RunTurn(ctx context.Context, input string) error {
 	}
 	c.cancel = cancel
 	c.running = true
+	c.cancelRequested = false
+	c.activeTurnID, _ = agent.ParentTurn(ctx)
+	c.lastOutcome = ""
 	c.mu.Unlock()
 
 	defer func() {
 		c.mu.Lock()
 		c.running = false
 		c.cancel = nil
+		c.lastOutcome = event.TurnOutcomeSuccess
+		if c.cancelRequested || errors.Is(err, context.Canceled) {
+			c.lastOutcome = event.TurnOutcomeCancelled
+		} else if err != nil {
+			c.lastOutcome = event.TurnOutcomeFailed
+		}
+		c.resetCancelledStateLocked()
 		c.mu.Unlock()
 		cancel()
 	}()
@@ -1322,14 +1342,54 @@ func (c *Controller) Run(ctx context.Context, input string) error {
 // Cancel aborts the in-flight turn. A goroutine blocked awaiting approval
 // unblocks via the cancelled context.
 func (c *Controller) Cancel() {
+	c.CancelTurn("")
+}
+
+type TurnStatus struct {
+	TurnID          string            `json:"turnId,omitempty"`
+	Running         bool              `json:"running"`
+	CancelRequested bool              `json:"cancelRequested"`
+	Outcome         event.TurnOutcome `json:"outcome,omitempty"`
+}
+
+type CancelAck struct {
+	TurnStatus
+	Accepted bool `json:"accepted"`
+}
+
+func (c *Controller) turnStatusLocked() TurnStatus {
+	return TurnStatus{TurnID: c.activeTurnID, Running: c.running, CancelRequested: c.cancelRequested, Outcome: c.lastOutcome}
+}
+
+func (c *Controller) TurnStatus() TurnStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.turnStatusLocked()
+}
+
+// CancelTurn matches and captures the cancellation function atomically. A late
+// cancellation for an old turn must never target its successor.
+func (c *Controller) CancelTurn(expected string) CancelAck {
 	c.mu.Lock()
 	cancel := c.cancel
-	if cancel != nil {
+	accepted := c.running && cancel != nil && (expected == "" || expected == c.activeTurnID)
+	if accepted {
 		c.cancelRequested = true
 	}
+	ack := CancelAck{TurnStatus: c.turnStatusLocked(), Accepted: accepted}
 	c.mu.Unlock()
-	if cancel != nil {
+	if accepted {
 		cancel()
+	}
+	return ack
+}
+
+func (c *Controller) resetCancelledStateLocked() {
+	c.cancelRequested = false
+	c.paused = false
+	if c.pauseWait != nil {
+		close(c.pauseWait)
+		c.pauseWait = nil
 	}
 }
 

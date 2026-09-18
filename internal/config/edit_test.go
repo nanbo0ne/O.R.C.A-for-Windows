@@ -1074,25 +1074,25 @@ func TestNormalizeEffortCustomDefaultEffort(t *testing.T) {
 		Kind:             "openai",
 		BaseURL:          "https://example.com",
 		SupportedEfforts: []string{"low", "medium", "high"},
-		DefaultEffort:    "xhigh", // not in the list — must fall back to the first level
+		DefaultEffort:    "xhigh", // An undeclared default leaves the choice to the provider.
 	}
 	cap := EffortCapabilityForEntry(e)
-	if cap.Default != "low" {
-		t.Fatalf("default = %q, want low (first of supported_efforts)", cap.Default)
+	if cap.Default != "auto" {
+		t.Fatalf("default = %q, want auto", cap.Default)
 	}
-	// Omitting DefaultEffort also falls back to the first level.
+	// Omitting DefaultEffort also leaves the choice to the provider.
 	e2 := *e
 	e2.DefaultEffort = ""
-	if cap := EffortCapabilityForEntry(&e2); cap.Default != "low" {
-		t.Errorf("empty default = %q, want low", cap.Default)
+	if cap := EffortCapabilityForEntry(&e2); cap.Default != "auto" {
+		t.Errorf("empty default = %q, want auto", cap.Default)
 	}
 	// /effort auto still maps to "" regardless of DefaultEffort.
 	if got, err := NormalizeEffort(e, "auto"); err != nil || got != "" {
 		t.Fatalf("NormalizeEffort(auto) = %q/%v, want empty/nil", got, err)
 	}
 	e.Effort = "auto"
-	if got := EffectiveEffort(e); got != "low" {
-		t.Fatalf("stored auto should fall through to default_effort, got %q", got)
+	if got := EffectiveEffort(e); got != "" {
+		t.Fatalf("stored auto with invalid default should omit effort, got %q", got)
 	}
 	e.Effort = "high"
 	if got := EffectiveEffort(e); got != "high" {

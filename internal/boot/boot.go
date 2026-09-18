@@ -1268,6 +1268,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"api_key_env":        e.APIKeyEnv,
 			"thinking":           e.Thinking,
 			"effort":             config.EffectiveEffort(e),
+			"supported_efforts":  e.SupportedEfforts,
 			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
 			"proxy_spec":         proxy,
 		},

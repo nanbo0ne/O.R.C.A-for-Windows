@@ -52,6 +52,9 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 		levels = append(levels, "auto")
 		levels = append(levels, supported...)
 		def := defaultSupportedEffort(e, supported)
+		if def == "" {
+			def = "auto"
+		}
 		return EffortCapability{Supported: true, Levels: levels, Default: def}
 	}
 	switch explicitReasoningProtocol(e) {
@@ -169,10 +172,10 @@ func EffortDisplay(e *ProviderEntry) string {
 
 // EffectiveEffort resolves the provider-visible effort value. Explicit
 // ProviderEntry.Effort wins; otherwise a configured SupportedEfforts list makes
-// DefaultEffort (or the first supported level) the runtime default. Empty means
+// a valid DefaultEffort the runtime default. Empty means
 // provider default / omit the provider-specific effort field.
 func EffectiveEffort(e *ProviderEntry) string {
-	if e == nil {
+	if e == nil || explicitReasoningProtocol(e) == ReasoningProtocolNone {
 		return ""
 	}
 	if effort := normalizeStoredEffort(e.Effort); effort != "" {
@@ -213,7 +216,10 @@ func defaultSupportedEffort(e *ProviderEntry, supported []string) string {
 		}
 	}
 	if !containsString(supported, def) {
-		return supported[0]
+		if ReasoningProtocolForEntry(e) == ReasoningProtocolDeepSeek || isMiniMaxEntry(e) {
+			return supported[0]
+		}
+		return ""
 	}
 	return def
 }

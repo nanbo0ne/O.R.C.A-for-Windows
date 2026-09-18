@@ -6,6 +6,58 @@ import (
 	"testing"
 )
 
+func TestCustomEffortDefaults(t *testing.T) {
+	for _, tc := range []struct {
+		name, def, want string
+	}{
+		{"explicit xhigh", " XHIGH ", "xhigh"},
+		{"missing", "", ""},
+		{"invalid", "max", ""},
+		{"auto", "auto", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &ProviderEntry{Kind: "openai", Model: "custom", ReasoningProtocol: "openai",
+				SupportedEfforts: []string{"high", " XHIGH ", "auto"}, DefaultEffort: tc.def}
+			for _, stored := range []string{"", "auto"} {
+				e.Effort = stored
+				if got := EffectiveEffort(e); got != tc.want {
+					t.Errorf("stored %q: effective = %q, want %q", stored, got, tc.want)
+				}
+			}
+			wantDefault := tc.want
+			if wantDefault == "" {
+				wantDefault = "auto"
+			}
+			if cap := EffortCapabilityForEntry(e); cap.Default != wantDefault {
+				t.Errorf("capability default = %q, want %q", cap.Default, wantDefault)
+			}
+			if got, err := NormalizeEffort(e, " XHIGH "); err != nil || got != "xhigh" {
+				t.Fatalf("declared xhigh = %q/%v", got, err)
+			}
+			e.SupportedEfforts = []string{"high"}
+			if _, err := NormalizeEffort(e, "xhigh"); err == nil {
+				t.Fatal("undeclared xhigh accepted")
+			}
+		})
+	}
+}
+
+func TestEffectiveEffortNoneOmitsStoredAndDefaultValues(t *testing.T) {
+	for _, base := range []string{"https://custom.example/v1", "https://api.deepseek.com/v1", "https://api.minimaxi.com/v1"} {
+		for _, effort := range []string{"xhigh", "auto", ""} {
+			e := &ProviderEntry{Kind: "openai", BaseURL: base, Model: "deepseek-flash",
+				ReasoningProtocol: "none", Effort: effort, DefaultEffort: "xhigh", SupportedEfforts: []string{"xhigh"}}
+			if got := EffectiveEffort(e); got != "" {
+				t.Errorf("base=%s effort=%q: EffectiveEffort=%q, want omitted", base, effort, got)
+			}
+			e.SupportedEfforts = nil
+			if got := EffectiveEffort(e); got != "" {
+				t.Errorf("base=%s effort=%q: model fallback with none=%q, want omitted", base, effort, got)
+			}
+		}
+	}
+}
+
 func TestDeepSeekV41EffortAcrossModelsAndStoredAliases(t *testing.T) {
 	for _, model := range []string{"deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"} {
 		for _, explicitLevels := range []bool{false, true} {

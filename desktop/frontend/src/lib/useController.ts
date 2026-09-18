@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { asArray } from "./array";
 import { app, onEvent, onReady, onRuntimeSwitchProgress } from "./bridge";
 import { createRafBatch } from "./rafBatch";
+import { cancelAndObserve, startTurnStatusPolling } from "./cancelTurn";
 import { t } from "./i18n";
 import { modeHasAutoApproveTools } from "./types";
 import type {
@@ -27,6 +28,7 @@ import type {
   SessionMeta,
   TabMeta,
   ToolApprovalMode,
+  TurnStatus,
   TurnItemStatus,
   TurnOutcome,
   WireApproval,
@@ -118,6 +120,10 @@ interface State {
   hydrating: boolean;
   running: boolean;
   cancelRequested: boolean;
+  cancelSlow: boolean;
+  turnEpoch: number;
+  effortPending: boolean;
+  effortRequestId: number;
   turnActive: boolean;
   approval?: WireApproval;
   ask?: WireAsk;
@@ -134,6 +140,7 @@ interface State {
   committedFinalMessageId?: string;
   live?: LiveStream;
   pendingUser?: string;
+  pendingTerminals?: WireEvent[];
   discardTurn?: boolean;
   turnStartAt: number;
   turnProcessStartAt: number;
@@ -154,6 +161,10 @@ export const initialState: State = {
   hydrating: false,
   running: false,
   cancelRequested: false,
+  cancelSlow: false,
+  turnEpoch: 0,
+  effortPending: false,
+  effortRequestId: 0,
   turnActive: false,
   context: { used: 0, window: 0, sessionTokens: 0, windowConfirmed: false, costAvailable: false },
   jobs: [],
@@ -229,12 +240,16 @@ type Action =
   | { type: "unsend" }
   | { type: "cancel_requested" }
   | { type: "cancel_rejected" }
+  | { type: "cancel_slow" }
+  | { type: "turn_status"; status: TurnStatus; replacedTurnId?: string; turnEpoch?: number }
   | { type: "send_failed"; error: string }
   | { type: "backend_status"; running: boolean }
   | { type: "meta"; meta: Meta }
   | { type: "context"; context: ContextInfo }
   | { type: "balance"; balance: BalanceInfo }
-  | { type: "effort"; effort: EffortInfo }
+  | { type: "effort"; effort: EffortInfo; requestId?: number }
+  | { type: "effort_pending"; requestId: number }
+  | { type: "effort_settled"; requestId: number; effort?: EffortInfo }
   | { type: "jobs"; jobs: JobView[] }
   | { type: "checkpoints"; checkpoints: CheckpointMeta[] }
   | { type: "message_action_start"; action: MessageActionState }
@@ -565,7 +580,7 @@ function applyEvent(s: State, e: WireEvent): State {
         currentTurnId: turnId,
         committedFinalMessageId: undefined,
         running: true,
-        cancelRequested: false,
+        cancelRequested: cur.cancelRequested,
         turnActive: true,
         turnStartAt: cur.turnActive && cur.turnStartAt ? cur.turnStartAt : now,
         turnProcessStartAt: cur.turnActive ? cur.turnProcessStartAt : 0,
@@ -686,7 +701,14 @@ function applyEvent(s: State, e: WireEvent): State {
     case "approval_request": return { ...s, approval: e.approval };
     case "ask_request": return { ...s, ask: e.ask };
     case "turn_done": {
-      if (e.turnId && e.turnId !== s.currentTurnId) {
+      if (s.pendingUser !== undefined && !s.currentTurnId) {
+        const refreshed = refreshMatchingTurnStats(s, e);
+        if (refreshed || !e.turnId || s.items.some((item) => item.turnId === e.turnId)) return refreshed ?? s;
+        // A controller failure can precede Agent.TurnStarted. Retain the full
+        // event until an epoch-scoped status read confirms its identity.
+        return { ...s, pendingTerminals: [...(s.pendingTerminals ?? []).filter((event) => event.turnId !== e.turnId), e] };
+      }
+      if (e.turnId && s.currentTurnId && e.turnId !== s.currentTurnId) {
         // A delayed completion may arrive after a new turn starts. Its
         // authoritative aggregate still belongs to the old turn, including
         // usage from child producers, so refresh only that turn's stats.
@@ -706,7 +728,7 @@ function applyEvent(s: State, e: WireEvent): State {
       const showError = Boolean(e.err) && outcome !== "cancelled";
       const withError: Item[] = showError ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err!, turnId: e.turnId || s.currentTurnId }] : finalized;
       const stats = appendTurnStats(s, withError, outcome, finalMessageId, e);
-      return { ...s, items: stats.items, live: undefined, running: false, cancelRequested: false, turnActive: false, currentAssistant: undefined, currentTurnId: undefined, committedFinalMessageId: undefined, approval: undefined, ask: undefined, seq: stats.seq, turnStartAt: 0, turnProcessStartAt: 0, turnTokens: 0, turnUsageTokens: 0 };
+      return { ...s, items: stats.items, pendingTerminals: undefined, live: undefined, running: false, cancelRequested: false, cancelSlow: false, meta: s.meta ? { ...s.meta, paused: false } : undefined, turnActive: false, currentAssistant: undefined, currentTurnId: undefined, committedFinalMessageId: undefined, approval: undefined, ask: undefined, seq: stats.seq, turnStartAt: 0, turnProcessStartAt: 0, turnTokens: 0, turnUsageTokens: 0 };
     }
     default: return s;
   }
@@ -726,12 +748,29 @@ export function reducer(s: State, a: Action): State {
         turnTokens: 0,
         turnUsageTokens: 0,
         pendingUser: a.text,
+        pendingTerminals: undefined,
         discardTurn: false,
+        currentTurnId: undefined,
+        turnEpoch: s.turnEpoch + 1,
+        cancelRequested: false,
+        cancelSlow: false,
       };
     }
     case "unsend": return { ...s, pendingUser: undefined, discardTurn: true, running: false, live: undefined };
-    case "cancel_requested": return s.cancelRequested ? s : { ...s, cancelRequested: true };
-    case "cancel_rejected": return s.cancelRequested ? { ...s, cancelRequested: false } : s;
+    case "cancel_requested": return { ...s, cancelRequested: true, cancelSlow: false };
+    case "cancel_rejected": return { ...s, cancelRequested: false, cancelSlow: false };
+    case "cancel_slow": return { ...s, cancelSlow: true };
+    case "turn_status": {
+      if (a.turnEpoch !== undefined && a.turnEpoch !== s.turnEpoch) return s;
+      if (a.status.turnId && s.currentTurnId && a.status.turnId !== s.currentTurnId && a.replacedTurnId !== s.currentTurnId) return s;
+      if (s.pendingUser !== undefined && !s.currentTurnId && a.turnEpoch === undefined) return s;
+      if (!s.currentTurnId && s.pendingUser !== undefined && a.status.turnId && s.items.some((item) => item.turnId === a.status.turnId)) return s;
+      if (a.status.running) return { ...s, currentTurnId: a.status.turnId || s.currentTurnId, running: true, cancelRequested: Boolean(a.status.cancelRequested) || s.cancelRequested };
+      if (!s.running) return { ...s, cancelRequested: false, cancelSlow: false };
+      s = flushPendingUser({ ...s, currentTurnId: a.status.turnId || s.currentTurnId });
+      const terminal = s.pendingTerminals?.find((event) => event.turnId === a.status.turnId);
+      return reducer(s, { type: "event", e: { ...terminal, kind: "turn_done", turnId: a.status.turnId || s.currentTurnId, outcome: a.status.outcome || terminal?.outcome || (s.cancelRequested ? "cancelled" : "interrupted") } });
+    }
     case "send_failed": {
       if (s.pendingUser === undefined) return s;
       let idx = -1;
@@ -741,10 +780,10 @@ export function reducer(s: State, a: Action): State {
       }
       const items = idx >= 0 ? s.items.map((it, i) => (i === idx ? { ...it, failed: true } : it)) : s.items;
       const notice: Item = { kind: "notice", id: `n${s.seq}`, level: "warn", text: a.error };
-      return { ...s, pendingUser: undefined, running: false, turnActive: false, live: undefined, seq: s.seq + 1, items: [...items, notice] };
+      return { ...s, pendingUser: undefined, running: false, cancelRequested: false, cancelSlow: false, turnActive: false, live: undefined, seq: s.seq + 1, items: [...items, notice] };
     }
     case "backend_status": {
-      if (a.running === s.running) return s;
+      if (a.running === s.running) return a.running ? s : { ...s, cancelRequested: false, cancelSlow: false };
       if (a.running) return { ...s, running: true, turnActive: true, turnStartAt: s.turnStartAt || Date.now() };
       const finalized = s.items.map((it) => {
         if (it.kind === "assistant" && s.live && it.id === s.live.id) return { ...it, text: s.live.text, reasoning: s.live.reasoning, streaming: false };
@@ -753,7 +792,7 @@ export function reducer(s: State, a: Action): State {
         return it;
       });
       const stats = appendTurnStats(s, finalized, "interrupted", s.committedFinalMessageId);
-      return { ...s, items: stats.items, running: false, turnActive: false, live: undefined, currentAssistant: undefined, currentTurnId: undefined, committedFinalMessageId: undefined, approval: undefined, ask: undefined, seq: stats.seq, turnStartAt: 0, turnProcessStartAt: 0, turnTokens: 0, turnUsageTokens: 0 };
+      return { ...s, items: stats.items, running: false, cancelRequested: false, cancelSlow: false, pendingUser: undefined, meta: s.meta ? { ...s.meta, paused: false } : undefined, turnActive: false, live: undefined, currentAssistant: undefined, currentTurnId: undefined, committedFinalMessageId: undefined, approval: undefined, ask: undefined, seq: stats.seq, turnStartAt: 0, turnProcessStartAt: 0, turnTokens: 0, turnUsageTokens: 0 };
     }
     case "meta": return sameMeta(s.meta, a.meta) ? s : { ...s, meta: a.meta };
     case "context": {
@@ -769,7 +808,9 @@ export function reducer(s: State, a: Action): State {
       return { ...s, context: { ...a.context, costAvailable }, usage, sessionTokens, sessionCost, sessionCurrency, costAvailable };
     }
     case "balance": return { ...s, balance: a.balance };
-    case "effort": return { ...s, effort: a.effort };
+    case "effort": return s.effortPending || (a.requestId !== undefined && a.requestId < s.effortRequestId) ? s : { ...s, effort: a.effort, effortRequestId: a.requestId ?? s.effortRequestId };
+    case "effort_pending": return { ...s, effortPending: true, effortRequestId: a.requestId };
+    case "effort_settled": return a.requestId < s.effortRequestId ? s : { ...s, effortPending: false, effortRequestId: a.requestId, effort: a.effort ?? s.effort };
     case "jobs": return { ...s, jobs: a.jobs };
     case "checkpoints": return { ...s, checkpoints: a.checkpoints };
     case "message_action_start": return { ...s, messageAction: a.action };
@@ -813,7 +854,7 @@ export function reducer(s: State, a: Action): State {
     }
     case "clearApproval": return { ...s, approval: undefined };
     case "clearAsk": return { ...s, ask: undefined };
-    case "reset": return { ...initialState, meta: s.meta, context: { ...s.context, used: 0, sessionTokens: 0 }, balance: s.balance, effort: s.effort, jobs: s.jobs };
+    case "reset": return { ...initialState, turnEpoch: s.turnEpoch + 1, effortPending: s.effortPending, effortRequestId: s.effortRequestId, meta: s.meta, context: { ...s.context, used: 0, sessionTokens: 0 }, balance: s.balance, effort: s.effort, jobs: s.jobs };
     case "event": return applyEvent(s, a.e);
     default: return s;
   }
@@ -872,10 +913,17 @@ function afterNextPaint(): Promise<void> {
   });
 }
 
+let effortRequestSequence = 0;
+async function refreshEffortForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<void> {
+  const requestId = ++effortRequestSequence;
+  const effort = await app.EffortForTab(tabId);
+  dispatchTo(tabId, { type: "effort", effort, requestId });
+}
+
 async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<void> {
   try {
     dispatchTo(tabId, { type: "meta", meta: await app.MetaForTab(tabId) });
-    dispatchTo(tabId, { type: "effort", effort: await app.EffortForTab(tabId) });
+    await refreshEffortForTab(tabId, dispatchTo);
   } catch {
     /* ignore */
   }
@@ -883,7 +931,10 @@ async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, acti
 
 export function useController() {
   const statesRef = useRef<TabStates>(new Map());
-  const lastTokenAt = useRef(0);
+  const pendingSends = useRef(new Map<string, Promise<void>>());
+  const statusRequests = useRef(new Map<string, { epoch: number | undefined; promise: Promise<TurnStatus> }>());
+  const cancelRequests = useRef(new Map<string, object>());
+  useEffect(() => () => { cancelRequests.current.clear(); }, []);
   const [activeTabId, setActiveTabId] = useState<string | undefined>();
   const activeTabIdRef = useRef<string | undefined>(undefined);
   // A render-triggering counter so that mutations to a non-active tab's state still
@@ -893,9 +944,7 @@ export function useController() {
 
   // The active tab's current state, with a stable identity for cancel().
   const activeState = activeTabId ? getOrCreateState(statesRef.current, activeTabId) : initialState;
-  const stateRef = useRef(activeState);
   activeTabIdRef.current = activeTabId;
-  stateRef.current = activeState;
 
   // Dispatch to a specific tab's state. If the tab doesn't have state yet, it's
   // created. Bumps the version so React re-renders when it becomes active.
@@ -908,6 +957,23 @@ export function useController() {
       bump();
     }
   }, [bump]);
+
+  const readTurnStatus = useCallback(async (tabId: string): Promise<TurnStatus> => {
+    const epoch = statesRef.current.get(tabId)?.turnEpoch;
+    const previous = statusRequests.current.get(tabId);
+    if (previous) {
+      if (previous.epoch === epoch) return previous.promise;
+      await previous.promise.catch(() => {});
+      return readTurnStatus(tabId);
+    }
+    const promise = new Promise<TurnStatus>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Turn status request timed out")), 5000);
+      app.TurnStatusForTab(tabId).then(resolve, reject).finally(() => clearTimeout(timer));
+    });
+    statusRequests.current.set(tabId, { epoch, promise });
+    try { return await promise; }
+    finally { statusRequests.current.delete(tabId); }
+  }, []);
 
   const checkpointRefreshSeq = useRef(new Map<string, number>());
   const sessionLoadSeq = useRef(new Map<string, number>());
@@ -1007,9 +1073,7 @@ export function useController() {
     });
 
     // Auxiliary status hydrates independently after the transcript is usable.
-    void safe(app.EffortForTab(tabId)).then((effort) => {
-      if (effort && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "effort", effort });
-    });
+    void safe(refreshEffortForTab(tabId, (id, action) => { if (sessionLoadCurrent(tabId, seq)) dispatchTo(id, action); }));
     void safe(app.JobsForTab(tabId)).then((jobs) => {
       if (jobs && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
     });
@@ -1043,10 +1107,12 @@ export function useController() {
   }, [activeTabFromBackend, loadSessionDataForTab]);
 
   const reconcileTabRuntime = useCallback(async (tabId: string) => {
+    const epoch = statesRef.current.get(tabId)?.turnEpoch;
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
     const tab = tabs.find((candidate) => candidate.id === tabId);
     if (!tab) return;
     const local = statesRef.current.get(tabId);
+    if (local?.turnEpoch !== epoch || pendingSends.current.has(tabId)) return;
     const needsInitialLoad = !local?.meta;
     const missedTurnDone = Boolean(local?.running && !tab.running);
     dispatchTo(tabId, { type: "backend_status", running: Boolean(tab.running) });
@@ -1054,13 +1120,12 @@ export function useController() {
       await loadSessionDataForTab(tabId, missedTurnDone);
       return;
     }
-    const [jobs, effort] = await Promise.all([
+    const [jobs] = await Promise.all([
       app.JobsForTab(tabId).catch(() => undefined),
-      app.EffortForTab(tabId).catch(() => undefined),
+      refreshEffortForTab(tabId, dispatchTo).catch(() => undefined),
     ]);
     void refreshContextForTab(tabId);
     if (jobs) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
-    if (effort) dispatchTo(tabId, { type: "effort", effort });
     refreshBalanceForTab(tabId);
   }, [dispatchTo, loadSessionDataForTab, refreshBalanceForTab, refreshContextForTab]);
 
@@ -1079,9 +1144,6 @@ export function useController() {
         requestContextRefresh(targetTabId);
         return;
       }
-      if (e.kind === "turn_started" || e.kind === "text" || e.kind === "reasoning") {
-        lastTokenAt.current = Date.now();
-      }
       if (e.kind === "text" || e.kind === "reasoning") {
         textBatch.push({ tabId: targetTabId, e });
       } else {
@@ -1095,7 +1157,7 @@ export function useController() {
         void refreshMetaForTab(targetTabId, dispatchTo);
         requestContextRefresh(targetTabId);
         refreshBalanceForTab(targetTabId);
-        app.EffortForTab(targetTabId).then((effort) => dispatchTo(targetTabId, { type: "effort", effort })).catch(() => {});
+        void refreshEffortForTab(targetTabId, dispatchTo).catch(() => {});
         void refreshCheckpoints(targetTabId);
       }
       if (e.kind === "compaction_done") {
@@ -1144,27 +1206,20 @@ export function useController() {
     return () => window.clearInterval(timer);
   }, [activeTabId, activeState.running, requestContextRefresh]);
 
-  // Stale-stream watchdog: if the frontend thinks the agent is running but
-  // no token events have arrived for 30 seconds, reconcile with the backend.
-  // This catches the case where the Wails event channel silently drops the
-  // turn_done event after a model-service interruption (#3746).
-  useEffect(() => {
-    if (!activeTabId) return;
-    const s = statesRef.current.get(activeTabId);
-    if (!s?.running || !s.live) return;
-    const since = Date.now() - lastTokenAt.current;
-    if (since >= 30_000) {
-      void reconcileTabRuntime(activeTabId);
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      const cur = statesRef.current.get(activeTabId);
-      if (cur?.running && cur.live && Date.now() - lastTokenAt.current >= 30_000) {
-        void reconcileTabRuntime(activeTabId);
+  useEffect(() => startTurnStatusPolling({
+    tabs: () => statesRef.current.keys(),
+    state: (tabId) => statesRef.current.get(tabId),
+    pending: (tabId) => pendingSends.current.has(tabId),
+    status: readTurnStatus,
+    update: (tabId, status, turnEpoch) => {
+      dispatchTo(tabId, { type: "turn_status", status, turnEpoch });
+      if (!status.running) {
+        void refreshMetaForTab(tabId, dispatchTo);
+        requestContextRefresh(tabId);
+        void refreshCheckpoints(tabId);
       }
-    }, 30_000 - since);
-    return () => window.clearTimeout(timer);
-  }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.live]);
+    },
+  }), [dispatchTo, readTurnStatus, refreshCheckpoints, requestContextRefresh]);
 
   const send = useCallback(async (displayText: string, submitText = displayText): Promise<void> => {
     const submitForTab = async (tabId: string): Promise<void> => {
@@ -1172,11 +1227,19 @@ export function useController() {
       dispatchTo(tabId, { type: "user", text: displayText, seq });
       const display = displayText.trim();
       const submit = submitText.trim();
+      const epoch = statesRef.current.get(tabId)?.turnEpoch;
+      let pending: Promise<void> | undefined;
       try {
-        await (display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit));
+        pending = display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit);
+        pendingSends.current.set(tabId, pending);
+        await pending;
       } catch (error) {
-        dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
+        if (statesRef.current.get(tabId)?.turnEpoch === epoch) {
+          dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
+        }
         throw error;
+      } finally {
+        if (pendingSends.current.get(tabId) === pending) pendingSends.current.delete(tabId);
       }
     };
     const tabId = activeTabIdRef.current ?? activeTabId;
@@ -1212,27 +1275,34 @@ export function useController() {
   }, [activeTabId, dispatchTo]);
 
   const cancel = useCallback((): string | undefined => {
-    const cur = stateRef.current;
-    const tabId = activeTabId;
-    if (cur.running && cur.pendingUser !== undefined) {
-      const text = cur.pendingUser;
-      if (tabId) {
-        dispatchTo(tabId, { type: "unsend" });
-        dispatchTo(tabId, { type: "cancel_requested" });
-        app.RequestCancelTab(tabId).then((ack) => {
-          if (!ack.accepted) dispatchTo(tabId, { type: "cancel_rejected" });
-        }).catch(() => dispatchTo(tabId, { type: "cancel_rejected" }));
-      }
-      return text;
-    }
-    if (tabId) {
-      dispatchTo(tabId, { type: "cancel_requested" });
-      app.RequestCancelTab(tabId).then((ack) => {
-        if (!ack.accepted) dispatchTo(tabId, { type: "cancel_rejected" });
-      }).catch(() => dispatchTo(tabId, { type: "cancel_rejected" }));
-    }
-    return undefined;
-  }, [activeTabId, dispatchTo]);
+    const tabId = activeTabIdRef.current;
+    if (!tabId) return;
+    const cur = statesRef.current.get(tabId);
+    if (!cur?.running || (cur.cancelRequested && !cur.cancelSlow)) return;
+    const request = {};
+    cancelRequests.current.set(tabId, request);
+    const current = () => cancelRequests.current.get(tabId) === request && statesRef.current.get(tabId)?.turnEpoch === cur.turnEpoch && Boolean(statesRef.current.get(tabId)?.running);
+    dispatchTo(tabId, { type: "cancel_requested" });
+    void (async () => {
+      await cancelAndObserve({
+        turnId: cur.currentTurnId,
+        admission: pendingSends.current.get(tabId),
+        status: () => readTurnStatus(tabId),
+        cancel: (turnId) => app.RequestCancelTurnForTab(tabId, turnId),
+        current,
+        update: (status, replacedTurnId) => {
+          dispatchTo(tabId, { type: "turn_status", status, replacedTurnId, turnEpoch: cur.turnEpoch });
+          if (!status.running) void refreshMetaForTab(tabId, dispatchTo);
+        },
+        slow: () => dispatchTo(tabId, { type: "cancel_slow" }),
+        error: (error) => {
+          dispatchTo(tabId, { type: "cancel_slow" });
+          dispatchTo(tabId, { type: "local_notice", level: "warn", text: `${t("composer.stopFailed")}: ${errorMessage(error)}` });
+        },
+      });
+    })();
+    return cur.pendingUser;
+  }, [activeTabId, dispatchTo, readTurnStatus]);
 
   const approve = useCallback((id: string, allow: boolean, session: boolean, persist: boolean) => {
     if (!activeTabId) return;
@@ -1300,7 +1370,7 @@ export function useController() {
     }
     try {
       dispatchTo(activeTabId, { type: "meta", meta: await app.MetaForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "effort", effort: await app.EffortForTab(activeTabId) });
+      await refreshEffortForTab(activeTabId, dispatchTo);
     } catch { /* ignore */ }
   }, [activeTabId, dispatchTo]);
 
@@ -1365,7 +1435,7 @@ export function useController() {
     if (!activeTabId) return;
     try {
       dispatchTo(activeTabId, { type: "meta", meta: await app.MetaForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "effort", effort: await app.EffortForTab(activeTabId) });
+      await refreshEffortForTab(activeTabId, dispatchTo);
       await refreshContextForTab(activeTabId);
     } catch { /* ignore */ }
   }, [activeTabId, dispatchTo, refreshContextForTab]);
@@ -1396,19 +1466,29 @@ export function useController() {
     }
     try {
       dispatchTo(activeTabId, { type: "meta", meta: await app.MetaForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "effort", effort: await app.EffortForTab(activeTabId) });
+      await refreshEffortForTab(activeTabId, dispatchTo);
       await refreshContextForTab(activeTabId);
     } catch { /* ignore */ }
   }, [activeTabId, dispatchTo, refreshContextForTab]);
 
   const setEffort = useCallback(async (level: string) => {
     if (!activeTabId) return;
-    await app.SetEffortForTab(activeTabId, level).catch(() => {});
+    const tabId = activeTabId;
+    const current = statesRef.current.get(tabId);
+    if (current?.effortPending || current?.running) return;
+    const requestId = ++effortRequestSequence;
+    dispatchTo(tabId, { type: "effort_pending", requestId });
     try {
-      dispatchTo(activeTabId, { type: "meta", meta: await app.MetaForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "effort", effort: await app.EffortForTab(activeTabId) });
-      await refreshContextForTab(activeTabId);
-    } catch { /* ignore */ }
+      await app.SetEffortForTab(tabId, level);
+      const effort = await app.EffortForTab(tabId);
+      dispatchTo(tabId, { type: "effort_settled", effort, requestId: ++effortRequestSequence });
+      void refreshMetaForTab(tabId, dispatchTo);
+      void refreshContextForTab(tabId);
+    } catch (error) {
+      dispatchTo(tabId, { type: "effort_settled", requestId: ++effortRequestSequence });
+      dispatchTo(tabId, { type: "local_notice", level: "warn", text: errorMessage(error) });
+      throw error;
+    }
   }, [activeTabId, dispatchTo, refreshContextForTab]);
 
   const fetchMemory = useCallback((): Promise<MemoryView> =>

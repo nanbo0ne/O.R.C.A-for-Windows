@@ -59,6 +59,7 @@ import type {
   SlashArgsResult,
   TabMeta,
   ToolLibrarySettings,
+  TurnStatus,
   TopicMeta,
   UpdateInfo,
   UpdateProgress,
@@ -116,6 +117,8 @@ export interface AppBindings {
   Cancel(): Promise<void>;
   CancelTab(tabID: string): Promise<void>;
   RequestCancelTab(tabID: string): Promise<CancelAck>;
+  RequestCancelTurnForTab(tabID: string, turnID: string): Promise<CancelAck>;
+  TurnStatusForTab(tabID: string): Promise<TurnStatus>;
   PauseTab(tabID: string): Promise<void>;
   ResumeTab(tabID: string): Promise<void>;
   Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
@@ -1415,7 +1418,12 @@ function makeMockApp(): AppBindings {
         },
         async RequestCancelTab(_tabID) {
           await withMockTabScope(_tabID, () => this.Cancel());
-          return { accepted: true, turnId: "mock-turn" };
+          return { accepted: true, turnId: "mock-turn", running: false, outcome: "cancelled" };
+        },
+        async RequestCancelTurnForTab(tabID, _turnID) { return this.RequestCancelTab(tabID); },
+        async TurnStatusForTab(tabID) {
+          const tab = (await this.ListTabs()).find((item) => item.id === tabID);
+          return { running: Boolean(tab?.running), turnId: "mock-turn" };
         },
         async Approve(_id, allow, session, persist) {
           if (!pendingApprovalPreview) return;

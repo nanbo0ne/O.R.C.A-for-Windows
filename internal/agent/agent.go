@@ -550,6 +550,9 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) error {
 	streamRecoveries := 0
 	executorHandoff := a.executorHandoffGuard && strings.Contains(input.Text, executorHandoffMarker)
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if a.pauseWait != nil {
 			if err := a.pauseWait(ctx); err != nil {
 				return err
@@ -574,6 +577,12 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) error {
 		requestID := event.NewRequestID()
 		text, reasoning, signature, calls, usage, interrupted, partialToolStarted, err := a.stream(ctx, step+1, requestID)
 		if err != nil {
+			if ctx.Err() != nil {
+				if text != "" || reasoning.content != "" || reasoning.protocol != nil {
+					a.session.Add(provider.Message{Role: provider.RoleAssistant, Content: text, ReasoningContent: reasoning.content, ProtocolReasoningContent: reasoning.protocol, ReasoningSignature: signature})
+				}
+				return ctx.Err()
+			}
 			if interrupted && streamRecoveries < maxStreamRecoveries {
 				streamRecoveries++
 				if hasVisibleFinalAnswer(text) {
@@ -672,11 +681,6 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) error {
 		usedAnyTool = true
 
 		results := a.executeBatch(ctx, calls)
-		if a.pauseWait != nil {
-			if err := a.pauseWait(ctx); err != nil {
-				return err
-			}
-		}
 		for i, call := range calls {
 			a.session.Add(provider.Message{
 				Role:       provider.RoleTool,
@@ -684,6 +688,14 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) error {
 				ToolCallID: call.ID,
 				Name:       call.Name,
 			})
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if a.pauseWait != nil {
+			if err := a.pauseWait(ctx); err != nil {
+				return err
+			}
 		}
 
 		// The prompt only grows from here; compact before the next turn so it
@@ -883,7 +895,28 @@ func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string,
 		}
 		return stored, display
 	}
-	for chunk := range ch {
+	cancelled := func() (string, turnReasoning, string, []provider.ToolCall, *provider.Usage, bool, bool, error) {
+		stored, _ := finishReasoning()
+		return text.String(), stored, signature, nil, usage, false, partialToolStarted, ctx.Err()
+	}
+streamLoop:
+	for {
+		if ctx.Err() != nil {
+			return cancelled()
+		}
+		var chunk provider.Chunk
+		select {
+		case <-ctx.Done():
+			return cancelled()
+		case next, ok := <-ch:
+			if !ok {
+				break streamLoop
+			}
+			chunk = next
+		}
+		if ctx.Err() != nil {
+			return cancelled()
+		}
 		switch chunk.Type {
 		case provider.ChunkReasoning:
 			reasoningReceived = true
@@ -923,6 +956,9 @@ func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string,
 			}
 			return "", turnReasoning{}, "", nil, nil, false, false, chunk.Err
 		}
+	}
+	if ctx.Err() != nil {
+		return cancelled()
 	}
 	// With a PostLLMCall hook, the live stream was suppressed above; transform the
 	// full reasoning now and emit it once so the sink never sees the untranslated
@@ -1020,6 +1056,9 @@ func (a *Agent) systemPrompt() string {
 // parallelised.
 func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []string {
 	for _, c := range calls {
+		if ctx.Err() != nil {
+			break
+		}
 		t, ok := a.tools.Get(c.Name)
 		ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly()}
 		if ok {
@@ -1032,6 +1071,9 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 				ev.Profile = pr.ResolveProfile(json.RawMessage(c.Arguments))
 			}
 		}
+		if ctx.Err() != nil {
+			break
+		}
 		a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: ev})
 	}
 
@@ -1039,6 +1081,14 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 	outcomes := make([]toolOutcome, len(calls))
 	durations := make([]int64, len(calls))
 	run := func(i int) {
+		// Check inside the worker too: a parallel call may have waited for a
+		// slot while an earlier call cancelled the turn. Keep a result for each
+		// skipped call so the stored assistant/tool sequence stays resumable.
+		if err := ctx.Err(); err != nil {
+			outcomes[i] = toolOutcome{output: "error: " + err.Error(), errMsg: err.Error(), blocked: true}
+			results[i] = outcomes[i].output
+			return
+		}
 		start := time.Now()
 		outcomes[i] = a.executeOne(ctx, calls[i])
 		durations[i] = time.Since(start).Milliseconds()

@@ -107,3 +107,17 @@ func TestExplainError(t *testing.T) {
 		t.Error("unknown errors should pass through unchanged")
 	}
 }
+
+func TestExplainModelUnavailable(t *testing.T) {
+	previous := i18n.M
+	t.Cleanup(func() { i18n.M = previous })
+	for _, language := range []string{"zh", "en"} {
+		i18n.DetectLanguage(language)
+		got := explainError(&provider.APIError{Provider: "custom", Status: 404, Body: `{"error":{"code":"model_not_found","message":"missing deployment"}}`}).Error()
+		for _, want := range []string{"custom", "404", "missing deployment"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("missing %q in %s", want, got)
+			}
+		}
+	}
+}

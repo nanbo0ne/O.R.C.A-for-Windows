@@ -62,6 +62,50 @@ func TestEffortInvalidRejected(t *testing.T) {
 	}
 }
 
+func TestConfiguredEffortsRespectProtocol(t *testing.T) {
+	for _, tc := range []struct {
+		name, base, protocol, effort, want string
+		levels                             []string
+		reject                             bool
+	}{
+		{name: "declared xhigh", effort: " XHIGH ", levels: []string{" XHIGH "}, want: "xhigh"},
+		{name: "declared max", effort: "max", levels: []string{"max"}, want: "max"},
+		{name: "custom value", effort: "turbo", levels: []string{"turbo"}, want: "turbo"},
+		{name: "undeclared xhigh", effort: "xhigh", reject: true},
+		{name: "empty declaration", effort: "xhigh", levels: []string{"", "auto", " "}, reject: true},
+		{name: "restricted declaration", effort: "high", levels: []string{"xhigh"}, reject: true},
+		{name: "auto omits", effort: "auto", levels: []string{"xhigh"}},
+		{name: "none ignores declaration", protocol: "none", effort: "xhigh", levels: []string{"xhigh"}},
+		{name: "official deepseek alias", base: "https://api.deepseek.com/v1", effort: "xhigh", levels: []string{"xhigh"}, want: "high"},
+		{name: "official deepseek default", base: "https://api.deepseek.com/v1", effort: "auto", levels: []string{"xhigh"}, want: "high"},
+		{name: "official deepseek rejects custom", base: "https://api.deepseek.com/v1", effort: "turbo", levels: []string{"turbo"}, reject: true},
+		{name: "minimax disabled", base: "https://api.minimaxi.com/v1", effort: "disabled", levels: []string{"xhigh"}, want: "disabled"},
+		{name: "minimax rejects xhigh", base: "https://api.minimaxi.com/v1", effort: "xhigh", levels: []string{"xhigh"}, reject: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := tc.base
+			if base == "" {
+				base = "https://custom.example/v1"
+			}
+			p, err := New(provider.Config{Name: "custom", BaseURL: base, Model: "m", Extra: map[string]any{
+				"effort": tc.effort, "supported_efforts": tc.levels, "reasoning_protocol": tc.protocol,
+			}})
+			if tc.reject {
+				if err == nil {
+					t.Fatal("expected effort validation error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := p.(*client).effort; got != tc.want {
+				t.Fatalf("effort = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestReasoningProtocolOverridesEndpointHeuristic(t *testing.T) {
 	p, err := New(provider.Config{
 		Name:    "deepseek-proxy",

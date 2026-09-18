@@ -73,7 +73,7 @@ jobs:
         run: go test ./... -count=1 -p=1
 
       - name: Test changed concurrency boundaries
-        run: go test -race ./internal/agent ./internal/control ./internal/billing ./internal/localai ./internal/config -count=1 -p=1
+        run: go test -race ./internal/agent ./internal/control ./internal/event ./internal/provider/openai ./internal/billing ./internal/localai ./internal/config -count=1 -p=1
 
       - name: Generate frontend bindings
         run: |
@@ -229,6 +229,7 @@ jobs:
         run: |
           if [ "${{ runner.os }}" = Linux ]; then
             go test -tags webkit2_41 ./... -count=1 -p=1
+            go test -race -tags webkit2_41 . -run 'TestCancel|TestEffortPersistenceV310|TestRuntimeReconfigur|TestWorkAdmission' -count=1
           else
             go test ./... -count=1 -p=1
           fi
@@ -352,10 +353,10 @@ jobs:
           "$seven_zip" t dist/O.R.C.A-for-Windows-windows-amd64-installer.exe
           "$seven_zip" t dist/O.R.C.A-for-Windows-windows-amd64.zip
 
-      # Published upgrade baseline: desktop-v3.0.8.
+      # Published upgrade baseline: desktop-v3.0.9.
       # Asset: O.R.C.A-for-Windows-windows-amd64-installer.exe
-      # Size: 88808549 bytes
-      # SHA256: 708a94d7a97690ea1e5abd8e9fa6c0fcd4a0edf334ac5eb6f2c11b8e593c13b0
+      # Size: 91192109 bytes
+      # SHA256: 89efd5e03de9848988189901ce90fe0ec761a980c64b16e5bda0c2b9c14a7723
       # The acceptance script checks the size, pinned hash, and published SHA256SUMS.txt.
       - name: Test Windows installer upgrade and data retention
         if: runner.os == 'Windows'

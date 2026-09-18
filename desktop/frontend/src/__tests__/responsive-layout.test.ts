@@ -171,10 +171,10 @@ check(
   "Classic run status follows the Composer width when both sidebars are open",
 );
 check(
-    composer.includes('composer-runstatus__primary--${hasDraftContent ? "send" : "stop"}') &&
-    composer.includes("onClick={hasDraftContent ? () => void submit() : handleCancel}") &&
-    composer.includes("hasDraftContent ? (disabled || submitting || pendingPaste > 0 || !hasSendableContent) : cancelRequested") &&
-    composer.includes('hasDraftContent ? <ArrowUp size={13} /> : <Square size={11} fill="currentColor" strokeWidth={1.8} />') &&
+    composer.includes('composer-runstatus__primary--${showDraftSend ? "send" : "stop"}') &&
+    composer.includes("onClick={showDraftSend ? () => void submit() : handleCancel}") &&
+    composer.includes("showDraftSend ? (disabled || submitting || pendingPaste > 0 || !hasSendableContent) : cancelRequested && !cancelSlow") &&
+    composer.includes('showDraftSend ? <ArrowUp size={13} /> : <Square size={11} fill="currentColor" strokeWidth={1.8} />') &&
     css.includes(".composer-runstatus__primary {\n  --wails-draggable: no-drag;") &&
     css.includes("width: 34px;\n  min-width: 34px;\n  max-width: 34px;\n  height: 34px;") &&
     css.includes(".composer-runstatus__primary--send {") &&
@@ -295,11 +295,17 @@ check(
     css.includes("animation: none !important;"),
   "restored history skips bulk entrance animation during its first paint",
 );
+const sessionLoader = controller.slice(controller.indexOf("const loadSessionDataForTab ="), controller.indexOf("const activeTabFromBackend ="));
+const primaryLoaded = sessionLoader.indexOf('dispatchTo(tabId, { type: "session_primary_loaded"');
+const primaryDependencies = sessionLoader.indexOf("await Promise.all([metaLoad, historyLoad])");
+const auxiliaryEffort = sessionLoader.indexOf("void safe(refreshEffortForTab(tabId,");
 check(
   controller.includes("Meta and history are the only first-paint dependencies") &&
     controller.includes("afterNextPaint()") &&
     controller.includes('dispatchTo(meta.id, { type: "session_load_start"') &&
-    controller.indexOf("safe(app.EffortForTab(tabId))") > controller.indexOf('type: "session_primary_loaded"'),
+    primaryDependencies >= 0 && primaryLoaded > primaryDependencies &&
+    auxiliaryEffort > primaryLoaded &&
+    sessionLoader.slice(auxiliaryEffort).includes("if (sessionLoadCurrent(tabId, seq)) dispatchTo(id, action)"),
   "conversation selection paints before history work and auxiliary status hydrates later",
 );
 

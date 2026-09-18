@@ -915,6 +915,11 @@ func (a *App) queueSubmitDuringRuntimeReconfigure(tabID string, pending pendingR
 	if tab == nil || !tab.runtimeReconfiguring {
 		return false
 	}
+	if tab.pendingSubmitCount == 0 {
+		tab.pendingSubmitEpoch++
+	}
+	pending.epoch = tab.pendingSubmitEpoch
+	tab.pendingSubmitCount++
 	tab.pendingRuntimeSubmits = append(tab.pendingRuntimeSubmits, pending)
 	return true
 }
@@ -943,21 +948,76 @@ func (a *App) CancelTab(tabID string) {
 	}
 }
 
-type CancelAck struct {
-	Accepted bool   `json:"accepted"`
-	TurnID   string `json:"turnId,omitempty"`
-}
+type CancelAck = control.CancelAck
 
 // RequestCancelTab acknowledges whether a running turn accepted cancellation.
 // Completion still arrives through turn_completed(cancelled).
 func (a *App) RequestCancelTab(tabID string) CancelAck {
-	ctrl := a.ctrlByTabID(tabID)
-	if ctrl == nil || !ctrl.Running() {
+	return a.RequestCancelTurnForTab(tabID, "")
+}
+
+func pendingSubmitID(tab *WorkspaceTab) string {
+	return fmt.Sprintf("queued-%s-%d", tab.ID, tab.pendingSubmitEpoch)
+}
+
+func (a *App) TurnStatusForTab(tabID string) control.TurnStatus {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	tab := a.tabByIDLocked(tabID)
+	if tab == nil {
+		return control.TurnStatus{}
+	}
+	var status control.TurnStatus
+	if tab.Ctrl != nil {
+		status = tab.Ctrl.TurnStatus()
+	}
+	if !status.Running && tab.pendingSubmitCount > 0 {
+		return control.TurnStatus{Running: true, TurnID: pendingSubmitID(tab)}
+	}
+	return status
+}
+
+func (a *App) RequestCancelTurnForTab(tabID, turnID string) CancelAck {
+	tab := a.tabByID(tabID)
+	if tab == nil {
 		return CancelAck{}
 	}
-	ack := CancelAck{Accepted: true, TurnID: fmt.Sprintf("%d", ctrl.Turn())}
-	ctrl.Cancel()
-	return ack
+	tab.submitMu.Lock()
+	defer tab.submitMu.Unlock()
+	a.mu.Lock()
+	if a.tabs[tab.ID] != tab {
+		a.mu.Unlock()
+		return CancelAck{}
+	}
+	ctrl := tab.Ctrl
+	var status control.TurnStatus
+	if ctrl != nil {
+		status = ctrl.TurnStatus()
+	}
+	pendingID := pendingSubmitID(tab)
+	queued := tab.pendingSubmitCount > 0
+	// A queued admission retains its identity while that exact turn executes.
+	if turnID != "" && turnID == tab.launchedPendingID && status.TurnID == tab.launchedPendingTurn {
+		turnID = status.TurnID
+	}
+	// Never clear a successor's queue when a stale turn cancellation arrives.
+	if turnID != "" && turnID != status.TurnID && !(queued && turnID == pendingID) {
+		a.mu.Unlock()
+		return CancelAck{TurnStatus: status}
+	}
+	if queued {
+		tab.pendingSubmitEpoch++
+		tab.pendingSubmitCount = 0
+		tab.pendingRuntimeSubmits = nil
+	}
+	a.mu.Unlock()
+	if queued && !status.Running {
+		return CancelAck{Accepted: true, TurnStatus: control.TurnStatus{TurnID: pendingID, Outcome: event.TurnOutcomeCancelled}}
+	}
+	if ctrl == nil {
+		return CancelAck{}
+	}
+	return ctrl.CancelTurn(turnID)
 }
 
 // Steer sends mid-turn guidance to the agent without interrupting the in-flight request.
@@ -4558,14 +4618,14 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	generation := a.beginTabRuntimeReconfigure(tab)
 	tab.runtimeMu.Lock()
 	defer tab.runtimeMu.Unlock()
+	success := false
+	defer func() { a.finishTabRuntimeReconfigure(tab, generation, success) }()
 	if !a.tabRuntimeGenerationCurrent(tab, generation) {
-		return nil
+		return fmt.Errorf("conversation settings changed while saving effort; try again")
 	}
 	if tab.Ctrl != nil && tab.Ctrl.Running() {
 		return fmt.Errorf("finish or cancel the current turn before changing effort")
 	}
-	success := false
-	defer func() { a.finishTabRuntimeReconfigure(tab, generation, success) }()
 	entry, err := a.currentProviderEntryForTab(tabID)
 	if err != nil {
 		return err
@@ -4613,15 +4673,21 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		if closed {
 			return fmt.Errorf("conversation closed while changing effort")
 		}
-		return nil
+		return fmt.Errorf("conversation settings changed while saving effort; try again")
 	}
+	oldEffort, oldLabel, oldStartupErr, oldReady, oldPrefs := tab.effort, tab.Label, tab.StartupErr, tab.Ready, a.recentPrefs
 	tab.Ctrl = newCtrl
 	tab.effort = &effort
 	tab.Label = newCtrl.Label()
 	tab.StartupErr = ""
 	tab.Ready = true
 	a.rememberConversationPrefsLocked(tab)
-	a.saveTabsLocked()
+	if err := a.saveTabsLocked(); err != nil {
+		tab.Ctrl, tab.effort, tab.Label, tab.StartupErr, tab.Ready, a.recentPrefs = oldCtrl, oldEffort, oldLabel, oldStartupErr, oldReady, oldPrefs
+		a.mu.Unlock()
+		newCtrl.Close()
+		return fmt.Errorf("save conversation effort: %w", err)
+	}
 	a.mu.Unlock()
 	if oldCtrl != nil {
 		oldCtrl.Close()

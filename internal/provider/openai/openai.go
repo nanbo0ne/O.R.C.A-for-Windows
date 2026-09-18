@@ -7,7 +7,7 @@
 //   - api.minimaxi.com -> emits thinking.type=adaptive|disabled (M3's binary
 //     knob) instead of reasoning_effort, since M3 has no level scale.
 //   - everything else (MiMo and other OpenAI-compatible gateways) uses the
-//     vanilla reasoning_effort scale (low/medium/high).
+//     configured reasoning_effort levels, or low/medium/high by default.
 package openai
 
 import (
@@ -94,15 +94,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 			return nil, fmt.Errorf("openai: provider %q uses MiniMax thinking; effort must be adaptive or disabled", name)
 		}
 	case effort != "":
-		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
-		// high); "max" is a DeepSeek-ism MiMo et al. reject with 400, so clamp it
-		// to the OpenAI ceiling and reject other values at boot, not at request time.
-		switch effort {
-		case "max":
-			effort = "high"
-		case "low", "medium", "high":
-		default:
-			return nil, fmt.Errorf("openai: provider %q: effort must be low, medium, or high", name)
+		supported, _ := cfg.Extra["supported_efforts"].([]string)
+		effort, err = normalizeOpenAIEffort(effort, supported)
+		if err != nil {
+			return nil, fmt.Errorf("openai: provider %q: %w", name, err)
 		}
 	}
 	httpClient, err := newHTTPClient(cfg)

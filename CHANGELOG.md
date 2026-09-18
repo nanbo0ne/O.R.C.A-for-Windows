@@ -1,5 +1,14 @@
 # Changelog
 
+## Desktop 3.0.10 / 桌面版 3.0.10
+
+- Fix effort persistence/request behavior, current-turn cancellation and stale completion corrupting successor lifecycle state. Five live provider cases and the native Wails build passed; full regression, CI, platform packages and upgrade/publication acceptance are pending. Native-window interaction was not tested.
+- 修复思考强度保存与请求生效、当前回合取消及迟到完成事件影响新回合的问题。五项真实供应商验证与原生 Wails 构建通过；全量回归、CI、多平台发行包、升级发布验收待完成，原生窗口交互未测试。
+- Retain the standard Windows installer restored in 3.0.9; pin upgrade acceptance to the published 3.0.9 installer. No Modern / Classic redesign.
+- 沿用 3.0.9 已恢复的标准 Windows 安装器，升级验收固定使用已发布 3.0.9 安装包；不改版 Modern / Classic。
+- [Release notes / 发布说明](docs/releases/desktop-v3.0.10.md)
+- [Verification / 验收](docs/audits/desktop-v3.0.10-verification.md)
+
 ## Desktop 3.0.9 / 桌面版 3.0.9
 
 - Windows: restore the standard NSIS / MUI2 wizard and replace PowerShell process detection with a native Go helper. Continue immediately when no target is running and files are replaceable; allow up to 5 seconds for graceful exit, then terminate only confirmed target remnants.

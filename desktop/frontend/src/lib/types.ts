@@ -397,7 +397,10 @@ export interface Meta {
 export type CollaborationMode = "normal" | "plan" | "goal";
 export type ToolApprovalMode = "ask" | "auto" | "yolo";
 export type PromptMode = "coding" | "assistant";
-export interface CancelAck { accepted: boolean; turnId?: string }
+export interface TurnStatus { running: boolean; turnId?: string; cancelRequested?: boolean; outcome?: TurnOutcome }
+// An accepted queued alias can resolve to the actual turnId here. Subsequent
+// cancellation status polling must follow that acknowledged identity.
+export interface CancelAck extends TurnStatus { accepted: boolean }
 export type RuntimeSwitchPhase = "preparing" | "building" | "restoring" | "swapping" | "completed" | "failed" | "interrupted";
 export interface RuntimeSwitchResult {
   requestedMode: PromptMode;

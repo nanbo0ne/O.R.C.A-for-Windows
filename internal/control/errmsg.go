@@ -40,6 +40,12 @@ func explainError(err error) error {
 	}
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
+		if apiErr.Status == 404 && strings.Contains(strings.ToLower(apiErr.Body), "model_not_found") {
+			if i18n.M == i18n.Chinese {
+				return fmt.Errorf("%s：供应商当前未开放所选模型（HTTP 404）。请刷新模型列表，或向供应商确认模型名称与访问权限。\n%s", apiErr.Provider, providerBodyReason(apiErr.Body))
+			}
+			return fmt.Errorf("%s: selected model is unavailable (HTTP 404). Refresh the model list or check its name and access with the provider.\n%s", apiErr.Provider, providerBodyReason(apiErr.Body))
+		}
 		msg := i18n.M.ProviderStatusMessage(apiErr.Status)
 		if msg == "" {
 			return err

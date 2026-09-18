@@ -602,7 +602,7 @@ export default function App() {
   const tabMetasSignatureRef = useRef("");
   const promptModeSwitchingRef = useRef<Record<string, boolean>>({});
   const pendingModelSwitchRef = useRef<Record<string, Promise<void>>>({});
-  const pendingEffortSwitchRef = useRef<Record<string, Promise<void>>>({});
+  const pendingEffortSwitchRef = useRef<Partial<Record<string, Promise<void>>>>({});
   const pendingPromptModeSwitchRef = useRef<Partial<Record<string, Promise<void>>>>({});
   const pendingPromptModeOriginRef = useRef<Record<string, PromptMode>>({});
   const latestModelSwitchRef = useRef<Record<string, string>>({});
@@ -1333,14 +1333,15 @@ export default function App() {
 
   const switchEffort = useCallback(
     async (level: string) => {
-      if (!activeTabId) return;
+      if (!activeTabId || runningRef.current || pendingEffortSwitchRef.current[activeTabId]) return;
       latestEffortSwitchRef.current[activeTabId] = level;
       setPendingEffortsByTab((current) => (current[activeTabId] === level ? current : { ...current, [activeTabId]: level }));
-      if (runningRef.current) return;
       const task = (async () => {
         try {
           await setEffort(level);
           await refreshMeta();
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : String(error));
         } finally {
           if (latestEffortSwitchRef.current[activeTabId] === level) {
             delete latestEffortSwitchRef.current[activeTabId];
@@ -1357,7 +1358,7 @@ export default function App() {
       pendingEffortSwitchRef.current[activeTabId] = task;
       await task;
     },
-    [activeTabId, refreshMeta, setEffort],
+    [activeTabId, refreshMeta, setEffort, showToast],
   );
 
   const applyPendingRuntimePrefs = useCallback(async (tabId: string) => {
@@ -2968,6 +2969,8 @@ export default function App() {
               promptModeSwitching={promptModeSwitching}
               runtimeSwitch={state.runtimeSwitch}
               cancelRequested={state.cancelRequested}
+              cancelSlow={state.cancelSlow}
+              effortSaving={state.effortPending || Boolean(activeTabId && pendingEffortsByTab[activeTabId])}
               showToolApprovalControls={!automationConversation}
               paused={Boolean(state.meta?.paused)}
               goal={goal}
@@ -2994,7 +2997,7 @@ export default function App() {
               onConfigureEffort={() => setSettingsTarget("providers")}
               insertRequest={composerInsertRequest}
               pasteRequest={composerPasteRequest}
-              disabled={state.meta?.ready === false || state.meta?.readOnly === true || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+              disabled={state.effortPending || Boolean(activeTabId && pendingEffortsByTab[activeTabId]) || state.meta?.ready === false || state.meta?.readOnly === true || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
               decisionPending={state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
               ready={state.meta?.ready === true}
               turnStartAt={state.turnStartAt}

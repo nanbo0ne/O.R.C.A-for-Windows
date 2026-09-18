@@ -85,6 +85,11 @@ type WorkspaceTab struct {
 	// protects the fields below; runtimeMu deliberately stays per-tab so an
 	// unrelated conversation can still start or switch models concurrently.
 	runtimeMu             sync.Mutex
+	submitMu              sync.Mutex
+	pendingSubmitEpoch    uint64
+	pendingSubmitCount    int
+	launchedPendingID     string
+	launchedPendingTurn   string
 	runtimeGeneration     uint64
 	runtimeReconfiguring  bool
 	pendingRuntimeSubmits []pendingRuntimeSubmit
@@ -93,6 +98,7 @@ type WorkspaceTab struct {
 type pendingRuntimeSubmit struct {
 	display string
 	input   string
+	epoch   uint64
 }
 
 type recentConversationPrefs struct {
@@ -1049,29 +1055,32 @@ type wireEventTab struct {
 
 // TabMeta is the frontend-facing shape of one tab.
 type TabMeta struct {
-	ID                string `json:"id"`
-	Scope             string `json:"scope"`
-	WorkspaceRoot     string `json:"workspaceRoot"`
-	WorkspaceName     string `json:"workspaceName"`
-	TopicID           string `json:"topicId"`
-	TopicTitle        string `json:"topicTitle"`
-	ProjectColor      string `json:"projectColor,omitempty"`
-	Label             string `json:"label"`
-	Ready             bool   `json:"ready"`
-	Running           bool   `json:"running"`
-	Mode              string `json:"mode"`
-	CollaborationMode string `json:"collaborationMode"`
-	ToolApprovalMode  string `json:"toolApprovalMode"`
-	AskWorkflow       bool   `json:"askWorkflowEnabled"`
-	StepThinking      bool   `json:"stepThinkingEnabled"`
-	PromptMode        string `json:"promptMode"`
-	EnhancedMode      bool   `json:"enhancedModeEnabled"`
-	Goal              string `json:"goal,omitempty"`
-	GoalStatus        string `json:"goalStatus,omitempty"`
-	StartupErr        string `json:"startupErr,omitempty"`
-	ReadOnly          bool   `json:"readOnly,omitempty"`
-	Active            bool   `json:"active"`
-	Cwd               string `json:"cwd"`
+	ID                string            `json:"id"`
+	Scope             string            `json:"scope"`
+	WorkspaceRoot     string            `json:"workspaceRoot"`
+	WorkspaceName     string            `json:"workspaceName"`
+	TopicID           string            `json:"topicId"`
+	TopicTitle        string            `json:"topicTitle"`
+	ProjectColor      string            `json:"projectColor,omitempty"`
+	Label             string            `json:"label"`
+	Ready             bool              `json:"ready"`
+	Running           bool              `json:"running"`
+	TurnID            string            `json:"turnId,omitempty"`
+	CancelRequested   bool              `json:"cancelRequested"`
+	Outcome           event.TurnOutcome `json:"outcome,omitempty"`
+	Mode              string            `json:"mode"`
+	CollaborationMode string            `json:"collaborationMode"`
+	ToolApprovalMode  string            `json:"toolApprovalMode"`
+	AskWorkflow       bool              `json:"askWorkflowEnabled"`
+	StepThinking      bool              `json:"stepThinkingEnabled"`
+	PromptMode        string            `json:"promptMode"`
+	EnhancedMode      bool              `json:"enhancedModeEnabled"`
+	Goal              string            `json:"goal,omitempty"`
+	GoalStatus        string            `json:"goalStatus,omitempty"`
+	StartupErr        string            `json:"startupErr,omitempty"`
+	ReadOnly          bool              `json:"readOnly,omitempty"`
+	Active            bool              `json:"active"`
+	Cwd               string            `json:"cwd"`
 }
 
 func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
@@ -1105,7 +1114,11 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		m.ProjectColor = projectColor(tab.WorkspaceRoot)
 	}
 	if tab.Ctrl != nil {
-		m.Running = tab.Ctrl.Running()
+		status := tab.Ctrl.TurnStatus()
+		m.Running, m.TurnID, m.CancelRequested, m.Outcome = status.Running, status.TurnID, status.CancelRequested, status.Outcome
+	}
+	if !m.Running && tab.pendingSubmitCount > 0 {
+		m.Running, m.TurnID, m.Outcome = true, pendingSubmitID(tab), ""
 	}
 	return m
 }
@@ -1981,8 +1994,17 @@ func (a *App) drainRuntimeSubmits(tab *WorkspaceTab, queued []pendingRuntimeSubm
 	defer done()
 	for _, pending := range queued {
 		for {
+			tab.submitMu.Lock()
+			a.mu.Lock()
+			valid := a.tabs[tab.ID] == tab && pending.epoch == tab.pendingSubmitEpoch
+			a.mu.Unlock()
+			if !valid {
+				tab.submitMu.Unlock()
+				return
+			}
 			ctrl := a.ctrlByTabID(tab.ID)
 			if ctrl == nil {
+				tab.submitMu.Unlock()
 				return
 			}
 			if !ctrl.Running() {
@@ -1991,8 +2013,17 @@ func (a *App) drainRuntimeSubmits(tab *WorkspaceTab, queued []pendingRuntimeSubm
 					display = pending.input
 				}
 				a.submitAdmittedController(ctrl, display, pending.input)
+				a.mu.Lock()
+				tab.launchedPendingID = pendingSubmitID(tab)
+				tab.launchedPendingTurn = ctrl.TurnStatus().TurnID
+				if tab.pendingSubmitCount > 0 {
+					tab.pendingSubmitCount--
+				}
+				a.mu.Unlock()
+				tab.submitMu.Unlock()
 				break
 			}
+			tab.submitMu.Unlock()
 			select {
 			case <-time.After(50 * time.Millisecond):
 			case <-a.bootContext().Done():
@@ -2544,14 +2575,16 @@ func desktopConfigDir() string {
 	return filepath.Join(dir, product.ConfigDirName)
 }
 
-func (a *App) saveTabsLocked() {
+func (a *App) saveTabsLocked() error {
 	desktopModelStateMu.Lock()
 	defer desktopModelStateMu.Unlock()
 	if a.modelMigrationErr != "" {
-		return
+		return fmt.Errorf("%s", a.modelMigrationErr)
 	}
 	dir := desktopConfigDir()
-	os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
 	var entries []desktopTabEntry
 	for _, id := range a.orderedTabIDsLocked() {
 		if tab := a.tabs[id]; tab != nil {
@@ -2581,14 +2614,20 @@ func (a *App) saveTabsLocked() {
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "agent:ready")
 			}
+			return err
 		}
-		return
+		return nil
 	}
-	b, _ := json.MarshalIndent(f, "", "  ")
+	b, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return err
+	}
 	path := filepath.Join(dir, tabsFileName)
 	tmp := path + ".tmp"
-	os.WriteFile(tmp, b, 0o644)
-	os.Rename(tmp, path)
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (a *App) orderedTabIDsLocked() []string {

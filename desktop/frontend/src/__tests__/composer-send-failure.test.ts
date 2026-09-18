@@ -62,7 +62,9 @@ check(draft.text === "keep this draft" && draft.attachments.length === 1, "text 
 check(reported instanceof Error && reported.message === "workspace is still starting", "failure is delivered to the inline error reporter");
 check(composerSource.includes('role="status"') && composerSource.includes('t("msg.sendFailed")'), "Composer renders send failures as inline status feedback");
 check(composerSource.includes("if (!sameComposerDraft(submittedDraft, draftSnapshotRef.current)) return;"), "successful sends clear only their unchanged draft snapshot");
-check(composerSource.includes("disabled={hasDraftContent ? (disabled || submitting") && !composerSource.includes("readOnly={submitting}"), "sending disables the send control without making the textarea readonly");
+check(composerSource.includes("const showDraftSend = hasDraftContent && !cancelRequested;"), "cancellation keeps the stop action visible even when a draft exists");
+check(composerSource.includes("disabled={showDraftSend ? (disabled || submitting || pendingPaste > 0 || !hasSendableContent) : cancelRequested && !cancelSlow}") && !composerSource.includes("readOnly={submitting}"), "sending disables the send control without making the textarea readonly; slow cancellation permits retry");
+check(composerSource.includes("onClick={showDraftSend ? () => void submit() : handleCancel}"), "running primary action sends a draft or cancels the current turn");
 check(appSource.includes("await send(trimmed, submitText.trim())"), "App awaits the Submit callback before Composer can clear the draft");
 check(controllerSource.includes("throw error;"), "controller send propagates the rejecting backend promise");
 check(controllerSource.includes('if (!active?.id) throw new Error("Cannot send: no active tab is available.");'), "missing active tabs reject instead of reporting a successful send");

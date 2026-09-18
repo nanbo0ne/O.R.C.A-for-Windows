@@ -82,19 +82,33 @@ func (s *lifecycleSink) deltaItem(e Event, typ ItemType, id string) {
 	s.next.Emit(e)
 }
 
+func (s *lifecycleSink) resetTurn(id string) {
+	s.turnID = id
+	s.agentItemID, s.messageID, s.reasoningItemID = "", "", ""
+	s.lastAgentItemID, s.lastMessageID, s.compactionItemID = "", "", ""
+	s.answerCommitted = false
+	s.tools = map[string]string{}
+}
+
 func (s *lifecycleSink) Emit(e Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if e.Kind == TurnStarted {
-		if s.turnID == "" {
-			s.turnID = e.TurnID
-			if s.turnID == "" {
-				s.turnID = lifecycleID("turn")
+		if s.turnID == "" || (e.TurnID != "" && e.TurnID != s.turnID) {
+			id := e.TurnID
+			if id == "" {
+				id = lifecycleID("turn")
 			}
-			s.tools = map[string]string{}
+			s.resetTurn(id)
 		}
 		e.TurnID = s.turnID
+		s.next.Emit(e)
+		return
+	}
+	if e.Kind == TurnDone && e.TurnID != "" && e.TurnID != s.turnID {
+		// Preserve the old completion for aggregate/history consumers, without
+		// attaching the active turn's answer or clearing its item identities.
 		s.next.Emit(e)
 		return
 	}
@@ -200,9 +214,6 @@ func (s *lifecycleSink) Emit(e Event) {
 
 	s.next.Emit(e)
 	if e.Kind == TurnDone {
-		s.turnID, s.agentItemID, s.messageID, s.reasoningItemID = "", "", "", ""
-		s.lastAgentItemID, s.lastMessageID, s.compactionItemID = "", "", ""
-		s.answerCommitted = false
-		s.tools = map[string]string{}
+		s.resetTurn("")
 	}
 }

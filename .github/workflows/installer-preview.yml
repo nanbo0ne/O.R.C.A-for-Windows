@@ -102,7 +102,7 @@ jobs:
         run: |
           $copies = @(
             @{ Source = 'preview-dist\app\amd64\Orca.exe'; Destination = 'desktop\build\bin\Orca.exe' },
-            @{ Source = 'preview-dist\O.R.C.A-for-Windows-v3.0.9-windows-amd64-preview-installer.exe'; Destination = 'dist\O.R.C.A-for-Windows-windows-amd64-installer.exe' }
+            @{ Source = 'preview-dist\O.R.C.A-for-Windows-v3.0.10-windows-amd64-preview-installer.exe'; Destination = 'dist\O.R.C.A-for-Windows-windows-amd64-installer.exe' }
           )
           $hashes = foreach ($copy in $copies) {
             $source = Join-Path $env:GITHUB_WORKSPACE $copy.Source
@@ -120,7 +120,7 @@ jobs:
       - name: Test Windows installer upgrade and data retention
         timeout-minutes: 15
         run: |
-          ./scripts/test-desktop-installer.ps1 -ExpectedVersion '3.0.9' *>&1 |
+          ./scripts/test-desktop-installer.ps1 -ExpectedVersion '3.0.10' *>&1 |
             Tee-Object -FilePath "$env:GITHUB_WORKSPACE\preview-dist\reports\acceptance.log"
 
       - name: Collect acceptance and build reports
@@ -149,7 +149,7 @@ jobs:
         if: always() && runner.environment == 'github-hosted'
         uses: actions/upload-artifact@v7
         with:
-          name: installer-preview-3.0.9-windows-amd64-${{ github.run_id }}-${{ github.run_attempt }}
+          name: installer-preview-3.0.10-windows-amd64-${{ github.run_id }}-${{ github.run_attempt }}
           path: preview-dist/
           if-no-files-found: error
           retention-days: 7
