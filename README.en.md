@@ -4,11 +4,11 @@
 
 **O.R.C.A.** (**Open Reasoning & Computing Agent**) is an open-source workspace for real work. It brings model conversations, Assistant, Coding, research, files and images, engineering tools, memory, and automation into one pausable, inspectable, recoverable application.
 
-> **3.0.8: Modern chat polish.** Center the turn rail around its contents, constrain and center the Composer and auxiliary areas, and give running status its own space. Reorder effort, model, and run controls, improve keyboard menus, and provide a settings path for unknown effort. Classic is unchanged; managed local AI and Computer Use stay disabled. See [release notes](docs/releases/desktop-v3.0.8.md), the [UI audit](docs/audits/2026-09-18-modern-chat-polish.md), and [release verification](docs/audits/desktop-v3.0.8-verification.md). Release acceptance is still pending.
+> **3.0.8: Modern chat polish.** Center the turn rail around its contents, constrain and center the Composer and auxiliary areas, and give running status its own space. Reorder effort, model, and run controls, improve keyboard menus, and provide a settings path for unknown effort. Classic is unchanged; managed local AI and Computer Use stay disabled. See [release notes](docs/releases/desktop-v3.0.8.md), the [UI audit](docs/audits/2026-09-18-modern-chat-polish.md), and [release verification](docs/audits/desktop-v3.0.8-verification.md).
 
 ## Downloads
 
-The links below target 3.0.8. Packages, signatures, and SHA-256 checksums become authoritative when the verified Release is public; release preparation is in progress. New builds omit old-brand duplicate assets while retaining installer upgrade compatibility.
+Download 3.0.8 packages, signatures, and SHA-256 checksums from the Release links below. New builds omit old-brand duplicate assets while retaining installer upgrade compatibility.
 
 | Platform | Package | Notes |
 | --- | --- | --- |
@@ -147,7 +147,7 @@ Windows publisher-signing and macOS notarization limitations continue: Windows p
 - An installed Windows build offers **explicit download -> user confirms exit -> run the installer**. It never downloads or installs in the background. The app should save sessions and drafts before exit and leave the existing installation in place if the operation fails.
 - Downloads show source, measured speed, and estimated time remaining. Sustained low speed suggests another source: cancel, select, and retry to resume a valid partial file. The alternative must match the signed version, size, and digest; switching never relaxes verification. Throughput depends on the network and server, and GitHub is not guaranteed to be faster.
 - macOS/Linux show the available version and integrity details and open the matching download page/package. Cross-platform in-place updating is not presented as complete. The macOS check uses the URL above as its primary source, with GitHub as fallback.
-- Older versions without a working in-app update path need one manual installation from a published Release page. Do not edit the config version or replace credential files by hand to force an upgrade. Background-process detection, closure before replacement, lock/access checks, and prevention of skipped files remain from 3.0.7; save tasks before manual upgrades. Actual 3.0.8 upgrade and data-retention results await release verification and cannot inherit a previous version's pass.
+- Older versions without a working in-app update path need one manual installation from a published Release page. Do not edit the config version or replace credential files by hand to force an upgrade. Background-process detection, closure before replacement, lock/access checks, and prevention of skipped files remain from 3.0.7; save tasks before manual upgrades. Upgrade and data-retention test results are listed in the release verification record.
 
 ## Configuration and Migration
 
@@ -189,7 +189,7 @@ Run `wails dev` in `desktop` for development. Running `npm run dev` alone uses a
 | Blank window or frame issue | WebView2/WebKitGTK/GTK versions, GPU driver, and Modern/Classic selection; restart and collect logs before classifying it as a native defect |
 | Updater does nothing | Primary manifest, GitHub fallback, signature/version fields, and system proxy; on Windows manually download and exit to install rather than expecting a background install |
 
-See the [3.0.8 build checklist](docs/build/desktop-v3.0.8.md) and [release acceptance record](docs/audits/desktop-v3.0.8-verification.md) for pending checks. The [UI audit](docs/audits/2026-09-18-modern-chat-polish.md) records 362 cases and 3990 assertions with no failures, including 60 English/Chinese Classic CSS geometry/computed-style comparisons with no differences; attachments passed a separate 24 assertions. These do not establish installation, real-provider, or three-platform release acceptance. The [3.0.7 verification](docs/audits/desktop-v3.0.7-verification.md), [3.0.5 verification](docs/audits/desktop-v3.0.5-verification.md), [3.0.4 validation report](docs/audits/2026-09-08-v3.0.4-release-validation.md), and [historical download measurements](docs/audits/2026-09-08-download-diagnosis.md) describe earlier results. [desktop/README.md](desktop/README.md) and the [artifact runtime boundary](docs/ARTIFACT_RUNTIME.md) provide focused details.
+See the [3.0.8 build checklist](docs/build/desktop-v3.0.8.md) and [release acceptance record](docs/audits/desktop-v3.0.8-verification.md) for test results and limitations. The [UI audit](docs/audits/2026-09-18-modern-chat-polish.md) records 362 cases and 3990 assertions with no failures, including 60 English/Chinese Classic CSS geometry/computed-style comparisons with no differences; attachments passed a separate 24 assertions. These do not establish installation, real-provider, or three-platform release acceptance. The [3.0.7 verification](docs/audits/desktop-v3.0.7-verification.md), [3.0.5 verification](docs/audits/desktop-v3.0.5-verification.md), [3.0.4 validation report](docs/audits/2026-09-08-v3.0.4-release-validation.md), and [historical download measurements](docs/audits/2026-09-08-download-diagnosis.md) describe earlier results. [desktop/README.md](desktop/README.md) and the [artifact runtime boundary](docs/ARTIFACT_RUNTIME.md) provide focused details.
 
 ## License
 
