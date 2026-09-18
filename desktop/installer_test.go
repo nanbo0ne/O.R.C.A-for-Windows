@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
-func TestWindowsInstallerOffersShortcutAndLaunchChoices(t *testing.T) {
+func TestWindowsInstallerPreservesUTF8ChineseBOM(t *testing.T) {
 	body, err := os.ReadFile("build/windows/installer/project.nsi")
 	if err != nil {
 		t.Fatal(err)
@@ -17,13 +18,38 @@ func TestWindowsInstallerOffersShortcutAndLaunchChoices(t *testing.T) {
 	if !bytes.HasPrefix(body, []byte{0xEF, 0xBB, 0xBF}) {
 		t.Fatal("installer script must use a UTF-8 BOM so makensis decodes custom Chinese text correctly")
 	}
-	script := string(body)
+	if !utf8.Valid(body) || !utf8.ValidString(readWindowsInstallerGuardSource(t)) {
+		t.Fatal("installer and its guard include must contain valid UTF-8 Chinese text")
+	}
+	if !strings.Contains(string(body), `!insertmacro MUI_LANGUAGE "SimpChinese"`) {
+		t.Fatal("installer must retain Simplified Chinese language support")
+	}
+}
+
+func TestWindowsInstallerOffersShortcutAndLaunchChoices(t *testing.T) {
+	script := readWindowsInstallerSource(t)
+	previous := -1
+	for _, page := range []string{
+		`!insertmacro MUI_PAGE_WELCOME`,
+		`!insertmacro MUI_PAGE_LICENSE "resources\eula.txt"`,
+		`!insertmacro MUI_PAGE_DIRECTORY`,
+		`Page custom InstallOptionsPage InstallOptionsPageLeave`,
+		`!insertmacro MUI_PAGE_INSTFILES`,
+		`!insertmacro MUI_PAGE_FINISH`,
+	} {
+		at := strings.Index(script, page)
+		if at <= previous {
+			t.Fatalf("standard installer wizard page is missing or out of order: %s", page)
+		}
+		previous = at
+	}
+	sources := script + "\n" + readWindowsInstallerGuardSource(t)
 	for _, want := range []string{
-		"Page custom InstallOptionsPage InstallOptionsPageLeave",
-		"MUI_FINISHPAGE_RUN",
-		"运行 ${INFO_PRODUCTNAME}",
-		"选择安装选项",
+		`!include "MUI2.nsh"`,
+		`!define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXECUTABLE}"`,
+		`!define MUI_FINISHPAGE_RUN_TEXT "运行 ${INFO_PRODUCTNAME}"`,
 		"创建桌面快捷方式",
+		`${NSD_GetState} $DesktopShortcutCheckbox $CreateDesktopShortcut`,
 		"CreateDesktopShortcut == ${BST_CHECKED}",
 		"Delete \"$DESKTOP\\${INFO_PRODUCTNAME}.lnk\"",
 		"IfFileExists \"$DESKTOP\\${INFO_PRODUCTNAME}.lnk\"",
@@ -31,7 +57,7 @@ func TestWindowsInstallerOffersShortcutAndLaunchChoices(t *testing.T) {
 		`File /oname=LICENSE.node.txt "..\installer-go\payload\LICENSE.node.txt"`,
 		`File /r "..\installer-go\payload\codegraph\*.*"`,
 	} {
-		if !strings.Contains(script, want) {
+		if !strings.Contains(sources, want) {
 			t.Fatalf("installer is missing %q", want)
 		}
 	}
@@ -221,20 +247,20 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`Preinstalled WebView2 is required`,
 		},
 		"official_baseline": {
-			`https://api.github.com/repos/nanbo0ne/O.R.C.A-for-Windows/releases/tags/desktop-v3.0.5`,
-			`https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.5/`,
-			`$release.tag_name -cne 'desktop-v3.0.5' -or $release.draft -or $release.prerelease`,
+			`https://api.github.com/repos/nanbo0ne/O.R.C.A-for-Windows/releases/tags/desktop-v3.0.8`,
+			`https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.8/`,
+			`$release.tag_name -cne 'desktop-v3.0.8' -or $release.draft -or $release.prerelease`,
 			`$assetName = 'O.R.C.A-for-Windows-windows-amd64-installer.exe'`,
 			`@($assetName, 'SHA256SUMS.txt')`,
 			`$assets.Count -ne 1`,
 			`$checksumRows.Count -ne 1`,
 			`[regex]::Escape($assetName)`,
 			`$oldHash -ine $checksumRows[0].Groups[1].Value -or $oldHash -cne $pinnedOldHash`,
-			`$pinnedOldSize = 88804245`,
+			`$pinnedOldSize = 88808549`,
 			`$name -ceq $assetName -and [long]$assets[0].size -ne $pinnedOldSize`,
 			`$oldSize = (Get-Item -LiteralPath $oldInstaller).Length`,
 			`$oldSize -ne $pinnedOldSize`,
-			`ab824268dcf6b01807022ef3c606db67f11f32c72871069eac86dbe75c50bca3`,
+			`708a94d7a97690ea1e5abd8e9fa6c0fcd4a0edf334ac5eb6f2c11b8e593c13b0`,
 			`tag = $release.tag_name; size = $oldSize; sha256 = $oldHash`,
 			`Invoke-WebRequest -Uri $direct -OutFile $destination -TimeoutSec 120`,
 		},
@@ -248,9 +274,9 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`120000 - $timer.ElapsedMilliseconds`,
 			`$streams.Wait($remaining)`,
 			`$process.ExitCode -ne 0`,
-			`Owned-Path 'upgrade target with spaces'`,
-			`Owned-Path 'fresh target with spaces'`,
-			`Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir" 'install-305'`,
+			"Owned-Path \"upgrade target with spaces `u{4e2d}`u{6587}\"",
+			"Owned-Path \"fresh target with spaces `u{4e2d}`u{6587}\"",
+			`Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir" 'install-308'`,
 			`Invoke-BoundedProcess $newInstaller '/S' 'upgrade-current'`,
 			`Invoke-BoundedProcess $newInstaller "/S /D=$freshDir" 'install-fresh'`,
 			`Invoke-BoundedProcess $uninstaller "/S _?=$target" $Label`,
@@ -272,7 +298,7 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`models\synthetic-tiny.gguf`,
 			`$markerHashes[$safe] = Get-SHA256 $safe`,
 			`(Get-SHA256 $path) -cne $markerHashes[$path]`,
-			`Assert-Markers 'installed-305'`,
+			`Assert-Markers 'installed-308'`,
 			`Assert-Markers 'upgraded-current'`,
 			`Assert-Markers $Label`,
 			`Invoke-DefaultUninstall $freshDir 'uninstall-fresh'`,
@@ -292,7 +318,7 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`$key.GetValue('DisplayVersion')`,
 			`GetVersionInfo($installedApp).ProductVersion`,
 			`$location -ine $target`,
-			`Assert-Installation $upgradeDir '3.0.5' 'installed-305'`,
+			`Assert-Installation $upgradeDir '3.0.8' 'installed-308'`,
 			`Assert-Installation $upgradeDir $productVersion 'upgraded-current'`,
 			`Assert-CurrentPayload $freshDir 'fresh-directory'`,
 			`Assert-CurrentPayload $upgradeDir 'upgraded-current'`,
@@ -322,8 +348,8 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 	guard := strings.Index(script, "$env:GITHUB_ACTIONS -cne 'true'")
 	functions := strings.Index(script, "function Get-PlainPath")
 	firstWrite := strings.Index(script, "[void][IO.Directory]::CreateDirectory($ownedRoot)")
-	size := strings.Index(script, "throw 'Official 3.0.5 installer size mismatch.'")
-	checksum := strings.Index(script, "throw 'Official 3.0.5 installer SHA256 mismatch.'")
+	size := strings.Index(script, "throw 'Official 3.0.8 installer size mismatch.'")
+	checksum := strings.Index(script, "throw 'Official 3.0.8 installer SHA256 mismatch.'")
 	install := strings.Index(script, `Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir"`)
 	if guard < 0 || functions <= guard || firstWrite <= functions || size < 0 || checksum <= size || install <= checksum {
 		t.Fatal("runner guards must precede side effects; baseline verification must precede installation")

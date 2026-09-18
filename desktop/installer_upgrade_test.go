@@ -15,7 +15,61 @@ func readWindowsInstallerSource(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(body)
+	return strings.ReplaceAll(string(body), "\r\n", "\n")
+}
+
+func readWindowsInstallerGuardSource(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("build", "windows", "installer", "installer_guard.nsh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.ReplaceAll(string(body), "\r\n", "\n")
+}
+
+func windowsInstallerBlock(t *testing.T, source, first, last string) string {
+	t.Helper()
+	var lines []string
+	for _, line := range strings.Split(source, "\n") {
+		if len(lines) == 0 && strings.TrimSpace(line) != first {
+			continue
+		}
+		lines = append(lines, line)
+		if strings.TrimSpace(line) == last {
+			return strings.Join(lines, "\n")
+		}
+	}
+	t.Fatalf("missing or unterminated NSIS block %q", first)
+	return ""
+}
+
+func windowsInstallerMakensis(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		t.Skip("NSIS probe is Windows-only")
+	}
+	if configured := os.Getenv("MAKENSIS"); configured != "" {
+		path, err := exec.LookPath(configured)
+		if err != nil {
+			t.Fatalf("configured MAKENSIS is unavailable: %v", err)
+		}
+		return path
+	}
+	for _, candidate := range []string{
+		`C:\Program Files (x86)\NSIS\makensis.exe`,
+		`C:\Program Files\NSIS\makensis.exe`,
+		"makensis.exe",
+	} {
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path
+		}
+	}
+	t.Skip("NSIS compiler unavailable")
+	return ""
+}
+
+func windowsInstallerNSISPath(path string) string {
+	return strings.ReplaceAll(path, "$", "$$")
 }
 
 func TestWindowsInstallerUpgradeAndUninstallContracts(t *testing.T) {
@@ -30,10 +84,9 @@ func TestWindowsInstallerUpgradeAndUninstallContracts(t *testing.T) {
 		`ManifestDPIAware true`,
 		`Call orca.closeTargetProcesses`,
 		`Call un.orca.closeTargetProcesses`,
-		`Get-TargetProcesses`,
-		`CloseMainWindow`,
-		`AddSeconds(5)`,
-		`IfSilent close_target_processes_silent_failed close_target_processes_prompt`,
+		`!include "installer_guard.nsh"`,
+		`SetShellVarContext current`,
+		`WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"`,
 		`WriteRegStr HKCU "${UNINST_KEY}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"`,
 		`Delete "$INSTDIR\uninstall.bat"`,
 		`RMDir "$INSTDIR"`,
@@ -57,17 +110,26 @@ func TestWindowsInstallerUpgradeAndUninstallContracts(t *testing.T) {
 	if strings.Contains(script, `RMDir /r "$INSTDIR"`) {
 		t.Fatal("uninstaller must not recursively remove the selected install directory")
 	}
+	for _, line := range strings.Split(script, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 1 && (strings.HasPrefix(fields[0], "WriteReg") || strings.HasPrefix(fields[0], "DeleteReg")) && fields[1] != "HKCU" {
+			t.Fatalf("installer registry writes must remain per-user: %s", line)
+		}
+	}
 
 	onInit := strings.Index(script, "Function .onInit")
 	if onInit < 0 {
 		t.Fatal("installer is missing .onInit")
 	}
-	onInitBody := script[onInit:]
+	onInitBody := windowsInstallerBlock(t, script, "Function .onInit", "FunctionEnd")
 	explicit := strings.Index(onInitBody, `StrCmp $INSTDIR "${ORCA_INSTALLDIR_SENTINEL}" use_compat_install_dir install_dir_done`)
 	current := strings.Index(onInitBody, `ReadRegStr $0 HKCU "${UNINST_KEY}" "InstallLocation"`)
+	currentIcon := strings.Index(onInitBody, `ReadRegStr $0 HKCU "${UNINST_KEY}" "DisplayIcon"`)
 	legacy := strings.Index(onInitBody, `ReadRegStr $0 HKCU "${LEGACY_UNINST_KEY}" "InstallLocation"`)
-	if explicit < 0 || current < 0 || legacy < 0 || explicit > current || current > legacy {
-		t.Fatalf("install directory precedence is not /D, current registry, legacy registry: explicit=%d current=%d legacy=%d", explicit, current, legacy)
+	legacyIcon := strings.Index(onInitBody, `ReadRegStr $0 HKCU "${LEGACY_UNINST_KEY}" "DisplayIcon"`)
+	fallback := strings.Index(onInitBody, "install_dir_default:")
+	if explicit < 0 || current <= explicit || currentIcon <= current || legacy <= currentIcon || legacyIcon <= legacy || fallback <= legacyIcon {
+		t.Fatalf("install directory precedence must be /D, current location/icon, legacy location/icon, default: %v", []int{explicit, current, currentIcon, legacy, legacyIcon, fallback})
 	}
 	if strings.Contains(onInitBody, `StrCmp $INSTDIR "" 0 done`) {
 		t.Fatal("legacy detection is still short-circuited by the InstallDir default")
@@ -76,34 +138,66 @@ func TestWindowsInstallerUpgradeAndUninstallContracts(t *testing.T) {
 		t.Fatal("missing final default install path fallback")
 	}
 
-	uninstallStart := strings.Index(script, `Section "uninstall"`)
-	if uninstallStart < 0 {
-		t.Fatal("installer is missing the uninstall section")
+	uninstall := windowsInstallerBlock(t, script, `Section "uninstall"`, "SectionEnd")
+	deleteData := windowsInstallerBlock(t, uninstall, `${If} $DeleteSavedData == ${BST_CHECKED}`, `${EndIf}`)
+	for _, path := range []string{
+		`$AppData\${PRODUCT_EXECUTABLE}`, `$AppData\deepseek-orca`, `$AppData\orca`,
+		`$LocalAppData\deepseek-orca`, `$Profile\.deepseek-orca`, `$AppData\O.R.C.A`,
+		`$LocalAppData\O.R.C.A`, `$INSTDIR\data`, `$INSTDIR\.deepseek-orca`,
+	} {
+		remove := `RMDir /r "` + path + `"`
+		if !strings.Contains(deleteData, remove) || strings.Count(script, remove) != 1 {
+			t.Errorf("saved data must be removed only in the explicit opt-in branch: %s", path)
+		}
 	}
-	uninstall := script[uninstallStart:]
-	deleteData := strings.Index(uninstall, `${If} $DeleteSavedData == ${BST_CHECKED}`)
-	webviewData := strings.Index(uninstall, `RMDir /r "$AppData\${PRODUCT_EXECUTABLE}"`)
-	if deleteData < 0 || webviewData < deleteData {
-		t.Fatal("WebView2 data must be removed only inside the explicit delete-data branch")
+	sources := script + "\n" + readWindowsInstallerGuardSource(t)
+	for _, want := range []string{
+		`${NSD_Uncheck} $DeleteSavedDataCheckbox`,
+		`${NSD_GetState} $DeleteSavedDataCheckbox $DeleteSavedData`,
+	} {
+		if !strings.Contains(sources, want) {
+			t.Errorf("uninstall must default to keeping saved data: missing %s", want)
+		}
 	}
 }
 
-func TestWindowsInstallerClosesOnlyExactRuntimePaths(t *testing.T) {
+func TestWindowsInstallerUsesNativeGuardBeforeWrites(t *testing.T) {
 	script := readWindowsInstallerSource(t)
-	if strings.Count(script, `IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 +2`) != 2 ||
-		!strings.Contains(script, `nsExec::ExecToStack /TIMEOUT=45000 '"$2"`) ||
-		!strings.Contains(script, `nsExec::ExecToStack /TIMEOUT=8000 '"$2"`) {
-		t.Fatal("install and uninstall must select native PowerShell before querying runtime paths")
+	guardSource := readWindowsInstallerGuardSource(t)
+	for _, want := range []string{`!insertmacro orca.guard ""`, `!insertmacro orca.guard "un."`} {
+		if !strings.Contains(script+guardSource, want) {
+			t.Errorf("install and uninstall must share the native guard: missing %s", want)
+		}
 	}
-	want := `$$targetPaths = @([IO.Path]::Combine($$targetDir, 'Orca.exe'), [IO.Path]::Combine($$targetDir, 'deepseek-orca-desktop.exe'), [IO.Path]::Combine($$targetDir, 'node.exe'), [IO.Path]::Combine($$targetDir, 'codegraph', 'node.exe'))`
-	if strings.Count(script, want) != 2 {
-		t.Fatalf("installer must use the exact root and codegraph node paths in install and uninstall, count=%d", strings.Count(script, want))
+	guard := windowsInstallerBlock(t, guardSource, "!macro orca.guard PREFIX", "!macroend")
+	for _, want := range []string{
+		`orca-install-guard.exe`, `install-files.txt`, `kernel32::CreateProcessW`,
+		`--dir=$INSTDIR`, `--manifest=$PLUGINSDIR\install-files.txt`, `--status=$GuardStatus`,
+		`--log=$GuardLog`, `--cancel=$PLUGINSDIR\cancel-guard`, `--parent=$GuardParent`,
+		`SetErrorLevel $GuardCode`, `Abort "$GuardMessage"`,
+	} {
+		if !strings.Contains(guard, want) {
+			t.Errorf("native guard contract is missing %q", want)
+		}
 	}
-	if !strings.Contains(script, `Get-Process -ErrorAction Stop | Where-Object`) || !strings.Contains(script, `if (-not $$p.HasExited) { exit 3 }`) {
-		t.Fatal("runtime process matching must filter by resolved full path")
+	for _, forbidden := range []string{"powershell.exe", "Get-TargetProcesses", "taskkill"} {
+		if strings.Contains(strings.ToLower(script+guardSource), strings.ToLower(forbidden)) {
+			t.Errorf("installer must use the native path-scoped guard, found %q", forbidden)
+		}
 	}
-	if strings.Contains(script, `taskkill.exe" /IM`) || strings.Contains(script, `taskkill /IM`) {
-		t.Fatal("installer must not terminate runtimes by image name alone")
+	install := windowsInstallerBlock(t, script, "Section", "SectionEnd")
+	firstGuard := strings.Index(install, "Call orca.closeTargetProcesses")
+	bootstrap := strings.Index(install, "!insertmacro wails.webview2runtime")
+	lastGuard := strings.LastIndex(install, "Call orca.closeTargetProcesses")
+	firstWrite := strings.Index(install, "SetOutPath $INSTDIR")
+	if firstGuard < 0 || bootstrap <= firstGuard || lastGuard <= bootstrap || firstWrite <= lastGuard {
+		t.Fatal("guard must run before runtime bootstrap and again before replacing payload files")
+	}
+	uninstall := windowsInstallerBlock(t, script, `Section "uninstall"`, "SectionEnd")
+	guardAt := strings.Index(uninstall, "Call un.orca.closeTargetProcesses")
+	deleteAt := strings.Index(uninstall, "Delete ")
+	if guardAt < 0 || deleteAt <= guardAt {
+		t.Fatal("uninstall must guard before deleting files or shortcuts")
 	}
 }
 
@@ -127,83 +221,5 @@ func TestWindowsProductNamePreservesUpgradeIdentifiers(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Fatalf("installer lost identity compatibility: %s", want)
 		}
-	}
-}
-
-func TestWindowsInstallerCompilesWithMakensis(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("makensis contract compilation is Windows-only")
-	}
-
-	makensis := os.Getenv("MAKENSIS")
-	if makensis == "" {
-		for _, candidate := range []string{
-			"C:\\Program Files (x86)\\NSIS\\makensis.exe",
-			"C:\\Program Files\\NSIS\\makensis.exe",
-		} {
-			if _, err := os.Stat(candidate); err == nil {
-				makensis = candidate
-				break
-			}
-		}
-	}
-	if makensis == "" {
-		makensis, _ = exec.LookPath("makensis.exe")
-	}
-	if makensis == "" {
-		t.Skip("makensis is not installed")
-	}
-
-	const resultName = "orca-nsis-parameters-probe.txt"
-	resultPath := filepath.Join(os.TempDir(), resultName)
-	_ = os.Remove(resultPath)
-	t.Cleanup(func() {
-		_ = os.Remove(resultPath)
-	})
-
-	script := "Unicode true\n" +
-		"SilentInstall silent\n" +
-		"AutoCloseWindow true\n" +
-		"RequestExecutionLevel user\n" +
-		"InstallDir \"$TEMP\\\\orca-nsis-sentinel\"\n" +
-		"OutFile \"probe.exe\"\n" +
-		"!include \"FileFunc.nsh\"\n\n" +
-		"Function .onInit\n" +
-		"    ${GetParameters} $0\n" +
-		"    FileOpen $1 \"$TEMP\\" + resultName + "\" w\n" +
-		"    FileWrite $1 \"CMDLINE=$CMDLINE$\\r$\\n\"\n" +
-		"    FileWrite $1 \"PARAMS=$0$\\r$\\n\"\n" +
-		"    FileWrite $1 \"INSTDIR=$INSTDIR$\\r$\\n\"\n" +
-		"    FileClose $1\n" +
-		"    Abort\n" +
-		"FunctionEnd\n\n" +
-		"Section\n" +
-		"SectionEnd\n"
-	scriptPath := filepath.Join(t.TempDir(), "probe.nsi")
-	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	scriptDir := filepath.Dir(scriptPath)
-	compile := exec.Command(makensis, "/V1", scriptPath)
-	compile.Dir = scriptDir
-	if out, err := compile.CombinedOutput(); err != nil {
-		t.Fatalf("synthetic makensis probe failed: %v\n%s", err, out)
-	}
-
-	explicit := filepath.Join(os.TempDir(), "orca-nsis-explicit-target")
-	_ = exec.Command(filepath.Join(scriptDir, "probe.exe"), "/D="+explicit).Run()
-	raw, err := os.ReadFile(resultPath)
-	if err != nil {
-		t.Fatalf("NSIS probe did not write %s: %v", resultPath, err)
-	}
-	got := string(raw)
-	if strings.Contains(got, "/D=") {
-		t.Fatalf("NSIS exposed /D in $CMDLINE or GetParameters: %q", got)
-	}
-	if !strings.Contains(got, "INSTDIR="+explicit) {
-		t.Fatalf("NSIS did not preserve explicit /D path: %q", got)
-	}
-	if strings.Contains(got, "PARAMS=/D=") {
-		t.Fatalf("GetParameters unexpectedly included /D: %q", got)
 	}
 }

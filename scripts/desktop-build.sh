@@ -194,6 +194,29 @@ prepare_windows_installer_resources() {
 	[ -f "$cg_dest/bin/codegraph.cmd" ] || { echo "CodeGraph launcher missing from archive" >&2; exit 1; }
 	[ -f "$cg_dest/lib/package.json" ] || { echo "CodeGraph package metadata missing from archive" >&2; exit 1; }
 	grep -Fq "\"version\": \"${version#v}\"" "$cg_dest/lib/package.json" || { echo "CodeGraph version mismatch in archive" >&2; exit 1; }
+
+	prepare_windows_installer_guard
+}
+
+prepare_windows_installer_guard() {
+	local installer_go="$ROOT/desktop/build/windows/installer-go"
+	local payload="$installer_go/payload"
+	local manifest="$installer_go/install-files.txt"
+	assert_within_dir "$installer_go" "$ROOT/desktop/build/windows"
+	assert_within_dir "$manifest" "$installer_go"
+	assert_within_dir "$installer_go/orca-install-guard.exe" "$installer_go"
+	echo "==> building native Windows install guard (${arch})"
+	GOOS=windows GOARCH="$arch" CGO_ENABLED=0 go -C "$ROOT/desktop" build \
+		-ldflags='-s -w -H=windowsgui' \
+		-o "$installer_go/orca-install-guard.exe" ./cmd/orca-install-guard
+
+	# Match installation targets, including the NSIS-generated uninstaller. Bash
+	# writes UTF-8 without a BOM; sorting keeps the recursive payload deterministic.
+	(
+		cd "$payload"
+		printf '%s\n' Orca.exe node.exe LICENSE.node.txt THIRD-PARTY-NOTICES.txt uninstall.exe
+		find codegraph -type f -print | LC_ALL=C sort
+	) > "$manifest"
 }
 
 copy_stable_windows_installer() {

@@ -25,6 +25,7 @@ import type { ModelInfo } from "./lib/types";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onProjectTreeChanged, openExternal } from "./lib/bridge";
+import { useInstallerShutdown } from "./lib/useInstallerShutdown";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
@@ -478,6 +479,7 @@ function TextSizeHotkeys() {
 }
 
 export default function App() {
+  useInstallerShutdown();
   const {
     state,
     activeTabId,

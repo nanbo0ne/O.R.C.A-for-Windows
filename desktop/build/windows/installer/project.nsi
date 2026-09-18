@@ -57,31 +57,33 @@ VIAddVersionKey "ProductName"     "${INFO_PRODUCTNAME}"
 # Enable HiDPI support. https://nsis.sourceforge.io/Reference/ManifestDPIAware
 ManifestDPIAware true
 
-!include "MUI.nsh"
+!include "MUI2.nsh"
 !include "nsDialogs.nsh"
 
 !define MUI_ICON "..\icon.ico"
 !define MUI_UNICON "..\icon.ico"
 # !define MUI_WELCOMEFINISHPAGE_BITMAP "resources\leftimage.bmp" #Include this to add a bitmap on the left side of the Welcome Page. Must be a size of 164x314
-!define MUI_FINISHPAGE_NOAUTOCLOSE # Wait on the INSTFILES page so the user can take a look into the details of the installation steps
+SetFont "Microsoft YaHei UI" 9
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXECUTABLE}"
 !define MUI_FINISHPAGE_RUN_TEXT "运行 ${INFO_PRODUCTNAME}"
-!define MUI_ABORTWARNING # This will warn the user if they exit from the installer.
+!define MUI_ABORTWARNING
 !define MUI_LICENSEPAGE_CHECKBOX
+!define MUI_CUSTOMFUNCTION_ABORT CancelGuard
+!define MUI_CUSTOMFUNCTION_UNABORT un.CancelGuard
 
 Var DeleteSavedDataCheckbox
 Var DeleteSavedData
 Var DesktopShortcutCheckbox
 Var CreateDesktopShortcut
 
-!insertmacro MUI_PAGE_WELCOME # Welcome to the installer page.
-!insertmacro MUI_PAGE_LICENSE "resources\eula.txt" # Adds a EULA page to the installer
-!insertmacro MUI_PAGE_DIRECTORY # In which folder install page.
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_LICENSE "resources\eula.txt"
+!insertmacro MUI_PAGE_DIRECTORY
 Page custom InstallOptionsPage InstallOptionsPageLeave
 !insertmacro MUI_PAGE_INSTFILES # Installing page.
-!insertmacro MUI_PAGE_FINISH # Finished installation page.
+!insertmacro MUI_PAGE_FINISH
 
-!insertmacro MUI_UNPAGE_CONFIRM # Confirm uninstall page.
+!insertmacro MUI_UNPAGE_CONFIRM
 UninstPage custom un.DeleteDataPage un.DeleteDataPageLeave
 !insertmacro MUI_UNPAGE_INSTFILES # Uninstalling page
 
@@ -92,19 +94,25 @@ UninstPage custom un.DeleteDataPage un.DeleteDataPageLeave
 #!finalize 'signtool --file "%1"'
 
 Name "${INFO_PRODUCTNAME}"
+!ifdef ORCA_PREVIEW
+Caption "${INFO_PRODUCTNAME} ${INFO_PRODUCTVERSION} 预览版安装"
+!endif
 OutFile "..\..\bin\O.R.C.A-for-Windows-windows-${ARCH}-installer.exe" # Name of the installer's file.
 !define ORCA_DEFAULT_INSTALLDIR "$LOCALAPPDATA\Programs\O.R.C.A for Windows"
 !define ORCA_INSTALLDIR_SENTINEL "$LOCALAPPDATA\Programs\O.R.C.A for Windows.__nsis_default__"
 InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation" # Reuse the previous install path on update; .onInit falls back to the default on first install.
 InstallDir "${ORCA_INSTALLDIR_SENTINEL}" # .onInit replaces this sentinel when no /D or registry path exists.
-ShowInstDetails show # This will always show the installation details.
+ShowInstDetails hide
+ShowUninstDetails hide
 AllowSkipFiles off
+!include "installer_guard.nsh"
 
 ####
 ## Per-user uninstaller registry (HKCU). Replaces wails.writeUninstaller /
 ## wails.deleteUninstaller, which write HKLM and would fail without admin rights.
 ####
 !macro orca.writeUninstaller
+    ClearErrors
     WriteUninstaller "$INSTDIR\uninstall.exe"
 
     WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${INFO_COMPANYNAME}"
@@ -124,6 +132,10 @@ AllowSkipFiles off
     ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
     IntFmt $0 "0x%08X" $0
     WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" "$0"
+    ${If} ${Errors}
+        SetErrorLevel 25
+        Abort "无法保存卸载信息，安装未完成。"
+    ${EndIf}
 !macroend
 
 !macro orca.deleteUninstaller
@@ -135,6 +147,7 @@ AllowSkipFiles off
 Function .onInit
    !insertmacro wails.checkArchitecture
    SetShellVarContext current
+   Call InitGuard
 
    ; NSIS consumes /D before $CMDLINE is exposed, so use a compile-time
    ; sentinel to distinguish "no /D" from an explicit path. /D therefore keeps
@@ -194,124 +207,20 @@ install_dir_done:
 shortcut_choice_done:
 FunctionEnd
 
-Function orca.closeTargetProcesses
-    InitPluginsDir
-    FileOpen $0 "$PLUGINSDIR\orca-close-processes.ps1" w
-    FileWrite $0 "$$ErrorActionPreference = 'Stop'$\r$\n"
-    FileWrite $0 "$$targetDir = [IO.Path]::GetFullPath($$args[0])$\r$\n"
-    FileWrite $0 "$$targetPaths = @([IO.Path]::Combine($$targetDir, 'Orca.exe'), [IO.Path]::Combine($$targetDir, 'deepseek-orca-desktop.exe'), [IO.Path]::Combine($$targetDir, 'node.exe'), [IO.Path]::Combine($$targetDir, 'codegraph', 'node.exe'))$\r$\n"
-    FileWrite $0 "$$names = @('Orca', 'deepseek-orca-desktop', 'node')$\r$\n"
-    FileWrite $0 "function Confirm-TargetFiles { foreach ($$file in $$targetPaths) { $$until = [DateTime]::UtcNow.AddSeconds(1); while ([IO.File]::Exists($$file)) { try { $$stream = [IO.File]::Open($$file, 'Open', 'ReadWrite', 'None'); $$stream.Dispose(); break } catch { if ([DateTime]::UtcNow -ge $$until) { exit 4 }; Start-Sleep -Milliseconds 100 } } } }$\r$\n"
-    FileWrite $0 "function Get-TargetProcesses { @(Get-Process -ErrorAction Stop | Where-Object { $$names -contains $$_.ProcessName } | Where-Object { $$p = $$_; try { $$path = $$p.Path; if (-not $$path) { throw 'Process path unavailable' }; $$targetPaths -contains [IO.Path]::GetFullPath($$path) } catch { if (-not $$p.HasExited) { exit 3 }; $$false } }) }$\r$\n"
-    FileWrite $0 "foreach ($$process in @(Get-TargetProcesses)) { if ($$process.MainWindowHandle -ne 0) { [void]$$process.CloseMainWindow() } }$\r$\n"
-    FileWrite $0 "$$deadline = [DateTime]::UtcNow.AddSeconds(5)$\r$\n"
-    FileWrite $0 "do { $$alive = @(Get-TargetProcesses); if ($$alive.Count -eq 0) { Confirm-TargetFiles; exit 0 }; Start-Sleep -Milliseconds 250 } while ([DateTime]::UtcNow -lt $$deadline)$\r$\n"
-    ; Allow normal updater shutdown to finish before stopping stale background runtimes.
-    FileWrite $0 "$$deadline = [DateTime]::UtcNow.AddSeconds(25)$\r$\n"
-    FileWrite $0 "do { if (@(Get-TargetProcesses).Count -eq 0) { Confirm-TargetFiles; exit 0 }; Start-Sleep -Milliseconds 250 } while ([DateTime]::UtcNow -lt $$deadline)$\r$\n"
-    FileWrite $0 "foreach ($$process in @(Get-TargetProcesses)) { try { $$handle = $$process.Handle; $$path = $$process.Path; if ($$path -and ($$targetPaths -contains [IO.Path]::GetFullPath($$path))) { $$process.Kill() } } catch { } }$\r$\n"
-    FileWrite $0 "$$deadline = [DateTime]::UtcNow.AddSeconds(5)$\r$\n"
-    FileWrite $0 "do { if (@(Get-TargetProcesses).Count -eq 0) { Confirm-TargetFiles; exit 0 }; Start-Sleep -Milliseconds 250 } while ([DateTime]::UtcNow -lt $$deadline)$\r$\n"
-    FileWrite $0 "exit 2$\r$\n"
-    FileClose $0
-
-close_target_processes_retry:
-    ; NSIS is 32-bit. Its redirected PowerShell cannot read a 64-bit process Path.
-    StrCpy $2 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
-    IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 +2
-    StrCpy $2 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
-    nsExec::ExecToStack /TIMEOUT=45000 '"$2" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\orca-close-processes.ps1" "$INSTDIR"'
-    Pop $1
-    Pop $0
-    StrCmp $1 "0" close_target_processes_done
-    IfSilent close_target_processes_silent_failed close_target_processes_prompt
-
-close_target_processes_prompt:
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "无法确认 ${INFO_PRODUCTNAME} 已退出，或安装文件仍被占用、不可写。安装尚未覆盖文件。$\r$\n请保存任务并退出应用，检查目录权限，然后点击“重试”，或取消安装。" IDRETRY close_target_processes_retry
-    Goto close_target_processes_failed
-
-close_target_processes_silent_failed:
-    SetErrorLevel 66
-
-close_target_processes_failed:
-    Abort
-
-close_target_processes_done:
-FunctionEnd
-
-Function un.orca.closeTargetProcesses
-    InitPluginsDir
-    FileOpen $0 "$PLUGINSDIR\orca-close-processes.ps1" w
-    FileWrite $0 "$$ErrorActionPreference = 'Stop'$\r$\n"
-    FileWrite $0 "$$targetDir = [IO.Path]::GetFullPath($$args[0])$\r$\n"
-    FileWrite $0 "$$targetPaths = @([IO.Path]::Combine($$targetDir, 'Orca.exe'), [IO.Path]::Combine($$targetDir, 'deepseek-orca-desktop.exe'), [IO.Path]::Combine($$targetDir, 'node.exe'), [IO.Path]::Combine($$targetDir, 'codegraph', 'node.exe'))$\r$\n"
-    FileWrite $0 "$$names = @('Orca', 'deepseek-orca-desktop', 'node')$\r$\n"
-    FileWrite $0 "function Get-TargetProcesses { @(Get-Process -ErrorAction Stop | Where-Object { $$names -contains $$_.ProcessName } | Where-Object { $$p = $$_; try { $$path = $$p.Path; if (-not $$path) { throw 'Process path unavailable' }; $$targetPaths -contains [IO.Path]::GetFullPath($$path) } catch { if (-not $$p.HasExited) { exit 3 }; $$false } }) }$\r$\n"
-    FileWrite $0 "foreach ($$process in @(Get-TargetProcesses)) { if ($$process.MainWindowHandle -ne 0) { [void]$$process.CloseMainWindow() } }$\r$\n"
-    FileWrite $0 "$$deadline = [DateTime]::UtcNow.AddSeconds(5)$\r$\n"
-    FileWrite $0 "do { $$alive = @(Get-TargetProcesses); if ($$alive.Count -eq 0) { exit 0 }; Start-Sleep -Milliseconds 250 } while ([DateTime]::UtcNow -lt $$deadline)$\r$\n"
-    FileWrite $0 "exit 2$\r$\n"
-    FileClose $0
-
-un_close_target_processes_retry:
-    StrCpy $2 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
-    IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 +2
-    StrCpy $2 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
-    nsExec::ExecToStack /TIMEOUT=8000 '"$2" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\orca-close-processes.ps1" "$INSTDIR"'
-    Pop $1
-    Pop $0
-    StrCmp $1 "0" un_close_target_processes_done
-    IfSilent un_close_target_processes_silent_failed un_close_target_processes_prompt
-
-un_close_target_processes_prompt:
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "${INFO_PRODUCTNAME} 仍在后台运行。$\r$\n请先保存任务，并从系统托盘选择“退出”，然后点击“重试”。$\r$\n卸载程序不会强制结束进程；也可以取消卸载。" IDRETRY un_close_target_processes_retry
-    Goto un_close_target_processes_failed
-
-un_close_target_processes_silent_failed:
-    SetErrorLevel 66
-
-un_close_target_processes_failed:
-    Abort
-
-un_close_target_processes_done:
-FunctionEnd
-
-Function InstallOptionsPage
-    nsDialogs::Create 1018
-    Pop $0
-    ${If} $0 == error
-        Abort
-    ${EndIf}
-
-    ${NSD_CreateLabel} 0 0 100% 24u "选择安装选项"
-    Pop $0
-    ${NSD_CreateLabel} 0 62u 100% 36u "升级前请保存任务。安装器会尝试关闭此目录的旧程序，等待 30 秒后自动结束残留进程。"
-    Pop $0
-    ${NSD_CreateCheckbox} 0 32u 100% 24u "创建桌面快捷方式"
-    Pop $DesktopShortcutCheckbox
-    ${If} $CreateDesktopShortcut == ${BST_CHECKED}
-        ${NSD_Check} $DesktopShortcutCheckbox
-    ${Else}
-        ${NSD_Uncheck} $DesktopShortcutCheckbox
-    ${EndIf}
-
-    nsDialogs::Show
-FunctionEnd
-
-Function InstallOptionsPageLeave
-    ${NSD_GetState} $DesktopShortcutCheckbox $CreateDesktopShortcut
-FunctionEnd
 
 Section
     !insertmacro wails.setShellContext
 
-    DetailPrint "Closing running ${INFO_PRODUCTNAME} from the selected install folder..."
+    SetDetailsPrint both
+    DetailPrint "正在准备安装"
     Call orca.closeTargetProcesses
 
+    DetailPrint "正在检查 WebView2 运行环境"
     !insertmacro wails.webview2runtime
 
     ; Runtime bootstrap may take time: recheck immediately before replacing files.
     Call orca.closeTargetProcesses
+    DetailPrint "正在安装 O.R.C.A."
     SetOutPath $INSTDIR
     Delete "$INSTDIR\uninstall.bat"
 
@@ -322,6 +231,7 @@ Section
     SetOutPath "$INSTDIR\codegraph"
     File /r "..\installer-go\payload\codegraph\*.*"
     SetOutPath "$INSTDIR"
+    DetailPrint "正在保存快捷方式与卸载信息"
 
     Delete "$SMPROGRAMS\O.R.C.A for Windows.lnk"
     Delete "$SMPROGRAMS\Uninstall O.R.C.A for Windows.lnk"
@@ -397,23 +307,3 @@ Section "uninstall"
     ; unrelated files. Known app-owned entries above are removed explicitly.
     RMDir "$INSTDIR"
 SectionEnd
-
-Function un.DeleteDataPage
-    nsDialogs::Create 1018
-    Pop $0
-    ${If} $0 == error
-        Abort
-    ${EndIf}
-
-    ${NSD_CreateLabel} 0 0 100% 24u "Remove saved O.R.C.A. data?"
-    Pop $0
-    ${NSD_CreateCheckbox} 0 32u 100% 24u "Delete configuration, conversations, memory, cache, and other saved data. This cannot be undone."
-    Pop $DeleteSavedDataCheckbox
-    ${NSD_Uncheck} $DeleteSavedDataCheckbox
-
-    nsDialogs::Show
-FunctionEnd
-
-Function un.DeleteDataPageLeave
-    ${NSD_GetState} $DeleteSavedDataCheckbox $DeleteSavedData
-FunctionEnd
