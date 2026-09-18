@@ -4,13 +4,13 @@
 
 **O.R.C.A.**（**Open Reasoning & Computing Agent**）是面向真实工作的开源 AI 工作区：把模型对话、助手、编程、研究、文件与图片、工程工具、记忆和自动化放在同一个可暂停、可检查、可恢复的应用里。
 
-> **3.0.10** 修复思考强度保存与请求生效、当前回合取消及迟到终态影响新回合的问题。五项真实供应商验证与原生 Wails 构建通过；全量回归、CI、多平台发行包及升级发布验收待完成，原生窗口交互未测试。沿用 3.0.9 标准 Windows 安装器，不改版 Modern / Classic。
+> **3.0.10** 修复思考强度保存与请求生效，运行时始终保留停止按钮；取消不会覆盖新草稿，也不会因发送请求稍后成功而清空已取消的草稿。停止失败保留运行状态，迟到终态不影响新回合。沿用标准 Windows 安装器及 Modern / Classic 布局。
 >
 > [双语发布说明](docs/releases/desktop-v3.0.10.md) · [构建清单](docs/build/desktop-v3.0.10.md) · [发布验收记录](docs/audits/desktop-v3.0.10-verification.md)
 
 ## 下载
 
-3.0.10 下载入口为待发布目标，安装包、签名和 SHA-256 校验表尚待正式构建验收；当前已发布版本为 [3.0.9](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.9)。新版本不生成旧品牌兼容副本，安装升级兼容逻辑仍保留。
+请从对应平台的 Release 下载入口选择安装包，并核对版本、签名与 SHA-256 校验表。新版本不生成旧品牌兼容副本，安装升级兼容逻辑仍保留。
 
 | 平台 | 包 | 说明 |
 | --- | --- | --- |
@@ -190,7 +190,7 @@ wails build
 | 白屏或窗口异常 | WebView2/WebKitGTK/GTK 版本、GPU 驱动、Modern/Classic 选择；先重启并收集日志，再判断是否为原生问题 |
 | 更新器无响应 | 先访问主 manifest，再检查 GitHub 回退、签名/版本字段和系统代理；Windows 手动下载并退出安装，不要期待后台安装 |
 
-3.0.10 当前证据与待验收项见[构建清单](docs/build/desktop-v3.0.10.md)和[发布验收记录](docs/audits/desktop-v3.0.10-verification.md)。已有部分定向回归通过，不代表正式构建、真实窗口截图、安装升级或公网更新验收完成。[3.0.9 验收](docs/audits/desktop-v3.0.9-verification.md)与[3.0.8 界面验证](docs/audits/2026-09-18-modern-chat-polish.md)仅为历史证据。桌面开发与平台细节见 [desktop/README.md](desktop/README.md)，办公产物边界见 [docs/ARTIFACT_RUNTIME.md](docs/ARTIFACT_RUNTIME.md)。
+构建方式见[构建清单](docs/build/desktop-v3.0.10.md)；验证范围、发布检查结果及按用户要求暂缓的原生窗口交互验证见[详细验收记录](docs/audits/desktop-v3.0.10-verification.md)。桌面开发与平台细节见 [desktop/README.md](desktop/README.md)，办公产物边界见 [docs/ARTIFACT_RUNTIME.md](docs/ARTIFACT_RUNTIME.md)。
 
 ## 许可
 

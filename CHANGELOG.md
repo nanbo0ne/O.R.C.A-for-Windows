@@ -4,10 +4,10 @@
 
 - Keep Stop available while a next-turn draft exists, preserve drafts during pending-submit cancellation, and retain running state when a cancel request fails.
 - 有下一轮草稿时仍保留停止按钮；取消待发送内容不覆盖草稿，停止请求失败也不会误报为空闲。
-- Fix effort persistence/request behavior, current-turn cancellation and stale completion corrupting successor lifecycle state. Five live provider cases and the native Wails build passed; full regression, CI, platform packages and upgrade/publication acceptance are pending. Native-window interaction was not tested.
-- 修复思考强度保存与请求生效、当前回合取消及迟到完成事件影响新回合的问题。五项真实供应商验证与原生 Wails 构建通过；全量回归、CI、多平台发行包、升级发布验收待完成，原生窗口交互未测试。
-- Retain the standard Windows installer restored in 3.0.9; pin upgrade acceptance to the published 3.0.9 installer. No Modern / Classic redesign.
-- 沿用 3.0.9 已恢复的标准 Windows 安装器，升级验收固定使用已发布 3.0.9 安装包；不改版 Modern / Classic。
+- Fix effort persistence and request behavior, preserve supported higher effort levels, and prevent stale completion events from stopping the next turn. Running tabs reconcile backend status every 500ms; early terminal errors retain their original message.
+- 修复思考强度保存与请求生效，保留接入明确支持的较高强度，阻止迟到完成事件结束新回合；运行中的标签每 500 毫秒核对后端状态，启动前失败保留原始错误。
+- Retain the standard Windows installer restored in 3.0.9 and the Modern / Classic layouts. Enter queues the next draft while the mouse action remains Stop.
+- 沿用 3.0.9 已恢复的标准 Windows 安装器和 Modern / Classic 布局；Enter 可提交下一轮草稿，鼠标主按钮始终用于停止。
 - [Release notes / 发布说明](docs/releases/desktop-v3.0.10.md)
 - [Verification / 验收](docs/audits/desktop-v3.0.10-verification.md)
 

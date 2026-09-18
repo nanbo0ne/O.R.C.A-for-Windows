@@ -4,13 +4,13 @@
 
 **O.R.C.A.** (**Open Reasoning & Computing Agent**) is an open-source workspace for real work. It brings model conversations, Assistant, Coding, research, files and images, engineering tools, memory, and automation into one pausable, inspectable, recoverable application.
 
-> **3.0.10** fixes effort persistence/request behavior, current-turn cancellation, and stale terminal events corrupting successor lifecycle state. Five live provider cases and the native Wails build passed; full regression, CI, platform packages, upgrade and publication acceptance remain pending. Native-window interaction was not tested. Retain the standard 3.0.9 Windows installer and Modern / Classic layouts.
+> **3.0.10** fixes effort persistence and request behavior, keeps Stop available throughout a running turn, and preserves both new drafts and cancelled drafts when Submit resolves later. Stop failures retain running state, and stale completions cannot stop the next turn. The standard Windows installer and Modern / Classic layouts are retained.
 >
 > [Release notes](docs/releases/desktop-v3.0.10.md) · [Build checklist](docs/build/desktop-v3.0.10.md) · [Release verification](docs/audits/desktop-v3.0.10-verification.md)
 
 ## Downloads
 
-The 3.0.10 links below are planned release targets; packages, signatures, and SHA-256 checksums await production acceptance. The currently published version is [3.0.9](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.9). New builds omit old-brand duplicate assets while retaining installer upgrade compatibility.
+Choose the package for your platform from the Release download links and check its version, signature, and SHA-256 checksum. New builds omit old-brand duplicate assets while retaining installer upgrade compatibility.
 
 | Platform | Package | Notes |
 | --- | --- | --- |
@@ -191,7 +191,7 @@ Run `wails dev` in `desktop` for development. Running `npm run dev` alone uses a
 | Blank window or frame issue | WebView2/WebKitGTK/GTK versions, GPU driver, and Modern/Classic selection; restart and collect logs before classifying it as a native defect |
 | Updater does nothing | Primary manifest, GitHub fallback, signature/version fields, and system proxy; on Windows manually download and exit to install rather than expecting a background install |
 
-See the [3.0.10 build checklist](docs/build/desktop-v3.0.10.md) and [release verification](docs/audits/desktop-v3.0.10-verification.md) for current evidence and pending gates. Partial focused regression results do not establish production-build, real-window screenshot, installation/upgrade, or public-updater acceptance. The [3.0.9 verification](docs/audits/desktop-v3.0.9-verification.md) and [3.0.8 UI audit](docs/audits/2026-09-18-modern-chat-polish.md) remain historical evidence. See [desktop/README.md](desktop/README.md) for desktop details and the [artifact runtime boundary](docs/ARTIFACT_RUNTIME.md) for office artifacts.
+See the [build checklist](docs/build/desktop-v3.0.10.md) for build instructions and the [detailed verification record](docs/audits/desktop-v3.0.10-verification.md) for coverage, release checks, and native-window interaction testing deferred at the user's request. See [desktop/README.md](desktop/README.md) for desktop details and the [artifact runtime boundary](docs/ARTIFACT_RUNTIME.md) for office artifacts.
 
 ## License
 
