@@ -2,6 +2,23 @@
 
 ## Scope and Current Status
 
+Release candidate source: `f052bde37b287e883a13acf74214e28882aeae31`.
+Workflow: [35363513580](https://github.com/nanbo0ne/O.R.C.A-for-Windows/actions/runs/35363513580) (success).
+
+## CI Acceptance
+
+- Core full tests, changed-package race checks, frontend full tests and build: passed.
+- Windows amd64, macOS Universal and Linux amd64 native builds and desktop tests: passed.
+- Linux desktop race checks for cancellation, effort persistence, runtime rebuild
+  and work admission: passed.
+- Windows standard installer and portable archive checks: passed. Hosted Windows
+  fresh installation, pinned 3.0.9 upgrade, custom path, default uninstall,
+  current payload hashes and synthetic configuration/session/draft/model marker
+  retention passed (`Installer acceptance: passed`, 2026-09-18 15:51:57 UTC).
+- GitHub release contains 17 uploaded assets from the candidate source. Local
+  sizes, SHA-256 records and GitHub asset digests match. Mac staging checked all
+  files before an atomic activation; public download verification follows below.
+
 Latest pre-release checkpoint: the actual App passed 18/18 headless Modern/Classic
 scenarios and 176 assertions, plus 6 polling checks, after fixing three browser
 findings (cancel-error false idle, pending-submit draft loss, and missing mouse
@@ -11,12 +28,12 @@ controlled bridge and do not establish native-window behavior. The first CI run
 to include these fixes; it produced no release. Frontend full tests passed again.
 
 思考强度保存/请求生效、当前回合取消与生命周期隔离修复已实现。五项真实
-供应商请求通过；本机原生 Wails 构建通过。完整发布验收仍未完成，
-不将局部通过写成整版通过。标准 3.0.9 安装器和 Modern / Classic 保持。
+供应商请求通过；本机原生 Wails 构建和三平台 CI 通过。
+标准 3.0.9 安装器和 Modern / Classic 保持；原生窗口交互暂缓。
 
 Effort persistence/request behavior, current-turn cancellation and lifecycle
 isolation fixes are implemented. Five live provider cases and the local native
-Wails build passed. Full release acceptance remains incomplete.
+Wails build passed, as did production CI. Native-window interaction remains deferred.
 
 ## Current Integration Checkpoint
 
@@ -31,14 +48,12 @@ Verified locally before the release workflow:
 
 - Native Wails build: passed. Actual native-window interaction: deferred and
   NOT tested while computer-use is paused so the computer remains available.
-- Headless rendering verification: running in a separate task; result pending.
-  It does not establish native Wails interaction or installed-app acceptance.
-- Full core rerun with `-p 1`: ongoing. The initial parallel run hit a CLI
-  timeout; that focused CLI rerun passed. The complete core suite is not yet
-  recorded as passing.
-- Full frontend: initial source-contract failures were corrected; final full
-  rerun result remains pending. Earlier focused/typecheck passes are not a
-  substitute for this final rerun.
+- Headless rendering verification: 18/18 scenarios and 176 assertions passed in
+  Modern and Classic, with 6 additional polling checks. It does not establish
+  native Wails interaction or installed-app acceptance.
+- Cancellation after visible approval/Ask, paused work, late replies, silent
+  streams before and after their first chunk, and two active tabs passed focused
+  backend regressions. Completed tool results remain in resumable history.
 
 ## Actual Provider Verification
 
@@ -66,9 +81,7 @@ Acceptance of xhigh does not establish upstream reasoning depth or quality.
 
 - EffortSwitcher: 15 rendered-component tests passed for saving/running locks,
   accessible busy state, effective/omitted auto defaults, and EN/ZH hints.
-- Frontend application and test TypeScript checks passed at that UI checkpoint.
-  These do not verify subsequent parent integration, send blocking, failure
-  reporting, cancellation, browser interactions, or screenshots.
+- Frontend application/test TypeScript checks and final full frontend tests passed.
 - Complete `internal/event` and `internal/control` suites passed after lifecycle
   isolation changes, including the formerly failing delayed-completion successor
   regression and synchronous RunTurn success/failure/cancelled outcomes.
@@ -97,25 +110,47 @@ Acceptance of xhigh does not establish upstream reasoning depth or quality.
   pinned digest, and published `SHA256SUMS.txt`; require a candidate newer than
   3.0.9. Execute installation only on disposable GitHub-hosted Windows X64.
 
-## Pending Release Gates
+## Release Integrity and Deployment
 
-- Final complete core/frontend/native-desktop and race-check results on the
-  reviewed source. Local `-race` was unavailable with CGO disabled and no C
-  compiler on PATH; this must not be recorded as a race-detector pass.
-- Downstream aggregate/status handling of stale terminal events requires its
-  own identity checks; lifecycle passthrough preserves historical receipts.
-- Production Windows/macOS/Linux builds and version/packaging checks.
-- Production installer fresh-install, 3.0.9 upgrade, default uninstall, payload
-  integrity and configuration/session/draft/model retention acceptance.
-- Headless render results remain pending. Native-window effort/cancellation
-  interaction is deferred and untested while computer-use is paused. This is a
-  documented coverage gap, not an additional release authorization gate.
-- Asset sizes/digests, archive integrity, NSIS CRC and Minisign verification.
-- GitHub publication and Mac staged deployment, public downloads, signed stable
-  manifest, missing-path 404, and actual updater validation.
+- Published `desktop-v3.0.10` points to `f052bde37b287e883a13acf74214e28882aeae31`.
+- Installer: `O.R.C.A-for-Windows-windows-amd64-installer.exe`, 91,205,028 bytes.
+- Installer SHA-256: `a021db82626246a6895abbdd53128f0264f37aa40c21cc56cf9a81399879e979`.
+- NSIS CRC: `eee2c2cc`, verified locally. Portable archive integrity and package
+  Minisign signatures passed; the signed manifest validates five platform entries.
+- Final bilingual release notes were inserted into the manifest and re-signed
+  before publication. Binary assets and source commit were unchanged.
+- All 17 GitHub asset sizes/digests match local delivery. Mac staging and final
+  release directories passed all 16 SHA-256 records; stable manifest switched
+  atomically from 3.0.9 to 3.0.10. Local HTTP matches the signed manifest and
+  missing update paths return 404. Public-path checks are recorded below.
 
-No production CI, verified platform release assets, completed headless screenshot
-report, native interaction or public update results for 3.0.10 are claimed here. Earlier [3.0.9 evidence](desktop-v3.0.9-verification.md)
-is historical and must not be relabeled as 3.0.10 acceptance. User authorization
-for building and public GitHub/Mac release remains effective after the other
-release checks pass. Deferred native interaction must remain disclosed.
+## Public Update Probe (2026-09-19, Asia/Shanghai)
+
+- The production updater functions fetched and verified the public signed
+  manifest, detected the 3.0.9-to-3.0.10 update, and downloaded the complete
+  91,205,028-byte installer from the Mac public source. SHA-256 and Minisign
+  verification passed. Download/verification took 13m7.822s (about 113 KiB/s).
+  This isolated test downloaded only; it did not launch or install the package.
+- The public site shows 3.0.10. Stable manifest and signature match local files;
+  missing manifest and package paths return 404.
+- Portable ZIP, Linux DEB and macOS DMG public first-64-KiB bytes, advertised
+  total lengths and signature files match the fully verified local packages.
+  These three packages were sampled, not fully downloaded again over public HTTP.
+- Network limitations remain: an independent full curl transfer stalled;
+  a Mac-origin public curl probe timed out after 180s with 13,879,611 bytes.
+  Two portable-ZIP tail-range probes returned correct 206/Content-Range headers
+  but timed out without body bytes. These are not recorded as successful full
+  downloads. No claim is made that public download throughput was improved.
+- Evidence: `.tmp/release-v310/updater-public-result.log` and
+  `.tmp/release-v310/delivery-verification.json`. GitHub and server full-file
+  digests remain independently verified; network sampling is not a substitute.
+
+## Remaining Coverage Limits
+
+Native-window effort/cancellation interaction is deferred at the user's request;
+no GUI automation was used while the workstation was needed. Headless tests and
+hosted Windows installer acceptance are separate evidence, not substitutes for
+native button interaction. Local race testing required an unavailable C compiler;
+Linux CI core and desktop race checks passed. The historical Token Lens 404 was
+not reproduced and is not claimed fixed. Earlier [3.0.9 evidence](desktop-v3.0.9-verification.md)
+remains historical and is not relabeled as 3.0.10 acceptance.
