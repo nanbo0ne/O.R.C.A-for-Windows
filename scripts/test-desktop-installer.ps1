@@ -383,10 +383,10 @@ $ErrorActionPreference = 'Stop'
     # Exercise both /D and the persisted path with spaces and Chinese characters.
     $upgradeDir = Owned-Path "upgrade target with spaces `u{4e2d}`u{6587}"
     $freshDir = Owned-Path "fresh target with spaces `u{4e2d}`u{6587}"
-    $null = Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir" 'install-309'
+    $null = Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir" 'install-310'
     Assert-NoApplication
     Assert-Installation $upgradeDir '3.0.10' 'installed-310'
-    Assert-Markers 'installed-309'
+    Assert-Markers 'installed-310'
     Add-Marker (Join-Path $upgradeDir 'data\synthetic-session.json') '{"synthetic":true}'
     Add-Marker (Join-Path $upgradeDir '.deepseek-orca\config.json') '{"synthetic":true}'
 
