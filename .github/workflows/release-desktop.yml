@@ -353,10 +353,10 @@ jobs:
           "$seven_zip" t dist/O.R.C.A-for-Windows-windows-amd64-installer.exe
           "$seven_zip" t dist/O.R.C.A-for-Windows-windows-amd64.zip
 
-      # Published upgrade baseline: desktop-v3.0.9.
+      # Published upgrade baseline: desktop-v3.0.10.
       # Asset: O.R.C.A-for-Windows-windows-amd64-installer.exe
-      # Size: 91192109 bytes
-      # SHA256: 89efd5e03de9848988189901ce90fe0ec761a980c64b16e5bda0c2b9c14a7723
+      # Size: 91205028 bytes
+      # SHA256: a021db82626246a6895abbdd53128f0264f37aa40c21cc56cf9a81399879e979
       # The acceptance script checks the size, pinned hash, and published SHA256SUMS.txt.
       - name: Test Windows installer upgrade and data retention
         if: runner.os == 'Windows'

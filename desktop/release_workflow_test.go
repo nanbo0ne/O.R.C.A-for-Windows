@@ -163,14 +163,14 @@ func TestInstallerAcceptanceUsesPublished309Baseline(t *testing.T) {
 	}
 	script := string(body)
 	for _, want := range []string{
-		"$ExpectedVersion = '3.0.10'",
+		"$ExpectedVersion = '3.0.11'",
 		"$assetName = 'O.R.C.A-for-Windows-windows-amd64-installer.exe'",
-		"[version]$productVersion -le [version]'3.0.9'",
-		"releases/tags/desktop-v3.0.9",
-		"Assert-Installation $upgradeDir '3.0.9' 'installed-309'",
+		"[version]$productVersion -le [version]'3.0.10'",
+		"releases/tags/desktop-v3.0.10",
+		"Assert-Installation $upgradeDir '3.0.10' 'installed-310'",
 		"'SHA256SUMS.txt'",
-		"$pinnedOldSize = 91192109",
-		"89efd5e03de9848988189901ce90fe0ec761a980c64b16e5bda0c2b9c14a7723",
+		"$pinnedOldSize = 91205028",
+		"a021db82626246a6895abbdd53128f0264f37aa40c21cc56cf9a81399879e979",
 		"$oldHash -ine $checksumRows[0].Groups[1].Value -or $oldHash -cne $pinnedOldHash",
 	} {
 		if !strings.Contains(script, want) {
@@ -190,10 +190,10 @@ func TestInstallerAcceptanceUsesPublished309Baseline(t *testing.T) {
 	}
 	workflow := readDesktopReleaseWorkflow(t)
 	for _, want := range []string{
-		"# Published upgrade baseline: desktop-v3.0.9.",
+		"# Published upgrade baseline: desktop-v3.0.10.",
 		"# Asset: O.R.C.A-for-Windows-windows-amd64-installer.exe",
-		"# Size: 91192109 bytes",
-		"# SHA256: 89efd5e03de9848988189901ce90fe0ec761a980c64b16e5bda0c2b9c14a7723",
+		"# Size: 91205028 bytes",
+		"# SHA256: a021db82626246a6895abbdd53128f0264f37aa40c21cc56cf9a81399879e979",
 		`"$seven_zip" t dist/O.R.C.A-for-Windows-windows-amd64-installer.exe`,
 	} {
 		if !strings.Contains(workflow, want) {
@@ -219,8 +219,8 @@ func TestReleaseDesktopVersionMetadataAgrees(t *testing.T) {
 		} `json:"info"`
 	}
 	readJSON("wails.json", &wails)
-	if wails.Info.ProductVersion != "3.0.10" {
-		t.Fatalf("Wails version = %q, want 3.0.10", wails.Info.ProductVersion)
+	if wails.Info.ProductVersion != "3.0.11" {
+		t.Fatalf("Wails version = %q, want 3.0.11", wails.Info.ProductVersion)
 	}
 	var windows struct {
 		Fixed map[string]string            `json:"fixed"`

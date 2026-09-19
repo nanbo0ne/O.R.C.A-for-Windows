@@ -1,5 +1,16 @@
 # Changelog
 
+## Desktop 3.0.11 / 桌面版 3.0.11
+
+- Fix `/compact` compatibility for local and third-party OpenAI-compatible models with model-preserving, bounded fallbacks and history-safe failure handling. Do not classify an explicit `404 model_not_found` as a reasoning-effort error.
+- 修复本地及第三方 OpenAI-compatible 模型的 `/compact` 兼容性，增加保持模型不变的有界回退和失败保护；明确的 `404 model_not_found` 不再误判为思考强度错误。
+- Move processing state into the Composer row, make Enter send and Shift+Enter insert a newline, de-duplicate image paste, and focus the Composer from its blank surface.
+- 处理中状态回到底部 Composer 控制行，Enter 发送、Shift+Enter 换行，修复图片重复粘贴并扩大输入框可点击区域。
+- Coalesce new-session loading and discard stale model/balance results during Controller replacement.
+- 合并新会话加载请求，并在 Controller 切换时丢弃旧模型和余额结果。
+- [Release notes / 发布说明](docs/releases/desktop-v3.0.11.md)
+- [Verification / 验收](docs/audits/desktop-v3.0.11-verification.md)
+
 ## Desktop 3.0.10 / 桌面版 3.0.10
 
 - Keep Stop available while a next-turn draft exists, preserve drafts during pending-submit cancellation, and retain running state when a cancel request fails.

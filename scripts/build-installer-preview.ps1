@@ -4,14 +4,14 @@ param(
     [ValidateSet('amd64', 'arm64')]
     [string]$Architecture = 'amd64',
     [switch]$SkipAppBuild,
-    [string]$OutputDirectory = 'D:\AI-Reasonix\dist\desktop-v3.0.10-preview'
+    [string]$OutputDirectory = 'D:\AI-Reasonix\dist\desktop-v3.0.11-preview'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'The installer preview requires Windows.' }
 
-$version = '3.0.10'
+$version = '3.0.11'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $desktop = Join-Path $repo 'desktop'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
