@@ -166,6 +166,42 @@ func TestBuildRequestAlwaysSerializesContent(t *testing.T) {
 	}
 }
 
+func TestBuildRequestScopedCompactionOverrideDoesNotChangeModelOrPurpose(t *testing.T) {
+	c := &client{model: "Deepseek_Orca_uncensored", deepseek: true, effort: "xhigh"}
+	standard := c.buildRequest(provider.Request{
+		Purpose:  provider.RequestPurposeCompaction,
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "summarize"}},
+	})
+	omit := ""
+	fallback := c.buildRequest(provider.Request{
+		Purpose:                 provider.RequestPurposeCompactionFallback,
+		ReasoningEffortOverride: &omit,
+		Messages:                []provider.Message{{Role: provider.RoleUser, Content: "summarize"}},
+	})
+	if standard.Model != "Deepseek_Orca_uncensored" || fallback.Model != standard.Model {
+		t.Fatalf("model changed across compaction retry: standard=%q fallback=%q", standard.Model, fallback.Model)
+	}
+	if standard.ReasoningEffort != "xhigh" {
+		t.Fatalf("standard effort = %q, want xhigh", standard.ReasoningEffort)
+	}
+	if fallback.ReasoningEffort != "" {
+		t.Fatalf("scoped omission serialized effort %q", fallback.ReasoningEffort)
+	}
+	standardJSON, err := json.Marshal(standard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallbackJSON, err := json.Marshal(fallback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{string(standardJSON), string(fallbackJSON)} {
+		if strings.Contains(body, "Purpose") || strings.Contains(body, "reasoningEffortOverride") {
+			t.Fatalf("internal request metadata leaked into wire JSON: %s", body)
+		}
+	}
+}
+
 func TestBuildRequestSerializesMultimodalUserContent(t *testing.T) {
 	c := &client{model: "vision-model"}
 	req := c.buildRequest(provider.Request{Messages: []provider.Message{{

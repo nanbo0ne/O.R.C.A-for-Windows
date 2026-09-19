@@ -132,6 +132,7 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 	requestID := event.NewRequestID()
 	ch, err := c.planner.Stream(ctx, provider.Request{
 		RequestID:   requestID,
+		Purpose:     provider.RequestPurposeTurn,
 		Messages:    c.plannerSess.Messages,
 		Temperature: c.temperature,
 	})

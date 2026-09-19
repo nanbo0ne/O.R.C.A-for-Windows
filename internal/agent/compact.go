@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,15 +21,66 @@ import (
 // fraction of the window, so a huge window still compacts rarely while a small
 // one still lands below the trigger (which is what stops the re-compaction loop).
 const (
-	defaultSoftCompactRatio  = 0.5   // report growing context here, but keep the cache-stable prefix intact
-	defaultCompactRatio      = 0.8   // trigger: prompt at this fraction of the window compacts
-	defaultCompactForceRatio = 0.9   // force compaction at this high-water mark even for low-value folds
-	defaultCompactTarget     = 0.5   // safety cap: the kept tail never exceeds this fraction of the window
-	defaultTailTokens        = 16384 // verbatim recent-tail budget, in tokens
-	minRecentKeep            = 2     // never keep fewer recent messages than this
-	minCompactMessages       = 2     // skip compaction below this many compactable messages
-	fallbackTokPerChar       = 0.25  // ~4 chars/token, used before any usage is available to calibrate
+	defaultSoftCompactRatio     = 0.5   // report growing context here, but keep the cache-stable prefix intact
+	defaultCompactRatio         = 0.8   // trigger: prompt at this fraction of the window compacts
+	defaultCompactForceRatio    = 0.9   // force compaction at this high-water mark even for low-value folds
+	defaultCompactTarget        = 0.5   // safety cap: the kept tail never exceeds this fraction of the window
+	defaultTailTokens           = 16384 // verbatim recent-tail budget, in tokens
+	minRecentKeep               = 2     // never keep fewer recent messages than this
+	minCompactMessages          = 2     // skip compaction below this many compactable messages
+	fallbackTokPerChar          = 0.25  // ~4 chars/token, used before any usage is available to calibrate
+	compactionFallbackMaxTokens = 4096
+	compactionFailureBackoff    = 30 * time.Second
 )
+
+type compactionFailureKind string
+
+const (
+	compactionModelUnavailable  compactionFailureKind = "model_unavailable"
+	compactionEffortUnsupported compactionFailureKind = "effort_unsupported"
+	compactionRequestShape      compactionFailureKind = "request_shape_unsupported"
+	compactionContextTooLarge   compactionFailureKind = "context_too_large"
+	compactionTransient         compactionFailureKind = "transient"
+	compactionEmpty             compactionFailureKind = "empty_summary"
+	compactionCancelled         compactionFailureKind = "cancelled"
+	compactionUnknown           compactionFailureKind = "unknown"
+)
+
+type compactionError struct {
+	kind compactionFailureKind
+	err  error
+}
+
+func (e *compactionError) Error() string {
+	if e == nil || e.err == nil {
+		return "compaction failed"
+	}
+	switch e.kind {
+	case compactionModelUnavailable:
+		return "context compaction failed: the selected model is unavailable at this provider endpoint; refresh the model list or switch models. The original history was kept."
+	case compactionEffortUnsupported:
+		return "context compaction failed: this provider rejected the reasoning setting, including its compatibility retry. The original history was kept."
+	case compactionContextTooLarge:
+		return "context compaction failed: the selected history is still too large for this model. Start a new context or remove large tool output; the original history was kept."
+	case compactionRequestShape:
+		return "context compaction failed: this provider rejected the summary request. The original history was kept."
+	case compactionTransient:
+		return "context compaction failed after a bounded retry because the provider was temporarily unavailable. The original history was kept."
+	case compactionEmpty:
+		return "context compaction failed because the provider returned an empty summary. The original history was kept."
+	case compactionCancelled:
+		return "context compaction was cancelled. The original history was kept."
+	default:
+		return fmt.Sprintf("context compaction failed: %v. The original history was kept.", e.err)
+	}
+}
+
+func (e *compactionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
 
 // checkpointTag wraps the compaction handoff so the model can distinguish it
 // from live user input and later strip or skip it when reasoning about the
@@ -80,6 +132,12 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	if a.contextWindow <= 0 || u == nil || u.PromptTokens == 0 {
 		return
 	}
+	if !a.compactionBackoffUntil.IsZero() {
+		if time.Now().Before(a.compactionBackoffUntil) {
+			return
+		}
+		a.compactionBackoffUntil = time.Time{}
+	}
 	high := int(float64(a.contextWindow) * a.compactRatio)
 	if a.autoCompactCooldown {
 		if u.PromptTokens < high {
@@ -127,6 +185,7 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		}
 	}
 	if err := a.compact(ctx, "auto", "", force); err != nil {
+		a.compactionBackoffUntil = time.Now().Add(compactionFailureBackoff)
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("compaction skipped: %v", err)})
 		return
 	}
@@ -262,6 +321,15 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		}
 	}
 
+	checkpoint, err := a.summarize(ctx, region, instructions)
+	if err != nil {
+		a.emitCompactionAborted(trigger)
+		return err
+	}
+
+	// Do not create an archive until the provider has returned a valid summary.
+	// A failed model request must leave both the live session and its on-disk
+	// trace untouched.
 	archived := ""
 	if a.archiveDir != "" {
 		path, err := archiveMessages(a.archiveDir, region)
@@ -270,12 +338,6 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 			return fmt.Errorf("archive: %w", err)
 		}
 		archived = path
-	}
-
-	checkpoint, err := a.summarize(ctx, region, instructions)
-	if err != nil {
-		a.emitCompactionAborted(trigger)
-		return err
 	}
 
 	tail := trimTailForCheckpoint(msgs, head, start, checkpoint, a.contextWindow, a.tailFloor())
@@ -316,12 +378,12 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 		return nil
 	}
 	region := msgs[fromIdx:]
-	if a.archiveDir != "" {
-		_, _ = archiveMessages(a.archiveDir, region) // best-effort traceability
-	}
 	summary, err := a.summarize(ctx, region, "")
 	if err != nil {
 		return err
+	}
+	if a.archiveDir != "" {
+		_, _ = archiveMessages(a.archiveDir, region) // best-effort traceability
 	}
 	next := make([]provider.Message, 0, fromIdx+1)
 	next = append(next, msgs[:fromIdx]...)
@@ -348,12 +410,12 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 		return nil
 	}
 	region := msgs[head:toIdx]
-	if a.archiveDir != "" {
-		_, _ = archiveMessages(a.archiveDir, region)
-	}
 	summary, err := a.summarize(ctx, region, "")
 	if err != nil {
 		return err
+	}
+	if a.archiveDir != "" {
+		_, _ = archiveMessages(a.archiveDir, region)
 	}
 	next := make([]provider.Message, 0, head+1+len(msgs)-toIdx)
 	next = append(next, msgs[:head]...)
@@ -512,9 +574,58 @@ func trimTailForCheckpoint(msgs []provider.Message, head, start int, checkpoint 
 // non-empty, is appended to the system prompt as extra focus guidance (from
 // /compact <focus> and/or a PreCompact hook).
 func (a *Agent) summarize(ctx context.Context, region []provider.Message, instructions string) (string, error) {
+	checkpoint, err := a.summarizeAttempt(ctx, region, instructions, summaryAttempt{})
+	if err == nil {
+		return checkpoint, nil
+	}
+	kind := classifyCompactionError(err)
+	if kind == compactionModelUnavailable || kind == compactionContextTooLarge || kind == compactionCancelled {
+		return "", &compactionError{kind: kind, err: err}
+	}
+
+	if kind == compactionEffortUnsupported {
+		omit := ""
+		checkpoint, fallbackErr := a.summarizeAttempt(ctx, region, instructions, summaryAttempt{
+			purpose:        provider.RequestPurposeCompactionFallback,
+			effortOverride: &omit,
+		})
+		if fallbackErr == nil {
+			return checkpoint, nil
+		}
+		return "", &compactionError{kind: fallbackKind(kind, fallbackErr), err: fallbackErr}
+	}
+
+	if kind == compactionRequestShape || kind == compactionTransient || kind == compactionEmpty {
+		checkpoint, fallbackErr := a.summarizeAttempt(ctx, region, instructions, summaryAttempt{
+			purpose:         provider.RequestPurposeCompactionFallback,
+			disableThinking: true,
+			maxTokens:       compactionFallbackMaxTokens,
+			conversation:    true,
+		})
+		if fallbackErr == nil {
+			return checkpoint, nil
+		}
+		return "", &compactionError{kind: fallbackKind(kind, fallbackErr), err: fallbackErr}
+	}
+
+	return "", &compactionError{kind: kind, err: err}
+}
+
+type summaryAttempt struct {
+	purpose         provider.RequestPurpose
+	effortOverride  *string
+	disableThinking bool
+	maxTokens       int
+	conversation    bool
+}
+
+func (a *Agent) summarizeAttempt(ctx context.Context, region []provider.Message, instructions string, attempt summaryAttempt) (string, error) {
 	sys := checkpointSystemPrompt
 	if strings.TrimSpace(instructions) != "" {
 		sys += "\n\nAdditional focus for this CONTEXT CHECKPOINT (prioritize keeping this):\n" + strings.TrimSpace(instructions)
+	}
+	if attempt.conversation {
+		sys += "\n\nCompatibility fallback: this is an internal continuation for context compression. Do not call tools, request approvals, modify files, or perform external actions. Return only a concise handoff summary."
 	}
 	requestID := event.NewRequestID()
 	requestPricing := a.pricing.SnapshotAt(time.Now())
@@ -527,11 +638,15 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	}()
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		RequestID: requestID,
+		Purpose:   requestPurpose(attempt.purpose),
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: sys},
 			{Role: provider.RoleUser, Content: renderTranscript(region)},
 		},
-		Temperature: a.temperature,
+		Temperature:             a.temperature,
+		MaxTokens:               attempt.maxTokens,
+		DisableThinking:         attempt.disableThinking,
+		ReasoningEffortOverride: attempt.effortOverride,
 	})
 	if err != nil {
 		return "", err
@@ -553,6 +668,66 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 		return "", fmt.Errorf("summarizer returned empty output")
 	}
 	return s, nil
+}
+
+func requestPurpose(p provider.RequestPurpose) provider.RequestPurpose {
+	if p == "" {
+		return provider.RequestPurposeCompaction
+	}
+	return p
+}
+
+func fallbackKind(original compactionFailureKind, err error) compactionFailureKind {
+	kind := classifyCompactionError(err)
+	if kind == compactionUnknown {
+		return original
+	}
+	return kind
+}
+
+func classifyCompactionError(err error) compactionFailureKind {
+	if err == nil {
+		return compactionUnknown
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return compactionCancelled
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "summarizer returned empty output") {
+		return compactionEmpty
+	}
+	var apiErr *provider.APIError
+	if !errors.As(err, &apiErr) {
+		if provider.IsStreamInterrupted(err) {
+			return compactionTransient
+		}
+		return compactionUnknown
+	}
+	body := strings.ToLower(apiErr.Body)
+	if apiErr.Status == 404 && (strings.Contains(body, "model_not_found") || strings.Contains(body, "model not found")) {
+		return compactionModelUnavailable
+	}
+	if apiErr.Status == 400 || apiErr.Status == 422 {
+		if containsAny(body, "reasoning_effort", "reasoning effort", "thinking", "unsupported parameter", "invalid effort") {
+			return compactionEffortUnsupported
+		}
+		if containsAny(body, "context length", "context_length", "maximum context", "too many tokens", "prompt is too long") {
+			return compactionContextTooLarge
+		}
+		return compactionRequestShape
+	}
+	if provider.RetryableStatus(apiErr.Status) {
+		return compactionTransient
+	}
+	return compactionUnknown
+}
+
+func containsAny(s string, markers ...string) bool {
+	for _, marker := range markers {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // renderTranscript flattens messages into a readable transcript for summarization.

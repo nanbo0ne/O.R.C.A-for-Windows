@@ -977,6 +977,8 @@ export function useController() {
 
   const checkpointRefreshSeq = useRef(new Map<string, number>());
   const sessionLoadSeq = useRef(new Map<string, number>());
+  const sessionLoads = useRef(new Map<string, Promise<void>>());
+  const balanceRefreshSeq = useRef(new Map<string, number>());
   const contextRefreshSeq = useRef(new Map<string, number>());
   const contextRefreshTimers = useRef(new Map<string, number>());
   const lastContextRefreshAt = useRef(new Map<string, number>());
@@ -1010,15 +1012,22 @@ export function useController() {
   }, [dispatchTo]);
 
   const refreshBalanceForTab = useCallback((tabId: string) => {
+    const seq = (balanceRefreshSeq.current.get(tabId) ?? 0) + 1;
+    balanceRefreshSeq.current.set(tabId, seq);
     // Clear the previous provider's value immediately. Unsupported providers
     // remain absent instead of flashing a misleading loading placeholder.
     dispatchTo(tabId, { type: "balance", balance: { available: false, display: "" } });
     app.BalanceForTab(tabId)
-      .then((balance) => dispatchTo(tabId, { type: "balance", balance }))
-      .catch((err) => dispatchTo(tabId, {
-        type: "balance",
-        balance: { available: false, display: "", err: err instanceof Error ? err.message : String(err) },
-      }));
+      .then((balance) => {
+        if (balanceRefreshSeq.current.get(tabId) === seq) dispatchTo(tabId, { type: "balance", balance });
+      })
+      .catch((err) => {
+        if (balanceRefreshSeq.current.get(tabId) !== seq) return;
+        dispatchTo(tabId, {
+          type: "balance",
+          balance: { available: false, display: "", err: err instanceof Error ? err.message : String(err) },
+        });
+      });
   }, [dispatchTo]);
 
   const requestContextRefresh = useCallback((tabId: string, minDelay = 0) => {
@@ -1049,39 +1058,52 @@ export function useController() {
   }, []);
 
   const loadSessionDataForTab = useCallback(async (tabId: string, reset = false) => {
-    const seq = bumpSessionLoadSeq(tabId);
-    const safe = <T,>(p: Promise<T>): Promise<T | undefined> => p.catch(() => undefined);
-    if (reset) dispatchTo(tabId, { type: "reset" });
-    const current = statesRef.current.get(tabId);
-    dispatchTo(tabId, { type: "session_load_start", hydrating: reset || !current || current.items.length === 0 });
+    const existing = sessionLoads.current.get(tabId);
+    if (existing && !reset) {
+      await existing;
+      return;
+    }
+    const load = (async () => {
+      const seq = bumpSessionLoadSeq(tabId);
+      const safe = <T,>(p: Promise<T>): Promise<T | undefined> => p.catch(() => undefined);
+      if (reset) dispatchTo(tabId, { type: "reset" });
+      const current = statesRef.current.get(tabId);
+      dispatchTo(tabId, { type: "session_load_start", hydrating: reset || !current || current.items.length === 0 });
 
-    // Meta and history are the only first-paint dependencies. Each is applied
-    // as soon as it arrives so a slow auxiliary endpoint cannot delay the chat.
-    const metaLoad = safe(app.MetaForTab(tabId)).then((meta) => {
-      if (meta && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "meta", meta });
-    });
-    const historyLoad = safe(app.HistoryForTab(tabId)).then((history) => {
-      if (history !== undefined && sessionLoadCurrent(tabId, seq)) {
-        dispatchTo(tabId, { type: "history", messages: asArray(history) });
-      }
-    });
-    await Promise.all([metaLoad, historyLoad]);
-    if (!sessionLoadCurrent(tabId, seq)) return;
-    dispatchTo(tabId, { type: "session_primary_loaded" });
-    window.requestAnimationFrame(() => {
-      if (sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "session_hydrated" });
-    });
+      // Meta and history are the only first-paint dependencies. Each is applied
+      // as soon as it arrives so a slow auxiliary endpoint cannot delay the chat.
+      const metaLoad = safe(app.MetaForTab(tabId)).then((meta) => {
+        if (meta && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "meta", meta });
+      });
+      const historyLoad = safe(app.HistoryForTab(tabId)).then((history) => {
+        if (history !== undefined && sessionLoadCurrent(tabId, seq)) {
+          dispatchTo(tabId, { type: "history", messages: asArray(history) });
+        }
+      });
+      await Promise.all([metaLoad, historyLoad]);
+      if (!sessionLoadCurrent(tabId, seq)) return;
+      dispatchTo(tabId, { type: "session_primary_loaded" });
+      window.requestAnimationFrame(() => {
+        if (sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "session_hydrated" });
+      });
 
-    // Auxiliary status hydrates independently after the transcript is usable.
-    void safe(refreshEffortForTab(tabId, (id, action) => { if (sessionLoadCurrent(tabId, seq)) dispatchTo(id, action); }));
-    void safe(app.JobsForTab(tabId)).then((jobs) => {
-      if (jobs && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
-    });
-    void safe(app.CheckpointsForTab(tabId)).then((checkpoints) => {
-      if (checkpoints && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "checkpoints", checkpoints: asArray(checkpoints) });
-    });
-    refreshBalanceForTab(tabId);
-    requestContextRefresh(tabId);
+      // Auxiliary status hydrates independently after the transcript is usable.
+      void safe(refreshEffortForTab(tabId, (id, action) => { if (sessionLoadCurrent(tabId, seq)) dispatchTo(id, action); }));
+      void safe(app.JobsForTab(tabId)).then((jobs) => {
+        if (jobs && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
+      });
+      void safe(app.CheckpointsForTab(tabId)).then((checkpoints) => {
+        if (checkpoints && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "checkpoints", checkpoints: asArray(checkpoints) });
+      });
+      refreshBalanceForTab(tabId);
+      requestContextRefresh(tabId);
+    })();
+    sessionLoads.current.set(tabId, load);
+    try {
+      await load;
+    } finally {
+      if (sessionLoads.current.get(tabId) === load) sessionLoads.current.delete(tabId);
+    }
   }, [bumpSessionLoadSeq, dispatchTo, refreshBalanceForTab, requestContextRefresh, sessionLoadCurrent]);
 
   const activeTabFromBackend = useCallback(async (): Promise<TabMeta | undefined> => {
