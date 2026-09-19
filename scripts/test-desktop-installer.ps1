@@ -1,6 +1,6 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([string]$ExpectedVersion = '3.0.10')
+param([string]$ExpectedVersion = '3.0.11')
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -56,7 +56,7 @@ if ($ExpectedVersion -notmatch '^v?(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?$') {
     throw 'ExpectedVersion must be a desktop semantic version.'
 }
 $productVersion = $Matches[1]
-if ([version]$productVersion -le [version]'3.0.9') { throw 'The candidate must be newer than 3.0.9.' }
+if ([version]$productVersion -le [version]'3.0.10') { throw 'The candidate must be newer than 3.0.10.' }
 $ownedRoot = Assert-ChildPath (Join-Path $runnerTemp ('orca installer acceptance ' + [guid]::NewGuid().ToString('N'))) $runnerTemp
 if (Test-Path -LiteralPath $ownedRoot) { throw 'The acceptance directory must be new.' }
 
@@ -110,7 +110,7 @@ if (-not (($webviewMachine -and $webviewMachine.PSObject.Properties['pv'] -and $
 }
 
 $assetName = 'O.R.C.A-for-Windows-windows-amd64-installer.exe'
-$pinnedOldSize = 91192109
+$pinnedOldSize = 91205028
 $candidate = Assert-ChildPath (Join-Path $repo "dist\$assetName") $repo
 $app = Assert-ChildPath (Join-Path $repo 'desktop\build\bin\Orca.exe') $repo
 $payload = Assert-ChildPath (Join-Path $repo 'desktop\build\windows\installer-go\payload') $repo
@@ -229,7 +229,7 @@ function Save-OfficialAsset($Asset, [string]$Destination) {
         Invoke-WebRequest -Uri $api -Headers $downloadHeaders -OutFile $destination -TimeoutSec 120
     } catch {
         # Public fallback; never forward the API bearer token to another host.
-        $direct = "https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.9/$($Asset.name)"
+        $direct = "https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.10/$($Asset.name)"
         Invoke-WebRequest -Uri $direct -OutFile $destination -TimeoutSec 120
     }
 }
@@ -317,27 +317,27 @@ try {
     if ($env:GH_TOKEN) { $headers.Authorization = "Bearer $env:GH_TOKEN" }
     $downloadHeaders = $headers.Clone()
     $downloadHeaders.Accept = 'application/octet-stream'
-    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/nanbo0ne/O.R.C.A-for-Windows/releases/tags/desktop-v3.0.9' -Headers $headers -TimeoutSec 120
-    if ($release.tag_name -cne 'desktop-v3.0.9' -or $release.draft -or $release.prerelease) { throw 'Invalid official baseline release.' }
+    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/nanbo0ne/O.R.C.A-for-Windows/releases/tags/desktop-v3.0.10' -Headers $headers -TimeoutSec 120
+    if ($release.tag_name -cne 'desktop-v3.0.10' -or $release.draft -or $release.prerelease) { throw 'Invalid official baseline release.' }
     foreach ($name in @($assetName, 'SHA256SUMS.txt')) {
         $assets = @($release.assets | Where-Object { $_.name -ceq $name })
         if ($assets.Count -ne 1) { throw "Missing or ambiguous release asset: $name" }
         if ($name -ceq $assetName -and [long]$assets[0].size -ne $pinnedOldSize) {
-            throw 'Official 3.0.9 installer metadata size mismatch.'
+            throw 'Official 3.0.10 installer metadata size mismatch.'
         }
         Save-OfficialAsset $assets[0] (Owned-Path "downloads\$name")
     }
     $oldInstaller = Owned-Path "downloads\$assetName"
     $oldSize = (Get-Item -LiteralPath $oldInstaller).Length
-    if ($oldSize -ne $pinnedOldSize) { throw 'Official 3.0.9 installer size mismatch.' }
+    if ($oldSize -ne $pinnedOldSize) { throw 'Official 3.0.10 installer size mismatch.' }
     $checksumText = [IO.File]::ReadAllText((Owned-Path 'downloads\SHA256SUMS.txt'))
     $checksumRows = [regex]::Matches($checksumText, ('(?im)^([a-f0-9]{64}) [ *]' + [regex]::Escape($assetName) + '\r?$'))
     if ($checksumRows.Count -ne 1) { throw 'The baseline must have exactly one SHA256SUMS entry.' }
     $oldHash = Get-SHA256 $oldInstaller
-    # Pin the public 3.0.9 baseline in addition to checking its downloaded sums.
-    $pinnedOldHash = '89efd5e03de9848988189901ce90fe0ec761a980c64b16e5bda0c2b9c14a7723'
+    # Pin the public 3.0.10 baseline in addition to checking its downloaded sums.
+    $pinnedOldHash = 'a021db82626246a6895abbdd53128f0264f37aa40c21cc56cf9a81399879e979'
     if ($oldHash -ine $checksumRows[0].Groups[1].Value -or $oldHash -cne $pinnedOldHash) {
-        throw 'Official 3.0.9 installer SHA256 mismatch.'
+        throw 'Official 3.0.10 installer SHA256 mismatch.'
     }
     $evidence.checks.Add(@{phase = 'official-baseline-sha256'; tag = $release.tag_name; size = $oldSize; sha256 = $oldHash})
     $newInstaller = Owned-Path 'candidate-installer.exe'
@@ -385,7 +385,7 @@ $ErrorActionPreference = 'Stop'
     $freshDir = Owned-Path "fresh target with spaces `u{4e2d}`u{6587}"
     $null = Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir" 'install-309'
     Assert-NoApplication
-    Assert-Installation $upgradeDir '3.0.9' 'installed-309'
+    Assert-Installation $upgradeDir '3.0.10' 'installed-310'
     Assert-Markers 'installed-309'
     Add-Marker (Join-Path $upgradeDir 'data\synthetic-session.json') '{"synthetic":true}'
     Add-Marker (Join-Path $upgradeDir '.deepseek-orca\config.json') '{"synthetic":true}'
