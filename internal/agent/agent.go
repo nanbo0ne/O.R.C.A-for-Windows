@@ -246,16 +246,17 @@ type Agent struct {
 	// checkpoint plus the minimum tail cannot buy enough room, so auto-compaction
 	// pauses instead of looping. softCompactNoticed gates the one-shot soft-ratio
 	// notice so it fires once per approach, not every turn.
-	contextWindow       int
-	softCompactRatio    float64
-	compactRatio        float64
-	compactForceRatio   float64
-	softCompactNoticed  bool
-	autoCompactCooldown bool
-	recentKeep          int
-	archiveDir          string
-	compactStuck        bool
-	consecutiveCompacts int
+	contextWindow          int
+	softCompactRatio       float64
+	compactRatio           float64
+	compactForceRatio      float64
+	softCompactNoticed     bool
+	autoCompactCooldown    bool
+	compactionBackoffUntil time.Time
+	recentKeep             int
+	archiveDir             string
+	compactStuck           bool
+	consecutiveCompacts    int
 
 	// stormSig / stormCount track a run of turns that keep failing the same way so
 	// the loop can break a death-spiral. The signature is each call's (tool, error)
@@ -415,6 +416,7 @@ func (a *Agent) CompactRatio() float64 { return a.compactRatio }
 // TUI's `/compact` command so the user can reset the prefix before it
 // naturally fills up.
 func (a *Agent) CompactNow(ctx context.Context, instructions string) error {
+	a.compactionBackoffUntil = time.Time{}
 	return a.compact(ctx, "manual", instructions, true)
 }
 
@@ -857,6 +859,7 @@ func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string,
 	})
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		RequestID:   requestID,
+		Purpose:     provider.RequestPurposeTurn,
 		Messages:    a.hydrateImageMessages(ctx, a.session.Messages),
 		Tools:       a.tools.Schemas(),
 		Temperature: a.temperature,

@@ -22543,6 +22543,10 @@ a[href] {
 :root[data-ui-style="modern"] .composer-wrap--modern .composer-modern-status {
   grid-area: status;
   align-self: center;
+  justify-self: stretch;
+  display: flex;
+  align-items: center;
+  height: 30px;
   min-width: 0;
   overflow: hidden;
   padding-inline: 8px;
@@ -22558,6 +22562,7 @@ a[href] {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  line-height: 30px;
 }
 
 :root[data-ui-style="modern"] .composer-wrap--modern .composer-card__actions--modern {

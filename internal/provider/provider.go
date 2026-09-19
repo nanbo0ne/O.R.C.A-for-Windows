@@ -72,16 +72,35 @@ type ToolSchema struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
+// RequestPurpose identifies the internal reason for a provider request. It is
+// intentionally not serialized onto the wire; it exists so diagnostics and
+// bounded compatibility fallbacks can distinguish a normal turn from an
+// isolated context checkpoint.
+type RequestPurpose string
+
+const (
+	RequestPurposeTurn               RequestPurpose = "turn"
+	RequestPurposeCompaction         RequestPurpose = "compaction"
+	RequestPurposeCompactionFallback RequestPurpose = "compaction_fallback"
+	RequestPurposeClassifier         RequestPurpose = "classifier"
+)
+
 // Request is a single completion request.
 type Request struct {
 	// RequestID is the client-generated identity for this provider request. It
 	// is carried for provider adapters and usage receipts; providers need not
 	// expose it remotely.
 	RequestID   string
+	Purpose     RequestPurpose
 	Messages    []Message
 	Tools       []ToolSchema
 	Temperature float64
 	MaxTokens   int
+	// ReasoningEffortOverride is scoped to this request. A nil pointer keeps the
+	// provider's configured effort; a non-nil empty string explicitly omits the
+	// effort field. This is used only for compatibility retries and never writes
+	// back to the conversation preference.
+	ReasoningEffortOverride *string
 	// DisableThinking is for short, isolated host classifiers. Ordinary turns
 	// leave it false and retain the configured reasoning behavior.
 	DisableThinking bool

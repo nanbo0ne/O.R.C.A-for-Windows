@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent } from "react";
+import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent } from "react";
 import { ArrowUp, Brain, Check, ChevronDown, FileImage, FileText, Folder, Gauge, List, MessageSquare, MoreHorizontal, Paperclip, Pause, Play, Plus, RefreshCw, Search, Shield, ShieldAlert, ShieldCheck, Slash, Sparkles, Square, Target, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
@@ -561,6 +561,7 @@ export function Composer({
     return () => { cancelled = true; };
   }, [attachments]);
   const nativeClipboardPasteTimerRef = useRef<number | null>(null);
+  const nativeClipboardPasteInFlightRef = useRef(false);
   // Snapshot of the current cwd so async callbacks (openPastChats) can detect
   // workspace switches and discard stale responses (issue #3601).
   const cwdRef = useRef(cwd);
@@ -1119,11 +1120,17 @@ export function Composer({
   };
 
   const attachNativeClipboardImage = async (notifyOnError: boolean): Promise<boolean> => {
+    // Ctrl/Cmd+V can produce both a browser paste event and the delayed native
+    // clipboard fallback. Treat one in-flight native read as the paste unit so
+    // two async callbacks cannot both pass the dedup check.
+    if (nativeClipboardPasteInFlightRef.current) return true;
+    nativeClipboardPasteInFlightRef.current = true;
     setPendingPaste((n) => n + 1);
     try {
       const path = await app.SaveClipboardImage();
       const previewUrl = await app.AttachmentDataURL(path);
-      const key = { hash: await dataURLHash(previewUrl), source: `native-clipboard:${path}` };
+      const hash = await dataURLHash(previewUrl);
+      const key = { hash, source: hash ? `native-clipboard-hash:${hash}` : `native-clipboard:${path}` };
       if (attachmentDedupRef.current.seen(key.hash, key.source)) return true;
       rememberAttachment(path, key);
       setAttachments((prev) => [...prev, { id: `attachment-${Date.now()}-${attachmentSequenceRef.current++}`, path, previewUrl, status: "ready" }]);
@@ -1133,6 +1140,7 @@ export function Composer({
       if (notifyOnError) showToast(t("composer.pasteImageFailed"), "warn");
       return false;
     } finally {
+      nativeClipboardPasteInFlightRef.current = false;
       setPendingPaste((n) => Math.max(0, n - 1));
     }
   };
@@ -1239,6 +1247,10 @@ export function Composer({
     if (files.length > 0) {
       e.preventDefault();
       attachFiles(files);
+      // Chromium/Wails can expose the same clipboard image both as a File and
+      // as a native path. The File already contains the complete image bytes;
+      // asking for native paths here would attach the same image a second time.
+      if (files.some((file) => file.type.toLowerCase().startsWith("image/"))) return;
       void app.ReadClipboardFilePaths().then((paths) => {
         const names = new Set(files.map((file) => file.name.toLowerCase()));
         const additional = paths.filter((path) => !names.has(baseName(path).toLowerCase()));
@@ -1610,6 +1622,13 @@ export function Composer({
       e.preventDefault();
       void submit(Boolean(running && (e.ctrlKey || e.metaKey)));
     }
+  };
+
+  const focusComposerSurface = (event: MouseEvent<HTMLDivElement>) => {
+    if (disabled) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("button, a, input, textarea, select, [role=button], [role=menuitem], [data-composer-no-focus]")) return;
+    taRef.current?.focus();
   };
 
   // Keydown handler for the past:chats search <input>. The search input is a
@@ -2250,6 +2269,7 @@ export function Composer({
       >
         <div
           className={`composer${dragOver ? " composer--dragover" : ""}${disabled ? " composer--disabled" : ""}${shellModeActive ? " composer--shell" : ""}`}
+          onClick={focusComposerSurface}
           onDrop={onDrop}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
@@ -2430,9 +2450,7 @@ export function Composer({
         </div>
         {uiStyle === "modern" && (
           <div className="composer-modern-status" role="status" aria-live="polite">
-            {runActivity && <Tooltip label={runActivity} fill>
-              <span className="composer-modern-status__text" tabIndex={0}>{runActivity}</span>
-            </Tooltip>}
+            {runActivity && <span className="composer-modern-status__text" tabIndex={0} title={runActivity}>{runActivity}</span>}
           </div>
         )}
         <div className={`composer-card__actions${uiStyle === "modern" ? " composer-card__actions--modern" : " composer-card__actions--classic"}`}>

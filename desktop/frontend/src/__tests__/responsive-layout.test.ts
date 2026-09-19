@@ -163,8 +163,26 @@ check(
 check(
   composer.includes('className="composer-modern-status" role="status"') &&
     css.includes("grid-area: status;") &&
+    css.includes("justify-self: stretch;") &&
+    css.includes("height: 30px;") &&
+    css.includes("line-height: 30px;") &&
+    composer.includes("onClick={focusComposerSurface}") &&
+    !composer.includes("<Tooltip label={runActivity} fill>") &&
     !css.includes("max-width: 148px;\n  flex: 0 1 auto;"),
-  "Modern run status owns flexible space independently of the fixed buttons",
+  "Modern run status owns flexible space independently of the fixed buttons without a floating tooltip",
+);
+check(
+  composer.includes("const nativeClipboardPasteInFlightRef = useRef(false)") &&
+    composer.includes("native-clipboard-hash:") &&
+    composer.includes("if (files.some((file) => file.type.toLowerCase().startsWith(\"image/\"))) return;") &&
+    composer.includes("nativeClipboardPasteInFlightRef.current = false"),
+  "image paste has one asynchronous native path and content-based duplicate protection",
+);
+check(
+  composer.includes("// Enter queues while the agent is running") &&
+    composer.includes("if (e.key === \"Enter\" && !e.shiftKey && !composing)") &&
+    composer.includes("Shift+Enter remains newline"),
+  "Enter submits while Shift+Enter remains a textarea newline",
 );
 check(
   css.includes(':root[data-ui-style="classic"] .composer-runstatus {\n  width: min(360px, 40cqw);'),
@@ -307,6 +325,14 @@ check(
     auxiliaryEffort > primaryLoaded &&
     sessionLoader.slice(auxiliaryEffort).includes("if (sessionLoadCurrent(tabId, seq)) dispatchTo(id, action)"),
   "conversation selection paints before history work and auxiliary status hydrates later",
+);
+check(
+  controller.includes("const sessionLoads = useRef(new Map<string, Promise<void>>())") &&
+    controller.includes("if (existing && !reset) {") &&
+    controller.includes("const balanceRefreshSeq = useRef(new Map<string, number>())") &&
+    controller.includes("if (balanceRefreshSeq.current.get(tabId) === seq) dispatchTo(tabId, { type: \"balance\", balance });") &&
+    controller.includes("if (sessionLoads.current.get(tabId) === load) sessionLoads.current.delete(tabId)"),
+  "concurrent tab loads coalesce and stale balance results cannot overwrite a newer model",
 );
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

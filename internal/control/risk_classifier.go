@@ -67,6 +67,7 @@ func (c *ProviderRiskClassifier) AssessWithParentTurn(ctx context.Context, input
 	}
 	ch, err := c.prov.Stream(ctx, provider.Request{
 		RequestID: requestID,
+		Purpose:   provider.RequestPurposeClassifier,
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: riskClassifierPrompt},
 			{Role: provider.RoleUser, Content: string(payload)},

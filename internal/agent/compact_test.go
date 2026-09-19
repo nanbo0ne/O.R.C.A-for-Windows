@@ -2,10 +2,13 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/event"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
@@ -19,6 +22,38 @@ type fakeProvider struct {
 	got   []provider.Message
 	req   provider.Request
 	usage *provider.Usage
+}
+
+type scriptedCompactionResponse struct {
+	reply string
+	err   error
+}
+
+type scriptedCompactionProvider struct {
+	responses []scriptedCompactionResponse
+	requests  []provider.Request
+}
+
+func (p *scriptedCompactionProvider) Name() string { return "scripted-compaction" }
+
+func (p *scriptedCompactionProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	p.requests = append(p.requests, req)
+	index := len(p.requests) - 1
+	if index >= len(p.responses) {
+		index = len(p.responses) - 1
+	}
+	if index < 0 {
+		return nil, fmt.Errorf("scripted provider has no response")
+	}
+	response := p.responses[index]
+	if response.err != nil {
+		return nil, response.err
+	}
+	ch := make(chan provider.Chunk, 2)
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: response.reply}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
 }
 
 func (f *fakeProvider) Name() string { return "fake" }
@@ -64,6 +99,128 @@ func TestCompactionSummarizerEmitsAttributedUsageReceipt(t *testing.T) {
 	got := sinkEvents[0]
 	if got.RequestID == "" || got.RequestID != prov.req.RequestID || got.ParentTurnID != parentTurnID || got.ProviderEndpoint != "https://api.deepseek.com" || got.Usage.TotalTokens != 100 {
 		t.Fatalf("compaction usage receipt = %+v, request=%+v", got, prov.req)
+	}
+}
+
+func compactionFailureSession() *Session {
+	return &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: strings.Repeat("important context ", 160)},
+		{Role: provider.RoleAssistant, Content: "first answer"},
+		{Role: provider.RoleUser, Content: "continue"},
+		{Role: provider.RoleAssistant, Content: "second answer"},
+		{Role: provider.RoleUser, Content: "latest"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+}
+
+func TestCompactModelUnavailablePreservesHistoryAndDoesNotRetry(t *testing.T) {
+	prov := &scriptedCompactionProvider{responses: []scriptedCompactionResponse{{err: &provider.APIError{
+		Provider: "Token Lens", Status: 404,
+		Body: `{"error":{"type":"model_not_found","message":"deployment is unavailable"}}`,
+	}}}}
+	sess := compactionFailureSession()
+	before := sess.Snapshot()
+	archiveDir := t.TempDir()
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: archiveDir}, event.Discard)
+
+	err := a.compact(context.Background(), "manual", "", true)
+	if err == nil || classifyCompactionError(err) != compactionModelUnavailable {
+		t.Fatalf("compact error = %v, want model_unavailable", err)
+	}
+	if len(prov.requests) != 1 {
+		t.Fatalf("model unavailable made %d requests, want one", len(prov.requests))
+	}
+	if !reflect.DeepEqual(sess.Snapshot(), before) {
+		t.Fatal("model-unavailable compaction changed the live history")
+	}
+	entries, readErr := os.ReadDir(archiveDir)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed compaction created %d archive files", len(entries))
+	}
+}
+
+func TestCompactUnsupportedEffortUsesOneScopedOmissionRetry(t *testing.T) {
+	prov := &scriptedCompactionProvider{responses: []scriptedCompactionResponse{
+		{err: &provider.APIError{Provider: "local", Status: 400, Body: `{"error":{"message":"unsupported parameter reasoning_effort"}}`}},
+		{reply: "- preserved summary"},
+	}}
+	sess := compactionFailureSession()
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, event.Discard)
+
+	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if len(prov.requests) != 2 {
+		t.Fatalf("requests = %d, want standard plus one fallback", len(prov.requests))
+	}
+	if prov.requests[0].Purpose != provider.RequestPurposeCompaction || prov.requests[1].Purpose != provider.RequestPurposeCompactionFallback {
+		t.Fatalf("request purposes = %q, %q", prov.requests[0].Purpose, prov.requests[1].Purpose)
+	}
+	if prov.requests[1].ReasoningEffortOverride == nil || *prov.requests[1].ReasoningEffortOverride != "" {
+		t.Fatalf("fallback effort override = %v, want explicit omission", prov.requests[1].ReasoningEffortOverride)
+	}
+	if prov.requests[1].DisableThinking {
+		t.Fatal("effort-only fallback unexpectedly disabled thinking")
+	}
+	if !strings.Contains(sess.Messages[1].Content, "preserved summary") {
+		t.Fatal("successful scoped fallback did not commit its summary")
+	}
+}
+
+func TestCompactRequestShapeUsesToolFreeConversationFallback(t *testing.T) {
+	prov := &scriptedCompactionProvider{responses: []scriptedCompactionResponse{
+		{err: &provider.APIError{Provider: "local", Status: 422, Body: `{"error":{"message":"invalid request shape"}}`}},
+		{reply: "- fallback summary"},
+	}}
+	sess := compactionFailureSession()
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, event.Discard)
+
+	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if len(prov.requests) != 2 || !prov.requests[1].DisableThinking || prov.requests[1].MaxTokens != compactionFallbackMaxTokens {
+		t.Fatalf("fallback request = %+v", prov.requests)
+	}
+	if !strings.Contains(prov.requests[1].Messages[0].Content, "Compatibility fallback") {
+		t.Fatalf("fallback prompt did not identify its restricted mode: %q", prov.requests[1].Messages[0].Content)
+	}
+}
+
+func TestCompactContextTooLargeDoesNotRetryOrMutateHistory(t *testing.T) {
+	prov := &scriptedCompactionProvider{responses: []scriptedCompactionResponse{{err: &provider.APIError{
+		Provider: "local", Status: 400, Body: `{"error":{"message":"maximum context length exceeded"}}`,
+	}}}}
+	sess := compactionFailureSession()
+	before := sess.Snapshot()
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, event.Discard)
+
+	if err := a.compact(context.Background(), "manual", "", true); err == nil || classifyCompactionError(err) != compactionContextTooLarge {
+		t.Fatalf("compact error = %v, want context_too_large", err)
+	}
+	if len(prov.requests) != 1 || !reflect.DeepEqual(sess.Snapshot(), before) {
+		t.Fatalf("context error retried or changed history: requests=%d", len(prov.requests))
+	}
+}
+
+func TestMaybeCompactBacksOffAfterProviderFailure(t *testing.T) {
+	prov := &scriptedCompactionProvider{responses: []scriptedCompactionResponse{{err: &provider.APIError{
+		Provider: "local", Status: 404, Body: `{"error":{"code":"model_not_found"}}`,
+	}}}}
+	a := New(prov, tool.NewRegistry(), compactionFailureSession(), Options{ContextWindow: 100, RecentKeep: 2}, event.Discard)
+	usage := &provider.Usage{PromptTokens: 100}
+	a.maybeCompact(context.Background(), usage)
+	a.maybeCompact(context.Background(), usage)
+	if len(prov.requests) != 1 {
+		t.Fatalf("backoff did not suppress repeated auto-compaction: requests=%d", len(prov.requests))
+	}
+	a.compactionBackoffUntil = time.Now().Add(-time.Millisecond)
+	a.maybeCompact(context.Background(), usage)
+	if len(prov.requests) != 2 {
+		t.Fatalf("expired backoff did not permit a later retry: requests=%d", len(prov.requests))
 	}
 }
 

@@ -60,6 +60,7 @@ func (c *ProviderAutoPlanClassifier) NeedsPlanWithParentTurn(ctx context.Context
 	var usage *provider.Usage
 	ch, err := c.prov.Stream(ctx, provider.Request{
 		RequestID: requestID,
+		Purpose:   provider.RequestPurposeClassifier,
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: autoPlanClassifierPrompt},
 			{Role: provider.RoleUser, Content: fmt.Sprintf("heuristic_score=%d\n\nUSER_REQUEST:\n%s", score, input)},

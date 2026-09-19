@@ -354,6 +354,11 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		out.Thinking = &thinkingMode{Type: t}
 		out.ReasoningEffort = ""
 	}
+	if req.ReasoningEffortOverride != nil {
+		// A compatibility retry may omit the effort field without changing the
+		// provider instance or the user's saved conversation preference.
+		out.ReasoningEffort = *req.ReasoningEffortOverride
+	}
 	if req.DisableThinking {
 		out.ReasoningEffort = ""
 		if c.deepseek || c.minimax {
