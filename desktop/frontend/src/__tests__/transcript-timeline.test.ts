@@ -1,6 +1,9 @@
 import { historyMessagesToItems, initialState, reducer, type Item } from "../lib/useController";
 import { activityIndicatorPhase, buildTimelineSegments, requiredWarmPage, timelineKinds, visibleWarmStart } from "../lib/transcriptTimeline";
 import { readFileSync } from "node:fs";
+import { readinessNoticeText } from "../lib/readinessNotice";
+import { en } from "../locales/en";
+import { zh } from "../locales/zh";
 
 let failed = 0;
 
@@ -407,5 +410,13 @@ equal("completed turn header is light, bordered, and rounded", transcriptSource.
 equal("completed turn cost is guarded by the backend availability flag", transcriptSource.includes("item.costAvailable !== true"), true);
 const standaloneStatsSource = transcriptSource.match(/function TurnStatsRow[\s\S]*?\r?\n}\r?\n\r?\nfunction CompletedTurn/);
 equal("standalone stats render without a faux expand control", Boolean(standaloneStatsSource && !standaloneStatsSource[0].includes("useState") && !standaloneStatsSource[0].includes("onToggle")), true);
+
+for (const dictionary of [en, zh]) {
+  const translate = (key: keyof typeof en) => dictionary[key];
+  equal("pending checklist notice uses the selected language", readinessNoticeText(en["notice.readinessPending"], translate), dictionary["notice.readinessPending"]);
+  equal("actual failed action remains an explicit warning", readinessNoticeText(en["notice.readinessFailed"], translate), dictionary["notice.readinessFailed"]);
+  equal("older diagnostic renders without exposing its raw task list", readinessNoticeText("final-answer readiness found a new failed action after targeted verification: synthetic task: pending", translate), dictionary["notice.readinessLegacyStopped"]);
+  equal("unrelated notices remain unchanged", readinessNoticeText("synthetic server error", translate), "synthetic server error");
+}
 
 if (failed > 0) process.exit(1);

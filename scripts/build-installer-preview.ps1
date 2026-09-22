@@ -4,14 +4,14 @@ param(
     [ValidateSet('amd64', 'arm64')]
     [string]$Architecture = 'amd64',
     [switch]$SkipAppBuild,
-    [string]$OutputDirectory = 'D:\AI-Reasonix\dist\desktop-v3.0.11-preview'
+    [string]$OutputDirectory = 'D:\AI-Reasonix\dist\desktop-v3.0.12-preview'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'The installer preview requires Windows.' }
 
-$version = '3.0.11'
+$version = '3.0.12'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $desktop = Join-Path $repo 'desktop'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
@@ -66,7 +66,7 @@ function Assert-App([string]$Path) {
     if ($LASTEXITCODE -ne 0) { throw "Cannot read Go build information: $Path" }
     $buildInfo = $buildInfoJSON | ConvertFrom-Json
     $ldflags = @($buildInfo.Settings | Where-Object Key -EQ '-ldflags' | Select-Object -ExpandProperty Value) -join ' '
-    if ($ldflags -notmatch '(?:^|\s)-X main\.version=v3\.0\.9(?:\s|$)') {
+    if ($ldflags -notmatch ('(?:^|\s)-X main\.version=v' + [regex]::Escape($version) + '(?:\s|$)')) {
         throw "The application lacks the v$version Go version marker: $Path"
     }
 }

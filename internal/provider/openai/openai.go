@@ -22,7 +22,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/netclient"
@@ -37,6 +36,11 @@ import (
 // (client.idleTimeout) so a test can shorten it without a shared global that
 // would race other streams' watchdogs.
 const defaultStreamIdleTimeout = 120 * time.Second
+
+// Absorb short event-sink delays without stopping HTTP reads. Sustained local
+// backpressure closes the response before upstream write timeouts can accumulate.
+const streamChunkBuffer = 64
+const defaultConsumerTimeout = 5 * time.Second
 
 func init() {
 	provider.Register("openai", New)
@@ -136,16 +140,17 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
-	name        string
-	apiKey      string
-	keyEnv      string // api_key_env name, surfaced in auth errors
-	baseURL     string
-	model       string
-	http        *http.Client
-	deepseek    bool
-	minimax     bool          // true for api.minimaxi.com - emits MiniMax-M3's thinking knob instead of reasoning_effort
-	effort      string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
-	idleTimeout time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
+	name            string
+	apiKey          string
+	keyEnv          string // api_key_env name, surfaced in auth errors
+	baseURL         string
+	model           string
+	http            *http.Client
+	deepseek        bool
+	minimax         bool          // true for api.minimaxi.com - emits MiniMax-M3's thinking knob instead of reasoning_effort
+	effort          string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	idleTimeout     time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
+	consumerTimeout time.Duration // blocked chunk delivery; defaultConsumerTimeout unless a test overrides
 }
 
 func (c *client) Name() string { return c.name }
@@ -196,7 +201,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		return nil, c.requestError(err)
 	}
 
-	out := make(chan provider.Chunk)
+	out := make(chan provider.Chunk, streamChunkBuffer)
 	go c.streamWithReconnect(ctx, resp, newReq, out)
 	return out, nil
 }
@@ -375,6 +380,8 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 // the first fatal error - a nil error means the stream reached [DONE].
 func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk) (emitted bool, _ error) {
 	defer resp.Body.Close()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 
 	// Close the response body when the context is canceled (user interrupt) or the
 	// stream stalls past c.idleTimeout, so scanner.Scan() unblocks instead of
@@ -389,7 +396,6 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	done := make(chan struct{})
 	defer close(done)
 	activity := make(chan struct{}, 1)
-	var stalled atomic.Bool
 	go func() {
 		idle := time.NewTimer(idleTimeout)
 		defer idle.Stop()
@@ -399,7 +405,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				resp.Body.Close()
 				return
 			case <-idle.C:
-				stalled.Store(true)
+				cancel(fmt.Errorf("%s: stream stalled - no data for %s", c.name, idleTimeout))
 				resp.Body.Close()
 				return
 			case <-activity:
@@ -415,6 +421,31 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			}
 		}
 	}()
+	consumerTimeout := c.consumerTimeout
+	if consumerTimeout <= 0 {
+		consumerTimeout = defaultConsumerTimeout
+	}
+	emit := func(chunk provider.Chunk) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		select {
+		case out <- chunk:
+			return true
+		default:
+		}
+		timer := time.NewTimer(consumerTimeout)
+		defer timer.Stop()
+		select {
+		case out <- chunk:
+			return true
+		case <-ctx.Done():
+			return false
+		case <-timer.C:
+			cancel(fmt.Errorf("%s: %w for %s; response closed", c.name, provider.ErrStreamConsumerBlocked, consumerTimeout))
+			return false
+		}
+	}
 
 	acc := map[int]*provider.ToolCall{}
 	started := map[int]bool{}
@@ -423,14 +454,10 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	var sawDone bool
 	var think thinkSplitter
 
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(streamActivityReader{Reader: resp.Body, activity: activity})
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
-		select { // ping the idle watchdog; non-blocking so a full buffer is fine
-		case activity <- struct{}{}:
-		default:
-		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
 			continue
@@ -459,8 +486,8 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			u := normaliseUsage(sr.Usage)
 			u.FinishReason = lastFinishReason
 			emitted = true
-			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkUsage, Usage: u}) {
-				return emitted, ctx.Err()
+			if !emit(provider.Chunk{Type: provider.ChunkUsage, Usage: u}) {
+				return emitted, context.Cause(ctx)
 			}
 		}
 		if len(sr.Choices) == 0 {
@@ -470,22 +497,22 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		delta := sr.Choices[0].Delta
 		if delta.ReasoningContent != nil {
 			emitted = true
-			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: *delta.ReasoningContent}) {
-				return emitted, ctx.Err()
+			if !emit(provider.Chunk{Type: provider.ChunkReasoning, Text: *delta.ReasoningContent}) {
+				return emitted, context.Cause(ctx)
 			}
 		}
 		if delta.Content != "" {
 			r, txt := think.push(delta.Content)
 			if r != "" {
 				emitted = true
-				if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: r}) {
-					return emitted, ctx.Err()
+				if !emit(provider.Chunk{Type: provider.ChunkReasoning, Text: r}) {
+					return emitted, context.Cause(ctx)
 				}
 			}
 			if txt != "" {
 				emitted = true
-				if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkText, Text: txt}) {
-					return emitted, ctx.Err()
+				if !emit(provider.Chunk{Type: provider.ChunkText, Text: txt}) {
+					return emitted, context.Cause(ctx)
 				}
 			}
 		}
@@ -509,15 +536,15 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			if !started[tc.Index] && cur.Name != "" {
 				started[tc.Index] = true
 				emitted = true
-				if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: cur.ID, Name: cur.Name}}) {
-					return emitted, ctx.Err()
+				if !emit(provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: cur.ID, Name: cur.Name}}) {
+					return emitted, context.Cause(ctx)
 				}
 			}
 		}
 	}
 
-	if stalled.Load() {
-		return emitted, fmt.Errorf("%s: stream stalled - no data for %s, connection likely dropped", c.name, idleTimeout)
+	if ctx.Err() != nil {
+		return emitted, context.Cause(ctx)
 	}
 	if err := scanner.Err(); err != nil {
 		return emitted, fmt.Errorf("%s: read stream: %w", c.name, err)
@@ -531,13 +558,13 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 
 	if r, txt := think.flush(); r != "" || txt != "" {
 		if r != "" {
-			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: r}) {
-				return emitted, ctx.Err()
+			if !emit(provider.Chunk{Type: provider.ChunkReasoning, Text: r}) {
+				return emitted, context.Cause(ctx)
 			}
 		}
 		if txt != "" {
-			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkText, Text: txt}) {
-				return emitted, ctx.Err()
+			if !emit(provider.Chunk{Type: provider.ChunkText, Text: txt}) {
+				return emitted, context.Cause(ctx)
 			}
 		}
 	}
@@ -551,23 +578,43 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			// an empty tool_call_id collapses multi-tool turns downstream.
 			tc.ID = fmt.Sprintf("call_%d", idx)
 		}
-		if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkToolCall, ToolCall: tc}) {
-			return emitted, ctx.Err()
+		if !emit(provider.Chunk{Type: provider.ChunkToolCall, ToolCall: tc}) {
+			return emitted, context.Cause(ctx)
 		}
 	}
-	if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkDone}) {
-		return emitted, ctx.Err()
+	if !emit(provider.Chunk{Type: provider.ChunkDone}) {
+		return emitted, context.Cause(ctx)
 	}
 	return emitted, nil
 }
 
 func sendChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Chunk) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	select {
 	case out <- chunk:
 		return true
 	case <-ctx.Done():
 		return false
 	}
+}
+
+// Activity is network bytes, not completed lines or successful UI deliveries.
+type streamActivityReader struct {
+	io.Reader
+	activity chan<- struct{}
+}
+
+func (r streamActivityReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if n > 0 {
+		select {
+		case r.activity <- struct{}{}:
+		default:
+		}
+	}
+	return n, err
 }
 
 // normaliseUsage folds the two cache-hit shapes the OpenAI-compatible ecosystem

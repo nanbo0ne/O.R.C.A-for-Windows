@@ -5,7 +5,7 @@ import community from '../data/community.json';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const repo = 'https://github.com/nanbo0ne/O.R.C.A-for-Windows';
 
-const desktopVer = '3.0.11';
+const desktopVer = '3.0.12';
 const R2 = `https://orca.aichat.diy/releases/desktop-v${desktopVer}`;
 
 const fmtN = (n) => Number(n).toLocaleString('en-US');
@@ -14,7 +14,7 @@ const half = Math.ceil(community.list.length / 2);
 const rowA = community.list.slice(0, half);
 const rowB = community.list.slice(half);
 
-const desc = "O.R.C.A. 3.0.11 is an open-source AI workspace for coding, research, image attachments, files, and office artifacts, with cloud providers and configured external local services. It brings Assistant, Coding, ORCA Agent, memory, and automation together in Modern and Classic layouts.";
+const desc = "O.R.C.A. 3.0.12 is an open-source AI workspace for coding, research, image attachments, files, and office artifacts, with cloud providers and configured external local services. It brings Assistant, Coding, ORCA Agent, memory, and automation together in Modern and Classic layouts.";
 const ld = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -68,7 +68,7 @@ const ld = {
         <span class="l-en">Choose cloud providers, then use O.R.C.A to code, research, analyze images you attach, and create work artifacts. External compatible local services remain available when configured.</span>
         <span class="l-zh">自由选择云端供应商，使用 O.R.C.A 编程、调研、分析你附上的图片和制作办公产物；已配置的外部兼容本地服务仍可使用。</span>
       </p>
-      <p class="reveal"><span class="l-en">3.0.11 fixes effort saving and current-turn cancellation. Stop stays available with a new draft; cancellation preserves that draft even when Submit resolves later. Stop failures retain running state, and stale completions cannot stop the next turn. The standard Windows installer and Modern / Classic layouts are retained. <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.11.md`}>Release notes</a></span><span class="l-zh">3.0.11 修复思考强度保存与当前回合取消。输入新草稿后仍可点击停止，取消后发送请求稍晚成功也不会清空草稿；停止失败保留运行状态，迟到终态不影响新回合。沿用标准 Windows 安装器和 Modern / Classic 布局。<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.11.md`}>发布说明</a></span></p>
+      <p class="reveal"><span class="l-en">3.0.12 fixes false end-of-turn failures and stream lifecycle issues. Unfinished tasks remain open; recovered actions and rejected checklist updates no longer cause erroneous termination. Completed streams release their connections, and sustained consumer blockage reports an error without replaying output. The standard Windows installer and Modern / Classic layouts are retained. <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.12.md`}>Release notes</a></span><span class="l-zh">3.0.12 修复结束检查误报和流式请求生命周期问题。未完成待办保持原样，已恢复动作及被拒绝的清单更新不再错误中止回合；流式结束及时释放连接，持续消费阻塞明确报错，不重放输出。沿用标准 Windows 安装器和 Modern / Classic 布局。<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.12.md`}>发布说明</a></span></p>
       <div class="hero-cta reveal" style="--d:0.18s">
         <a class="btn btn-dark" data-os-dl data-goto="desktop" href="#start"><span class="l-en">Download for <span class="os-name">macOS</span></span><span class="l-zh">下载 <span class="os-name">macOS</span> 版</span></a>
         <span class="install"><span class="ps1">$</span>npm i -g orca-agent<button data-copy="npm i -g orca-agent">Copy</button></span>
@@ -241,7 +241,7 @@ const ld = {
 
     <div class="dl reveal" style="--d:0.14s">
       <p class="dl-note"><span class="l-en">Choose your desktop package and check signatures and checksums on the <a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>Release page</a>. Flash retains <code>deepseek/deepseek-flash</code>: native vision, 1M context, up to 384K output, tools, and JSON. Old Flash/Vision names are aliases; Pro remains text-only.</span><span class="l-zh">按平台选择桌面安装包，并核对签名和校验表，详见 <a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>Release 页面</a>。Flash 沿用 <code>deepseek/deepseek-flash</code>，支持原生视觉、1M 上下文、最大 384K 输出、工具及 JSON；旧 Flash/Vision 名称为别名，Pro 保持文本模型。</span></p>
-      <p class="dl-note"><span class="l-en">3.0.11 does not repeat completed 3.0.5 Flash migration; custom providers and deliberate Pro choices are preserved. Effort remains low/high/max, auto = high. <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.11.md`}>Bilingual notes</a>, <a href={`${base}/docs/`}>model and RMB pricing reference</a>, and <a href={`${repo}/blob/main/docs/audits/desktop-v3.0.11-verification.md`}>verification</a>.</span><span class="l-zh">3.0.11 不重复 3.0.5 已完成的 Flash 迁移，自定义供应商及主动选择的 Pro 保留。思考强度仍为 low/high/max，auto = high。详见<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.11.md`}>双语说明</a>、<a href={`${base}/docs/`}>模型与人民币价格参考</a>及<a href={`${repo}/blob/main/docs/audits/desktop-v3.0.11-verification.md`}>验收记录</a>。</span></p>
+      <p class="dl-note"><span class="l-en">3.0.12 does not repeat completed 3.0.5 Flash migration; custom providers and deliberate Pro choices are preserved. Effort remains low/high/max, auto = high. <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.12.md`}>Bilingual notes</a>, <a href={`${base}/docs/`}>model and RMB pricing reference</a>, and <a href={`${repo}/blob/main/docs/audits/desktop-v3.0.12-verification.md`}>verification</a>.</span><span class="l-zh">3.0.12 不重复 3.0.5 已完成的 Flash 迁移，自定义供应商及主动选择的 Pro 保留。思考强度仍为 low/high/max，auto = high。详见<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.12.md`}>双语说明</a>、<a href={`${base}/docs/`}>模型与人民币价格参考</a>及<a href={`${repo}/blob/main/docs/audits/desktop-v3.0.12-verification.md`}>验收记录</a>。</span></p>
       <div class="dl-tabs" role="tablist">
         <button class="dl-tab active" type="button" data-pane="npm" role="tab">npm</button>
         <button class="dl-tab" type="button" data-pane="brew" role="tab">Homebrew</button>
@@ -253,7 +253,7 @@ const ld = {
         <div class="chan">
           <div class="chan-row rec">
             <code>npm i -g orca-agent</code><span class="v">CLI</span>
-            <span class="s"><span class="l-en">CLI channel · separate from desktop 3.0.11 · one binary · actively developed</span><span class="l-zh">CLI 渠道 · 与桌面版 3.0.11 独立 · 单二进制 · 主力开发中</span></span>
+            <span class="s"><span class="l-en">CLI channel · separate from desktop 3.0.12 · one binary · actively developed</span><span class="l-zh">CLI 渠道 · 与桌面版 3.0.12 独立 · 单二进制 · 主力开发中</span></span>
             <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
           </div>
           <div class="chan-row">
@@ -262,12 +262,12 @@ const ld = {
             <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
           </div>
         </div>
-        <div class="dl-note"><span class="l-en">CLI is a separate release channel from desktop 3.0.11. Install the current CLI channel from npm, or use <span class="mono">@next</span> for the preview channel. See the <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm package</a>.</span><span class="l-zh">CLI 与桌面版 3.0.11 是独立发布渠道。请从 npm 安装当前 CLI，或使用 <span class="mono">@next</span> 获取预览渠道。详见 <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm 包</a>。</span></div>
+        <div class="dl-note"><span class="l-en">CLI is a separate release channel from desktop 3.0.12. Install the current CLI channel from npm, or use <span class="mono">@next</span> for the preview channel. See the <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm package</a>.</span><span class="l-zh">CLI 与桌面版 3.0.12 是独立发布渠道。请从 npm 安装当前 CLI，或使用 <span class="mono">@next</span> 获取预览渠道。详见 <a class="rxnotes" href="https://www.npmjs.com/package/orca-agent">orca-agent npm 包</a>。</span></div>
       </div>
 
       <div class="dl-pane" data-pane="brew">
         <span class="install"><span class="ps1">$</span>brew install nanbo0ne/O.R.C.A-for-Windows/orca-agent<button data-copy="brew install nanbo0ne/O.R.C.A-for-Windows/orca-agent">Copy</button></span>
-        <div class="dl-note"><span class="l-en">CLI channel · macOS &amp; Linux · update with <span class="mono">brew upgrade</span>; CLI releases are separate from desktop 3.0.11.</span><span class="l-zh">CLI 渠道 · macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新；CLI 与桌面版 3.0.11 独立发布。</span></div>
+        <div class="dl-note"><span class="l-en">CLI channel · macOS &amp; Linux · update with <span class="mono">brew upgrade</span>; CLI releases are separate from desktop 3.0.12.</span><span class="l-zh">CLI 渠道 · macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新；CLI 与桌面版 3.0.12 独立发布。</span></div>
       </div>
 
       <div class="dl-pane" data-pane="desktop">
@@ -289,7 +289,7 @@ const ld = {
           </div>
         </div>
         <div class="dl-note"><span class="l-en">v<span class="rxv">{desktopVer}</span> desktop downloads and verification files follow the <a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>desktop Release page assets</a>. Installed Windows builds require explicit download and exit to install, with no automatic download. Other platforms open the download page/package. Computer Use is temporarily disabled on all platforms.</span><span class="l-zh">桌面版 v<span class="rxv">{desktopVer}</span> 下载与校验文件以 <a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>桌面端 Release 页资产</a>为准。Windows 安装版需主动下载并退出安装，不会自动下载；其他平台打开下载页或包。所有平台电脑操控暂时禁用。</span></div>
-        <div class="dl-note"><span class="l-en">Windows packages lack Authenticode publisher signing; macOS packages are not notarized. Minisign verifies update integrity, not operating-system publisher trust. 3.0.11 distinguishes file locks, permissions, and detection failures. Forced termination of unresponsive older versions cannot guarantee preservation of unsaved content; save tasks before manual upgrades.</span><span class="l-zh">Windows 包未作 Authenticode 发布者签名，macOS 包未公证。Minisign 验证更新完整性，不等于操作系统发布者认证。3.0.11 区分文件占用、权限与检测失败。强制结束无响应旧版本不能保证保存未落盘内容，手动升级前请保存任务。</span></div>
+        <div class="dl-note"><span class="l-en">Windows packages lack Authenticode publisher signing; macOS packages are not notarized. Minisign verifies update integrity, not operating-system publisher trust. 3.0.12 distinguishes file locks, permissions, and detection failures. Forced termination of unresponsive older versions cannot guarantee preservation of unsaved content; save tasks before manual upgrades.</span><span class="l-zh">Windows 包未作 Authenticode 发布者签名，macOS 包未公证。Minisign 验证更新完整性，不等于操作系统发布者认证。3.0.12 区分文件占用、权限与检测失败。强制结束无响应旧版本不能保证保存未落盘内容，手动升级前请保存任务。</span></div>
       </div>
     </div>
   </section>

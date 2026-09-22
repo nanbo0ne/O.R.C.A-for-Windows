@@ -5,6 +5,7 @@ import { activityIndicatorPhase, buildTimelineSegments, requiredWarmPage, visibl
 import { useLayoutEffect } from "react";
 import { useT } from "../lib/i18n";
 import { replaceAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
+import { readinessNoticeText } from "../lib/readinessNotice";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
 import { ProcessBrainIcon, ProcessCard, ProcessCompactIcon, ProcessInfoIcon, ProcessPhaseIcon, ProcessStatusIcon, ProcessToolIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
@@ -1500,7 +1501,7 @@ function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string 
       meta={warning ? <ProcessStatusIcon state="waiting" label={t("notice.warning")} /> : undefined}
       className={`notice notice--${level}`}
     >
-      <div className="notice__body">{text}</div>
+      <div className="notice__body">{readinessNoticeText(text, t)}</div>
     </ProcessCard>
   );
 }

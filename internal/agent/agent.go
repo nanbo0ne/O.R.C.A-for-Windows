@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -637,17 +638,23 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) error {
 					finalReadinessBlocks = 1
 					readinessFailureCount = a.evidence.FailureCount()
 					event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessBlocked, false))
-					a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness blocked: " + readiness.reason})
+					a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: readinessRetryNotice})
 					a.session.Add(provider.Message{Role: provider.RoleUser, Content: finalReadinessRetryMessage(readiness.reason)})
 					a.maybeCompact(ctx, usage)
 					continue
 				}
-				if a.evidence.FailureCount() > readinessFailureCount {
+				// A failed attempt that was recovered, or a rejected checklist
+				// update, must not turn a pending task list into a terminal error.
+				if readiness.failedAction && a.evidence.FailureCount() > readinessFailureCount {
 					event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessErrored, false))
-					return fmt.Errorf("final-answer readiness found a new failed action after targeted verification: %s", readiness.reason)
+					return errors.New(readinessFailureNotice)
 				}
 				event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, true))
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness accepted after one targeted verification attempt: " + readiness.reason})
+				if readiness.failedAction || readiness.missingProjectChecks > 0 {
+					a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: readinessUnverifiedNotice})
+				} else {
+					a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: readinessPendingNotice})
+				}
 				readiness.applies = false
 			}
 			if !hasVisibleFinalAnswer(text) {
@@ -716,6 +723,7 @@ func (a *Agent) finalReadinessFailure() string {
 
 type finalReadinessCheck struct {
 	applies              bool
+	failedAction         bool
 	reason               string
 	advisory             string
 	missingProjectChecks int
@@ -748,6 +756,7 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 	}
 	if failed, ok := a.evidence.LatestUnrecoveredFailure(); ok {
 		out.applies = true
+		out.failedAction = true
 		toolName := strings.TrimSpace(failed.ToolName)
 		if toolName == "" {
 			toolName = "tool"
@@ -813,8 +822,15 @@ func finalReadinessCheckSource(check instruction.VerifyCheck) string {
 	return source
 }
 
+const (
+	readinessRetryNotice      = "Checking unfinished tasks and verification results before finishing."
+	readinessPendingNotice    = "The task list still has unfinished items. They have not been marked complete."
+	readinessUnverifiedNotice = "Some results remain unverified. Review the tool results before relying on this response."
+	readinessFailureNotice    = "A tool action is still failing after a follow-up check. Review the failed tool result before continuing; completed work and the task list have been kept."
+)
+
 func finalReadinessRetryMessage(reason string) string {
-	return "Host final-answer readiness check failed: " + reason + "\n\nContinue the same task now. Address the readiness issue before giving the final answer."
+	return "Host final-answer readiness check failed: " + reason + "\n\nContinue the same task. Check the latest tool results and update the task list only for verified completions. Keep pending or background work open and explain what remains. Do not repeat successful actions merely to close the checklist, bypass a failed check, or claim unfinished work is complete."
 }
 
 func executorHandoffRetryMessage() string {
@@ -857,7 +873,9 @@ func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string,
 	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
 		a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max})
 	})
-	ch, err := a.prov.Stream(ctx, provider.Request{
+	requestCtx, cancelRequest := context.WithCancel(ctx)
+	defer cancelRequest()
+	ch, err := a.prov.Stream(requestCtx, provider.Request{
 		RequestID:   requestID,
 		Purpose:     provider.RequestPurposeTurn,
 		Messages:    a.hydrateImageMessages(ctx, a.session.Messages),
@@ -921,6 +939,8 @@ streamLoop:
 			return cancelled()
 		}
 		switch chunk.Type {
+		case provider.ChunkDone:
+			break streamLoop
 		case provider.ChunkReasoning:
 			reasoningReceived = true
 			reasoning.WriteString(chunk.Text)
@@ -960,6 +980,9 @@ streamLoop:
 			return "", turnReasoning{}, "", nil, nil, false, false, chunk.Err
 		}
 	}
+	// Release this completion before hooks or the next tool/model iteration.
+	// The parent turn context remains live for the rest of the task.
+	cancelRequest()
 	if ctx.Err() != nil {
 		return cancelled()
 	}

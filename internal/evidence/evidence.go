@@ -150,8 +150,9 @@ func (l *Ledger) HasSuccessfulVerificationAfter(after int) bool {
 	return false
 }
 
-// FailureCount is a monotonic same-turn counter used by the final-answer gate
-// to distinguish a repeated stale warning from a genuinely new failed action.
+// FailureCount counts failed actions in this turn, excluding checklist/sign-off
+// bookkeeping. It does not say whether those actions were later recovered;
+// the final-answer gate must also check LatestUnrecoveredFailure.
 func (l *Ledger) FailureCount() int {
 	if l == nil {
 		return 0
@@ -160,7 +161,7 @@ func (l *Ledger) FailureCount() int {
 	defer l.mu.Unlock()
 	count := 0
 	for _, r := range l.receipts {
-		if !r.Success {
+		if !r.Success && r.ToolName != "todo_write" && r.ToolName != "complete_step" {
 			count++
 		}
 	}

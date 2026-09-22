@@ -415,6 +415,10 @@ func (e *ReasoningHistoryError) Error() string {
 
 func (e *ReasoningHistoryError) Unwrap() error { return e.Err }
 
+// ErrStreamConsumerBlocked identifies local backpressure, not a peer failure.
+// Retrying the model cannot recover a blocked consumer and may duplicate output.
+var ErrStreamConsumerBlocked = errors.New("local stream consumer blocked")
+
 // StreamInterruptedError marks a recoverable transport cut that happened after
 // the caller had already received model output. Providers must not replay these
 // requests themselves because doing so could duplicate visible text or tool

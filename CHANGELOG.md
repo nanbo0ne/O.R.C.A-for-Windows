@@ -1,5 +1,14 @@
 # Changelog
 
+## Desktop 3.0.12 / 桌面版 3.0.12
+
+- 修复结束检查误报：已恢复动作及被拒绝的清单更新不再错误中止回合；未完成待办保持原样，真正失败仍受检查约束。
+- Fix false end-of-turn failures from recovered actions or rejected checklist updates without marking unfinished work complete.
+- 修复 SSE 结束后等待、取消资源释放和慢消费者阻塞；按实际接收字节判断网络空闲，避免重放已收到内容。
+- Bound stream backpressure, release completed requests, and track network activity by received bytes without replaying partial responses.
+- [Release notes / 发布说明](docs/releases/desktop-v3.0.12.md) · [Source reuse / 源码复用](docs/SOURCE_REUSE.md)
+- [Verification / 验收](docs/audits/desktop-v3.0.12-verification.md)
+
 ## Desktop 3.0.11 / 桌面版 3.0.11
 
 - Fix `/compact` compatibility for local and third-party OpenAI-compatible models with model-preserving, bounded fallbacks and history-safe failure handling. Do not classify an explicit `404 model_not_found` as a reasoning-effort error.
