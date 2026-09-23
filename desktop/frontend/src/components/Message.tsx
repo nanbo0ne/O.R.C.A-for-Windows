@@ -28,12 +28,14 @@ function attachmentIcon(kind: "image" | "file" | "folder") {
 
 export function UserMessage({
   text,
+  guidance = false,
   failed,
   turn,
   anchorId,
   onEdit,
 }: {
   text: string;
+  guidance?: boolean;
   failed?: boolean;
   turn?: number;
   anchorId?: string;
@@ -71,6 +73,7 @@ export function UserMessage({
   return (
     <div className={`msg msg--user${failed ? " msg--user-failed" : ""}`} id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
       <div className="msg__user-stack">
+        {guidance && <div className="steer__body">{t("steer.kind")}</div>}
         {orderedAttachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>
             {imageAttachments.length > 0 && (

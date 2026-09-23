@@ -704,8 +704,22 @@ func TestContextPanelUsesLastUsageBreakdownWithTelemetryTotal(t *testing.T) {
 		t.Fatalf("context panel breakdown = prompt:%d completion:%d reasoning:%d, want last usage 10/4/2",
 			panel.PromptTokens, panel.CompletionTokens, panel.ReasoningTokens)
 	}
+	if !panel.LastRequestAvailable || panel.LastRequestTotalTokens != 14 || !panel.ReasoningTokensAvailable {
+		t.Fatalf("last request metadata = available:%v total:%d reasoningAvailable:%v", panel.LastRequestAvailable, panel.LastRequestTotalTokens, panel.ReasoningTokensAvailable)
+	}
 	if panel.CacheHitTokens != 7 || panel.CacheMissTokens != 3 {
 		t.Fatalf("context panel cache breakdown = hit:%d miss:%d, want last usage 7/3",
 			panel.CacheHitTokens, panel.CacheMissTokens)
+	}
+}
+
+func TestSessionReasoningAvailabilityMarksPartialReceipts(t *testing.T) {
+	tab := &WorkspaceTab{}
+	tab.recordUsage(event.Event{Usage: &provider.Usage{CompletionTokens: 4, ReasoningTokens: 0, ReasoningTokensAvailable: true}})
+	tab.recordUsage(event.Event{Usage: &provider.Usage{CompletionTokens: 5}})
+	usage := tab.telemetrySnapshot().Usage
+	if !usage.ReasoningTokensAvailable || !usage.ReasoningTokensPartial || usage.ReasoningTokens != 0 {
+		t.Fatalf("session reasoning status = value:%d available:%v partial:%v; want 0, true, true",
+			usage.ReasoningTokens, usage.ReasoningTokensAvailable, usage.ReasoningTokensPartial)
 	}
 }

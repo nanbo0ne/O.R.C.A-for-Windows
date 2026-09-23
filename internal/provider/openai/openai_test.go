@@ -324,14 +324,69 @@ func TestNormaliseUsageMiMoShape(t *testing.T) {
 			CachedTokens int `json:"cached_tokens"`
 		}{CachedTokens: 600},
 		CompletionTokensDetails: &struct {
-			ReasoningTokens int `json:"reasoning_tokens"`
-		}{ReasoningTokens: 180},
+			ReasoningTokens *int `json:"reasoning_tokens"`
+		}{ReasoningTokens: func() *int { value := 180; return &value }()},
 	})
 	if u.CacheHitTokens != 600 || u.CacheMissTokens != 400 {
 		t.Errorf("nested cache normalisation wrong: hit=%d miss=%d (want 600 / 400)", u.CacheHitTokens, u.CacheMissTokens)
 	}
 	if u.ReasoningTokens != 180 {
 		t.Errorf("reasoning tokens lost: %d", u.ReasoningTokens)
+	}
+	if !u.ReasoningTokensAvailable {
+		t.Fatal("nested reasoning usage must be marked available")
+	}
+}
+
+func TestNormaliseUsageDistinguishesMissingReasoningFromReportedZero(t *testing.T) {
+	var reported, omitted wireUsage
+	if err := json.Unmarshal([]byte(`{"usage":{"completion_tokens_details":{"reasoning_tokens":0}}}`), &struct {
+		Usage *wireUsage `json:"usage"`
+	}{Usage: &reported}); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(`{"usage":{}}`), &struct {
+		Usage *wireUsage `json:"usage"`
+	}{Usage: &omitted}); err != nil {
+		t.Fatal(err)
+	}
+	gotReported := normaliseUsage(&reported)
+	gotOmitted := normaliseUsage(&omitted)
+	if gotReported.ReasoningTokens != 0 || !gotReported.ReasoningTokensAvailable {
+		t.Fatalf("reported zero = (%d, %v), want (0, true)", gotReported.ReasoningTokens, gotReported.ReasoningTokensAvailable)
+	}
+	if gotOmitted.ReasoningTokens != 0 || gotOmitted.ReasoningTokensAvailable {
+		t.Fatalf("omitted reasoning = (%d, %v), want (0, false)", gotOmitted.ReasoningTokens, gotOmitted.ReasoningTokensAvailable)
+	}
+	var emptyDetails wireUsage
+	if err := json.Unmarshal([]byte(`{"completion_tokens_details":{}}`), &emptyDetails); err != nil {
+		t.Fatal(err)
+	}
+	if normaliseUsage(&emptyDetails).ReasoningTokensAvailable {
+		t.Fatal("empty completion_tokens_details must not imply reported reasoning usage")
+	}
+}
+
+func TestNormaliseUsageRejectsInvalidReasoningSubset(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		completion int
+		reasoning  int
+		want       int
+	}{
+		{name: "above completion", completion: 10, reasoning: 12, want: 0},
+		{name: "negative", completion: 10, reasoning: -2, want: 0},
+		{name: "no completion", completion: 0, reasoning: 3, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			details := &struct {
+				ReasoningTokens *int `json:"reasoning_tokens"`
+			}{ReasoningTokens: &tc.reasoning}
+			got := normaliseUsage(&wireUsage{CompletionTokens: tc.completion, CompletionTokensDetails: details})
+			if got.ReasoningTokens != tc.want || got.ReasoningTokensAvailable {
+				t.Fatalf("reasoning = (%d, %v), want (%d, false)", got.ReasoningTokens, got.ReasoningTokensAvailable, tc.want)
+			}
+		})
 	}
 }
 

@@ -110,6 +110,42 @@ func TestToWireUsage(t *testing.T) {
 	}
 }
 
+func TestToWireUsageReasoningAvailability(t *testing.T) {
+	tests := []struct {
+		name          string
+		usage         provider.Usage
+		wantTokens    int
+		wantAvailable bool
+		wantField     bool
+	}{
+		{name: "reported zero", usage: provider.Usage{CompletionTokens: 4, ReasoningTokensAvailable: true}, wantAvailable: true, wantField: true},
+		{name: "missing", usage: provider.Usage{CompletionTokens: 4}, wantAvailable: false, wantField: false},
+		{name: "legacy positive", usage: provider.Usage{CompletionTokens: 4, ReasoningTokens: 2}, wantTokens: 2, wantAvailable: true, wantField: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wire := toWire(event.Event{Kind: event.Usage, Usage: &tt.usage})
+			encoded, err := json.Marshal(wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded struct {
+				Usage map[string]any `json:"usage"`
+			}
+			if err := json.Unmarshal(encoded, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			got, present := decoded.Usage["reasoningTokensAvailable"]
+			if present != tt.wantField || (present && got != tt.wantAvailable) {
+				t.Fatalf("serialized availability = (%v, %v), payload=%s", got, present, encoded)
+			}
+			if got := wire.Usage.ReasoningTokens; got != tt.wantTokens {
+				t.Fatalf("reasoning tokens = %d, want %d", got, tt.wantTokens)
+			}
+		})
+	}
+}
+
 func TestToWireUsageWithUnverifiedPricingHidesCost(t *testing.T) {
 	e := event.Event{
 		Kind:    event.Usage,

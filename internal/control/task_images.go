@@ -36,7 +36,6 @@ func (c *Controller) withTaskImages(ctx context.Context, interactive bool) conte
 	if scope, ok := ctx.Value(taskImageScopeKey{}).(taskImageScope); ok && scope.controller == c && scope.session == owner && scope.turn == turn {
 		return ctx
 	}
-	available := agent.TurnImages(ctx)
 	workspace := c.cpRoot
 	var mu sync.Mutex
 	var count int
@@ -58,7 +57,7 @@ func (c *Controller) withTaskImages(ctx context.Context, interactive bool) conte
 			gate = permission.NewGate(c.policy, taskImageHeadlessApprover{})
 		}
 		gate = taskImagePolicyGate{Gate: gate, policy: c.policy, workspace: workspace}
-		images, bytes, err := resolveTaskImages(call, workspace, names, model, available, gate,
+		images, bytes, err := resolveTaskImages(call, workspace, names, model, agent.TurnImages(call), gate,
 			maxVisionImagesPerTurn-count, maxVisionImageBytesPerTurn-total)
 		if err != nil {
 			return nil, err

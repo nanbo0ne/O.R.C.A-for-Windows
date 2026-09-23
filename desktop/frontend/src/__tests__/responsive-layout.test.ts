@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import ts from "typescript";
+import { ClipboardPasteArbiter, ClipboardPasteOperation } from "../lib/composerClipboard";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Source contracts must not depend on Git's platform-specific checkout newlines.
@@ -10,6 +12,23 @@ const statusBar = readSource("components", "StatusBar.tsx");
 const chrome = readSource("components", "AppChrome.tsx");
 const app = readSource("App.tsx");
 const composer = readSource("components", "Composer.tsx");
+const composerAST = ts.createSourceFile("Composer.tsx", composer, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+function composerCallback(name: string): string {
+  let result = "";
+  function visit(node: ts.Node) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name) {
+      result = node.initializer?.getText(composerAST) ?? "";
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(composerAST);
+  if (!result) throw new Error(`Missing Composer callback: ${name}`);
+  return result;
+}
+const pasteCallback = composerCallback("onPaste");
+const pasteKeyCallback = composerCallback("onKeyDown");
+const nativePasteCallback = composerCallback("attachNativeClipboardImage");
+const contextPasteCallback = composerCallback("pasteFromContextMenu");
 const settings = readSource("components", "SettingsPanel.tsx");
 const processCard = readSource("components", "ProcessCard.tsx");
 const transcript = readSource("components", "Transcript.tsx");
@@ -171,12 +190,31 @@ check(
     !css.includes("max-width: 148px;\n  flex: 0 1 auto;"),
   "Modern run status owns flexible space independently of the fixed buttons without a floating tooltip",
 );
+const pasteArbiter = new ClipboardPasteArbiter();
+const shortcutOperation = pasteArbiter.startShortcut();
+let nativeReads = 0;
+const nativeRead = () => { nativeReads++; return Promise.resolve(true); };
+const firstRead = shortcutOperation.readNative(nativeRead);
+const duplicateRead = shortcutOperation.readNative(nativeRead);
+let nativeDiscarded = 0;
+const nativeClaimed = shortcutOperation.claim(() => { nativeDiscarded++; });
+const browserOperation = pasteArbiter.browserPaste();
+const browserClaimed = browserOperation.claimBrowser();
+const separateOperation = pasteArbiter.startShortcut();
 check(
-  composer.includes("const nativeClipboardPasteInFlightRef = useRef(false)") &&
-    composer.includes("native-clipboard-hash:") &&
-    composer.includes("if (files.some((file) => file.type.toLowerCase().startsWith(\"image/\"))) return;") &&
-    composer.includes("nativeClipboardPasteInFlightRef.current = false"),
-  "image paste has one asynchronous native path and content-based duplicate protection",
+  pasteKeyCallback.includes("const operation = clipboardPasteArbiterRef.current.startShortcut()") &&
+    pasteKeyCallback.includes("attachNativeClipboardImage(false, operation)") &&
+    pasteCallback.includes("const operation = clipboardPasteArbiterRef.current.browserPaste()") &&
+    pasteCallback.includes("if (operation.claimBrowser()) void attachClipboardFiles(files)") &&
+    composerCallback("attachClipboardFiles").includes("attachFiles(await uniqueClipboardFiles(files))") &&
+    !composerCallback("attachFiles").includes("attachmentDedupRef") &&
+    nativePasteCallback.includes("operation.readNative(async () =>") &&
+    nativePasteCallback.includes("if (!operation.claim(") &&
+    firstRead === duplicateRead && await firstRead && nativeReads === 1 && nativeClaimed &&
+    browserOperation === shortcutOperation && browserClaimed && nativeDiscarded === 1 &&
+    !browserOperation.claim() && !browserOperation.claimBrowser() &&
+    separateOperation !== shortcutOperation && separateOperation.claim(),
+  "image paste shares one native read per operation, replaces its preview with browser files, and preserves independent adds",
 );
 check(
   composer.includes("// Enter queues while the agent is running") &&
@@ -200,9 +238,15 @@ check(
     !composer.includes("composer-runstatus__primary-label"),
   "running mouse action stays Stop with stable geometry while drafts use keyboard send",
 );
+const textOperation = new ClipboardPasteOperation();
+let textDiscarded = 0;
+textOperation.claim(() => { textDiscarded++; });
+textOperation.useText();
+textOperation.useText();
 check(
-  composer.includes("Plain text always follows the textarea's native paste path") &&
-    composer.includes('if (pasted !== "") return;') &&
+  /if \(pasted !== ""\)\s*\{\s*operation\.useText\(\);\s*return;\s*\}/.test(pasteCallback) &&
+    !pasteCallback.includes("replacePlainTextAtCaret") &&
+    textDiscarded === 1 && textOperation.handled && !textOperation.claim() &&
     !composer.includes("shouldFoldPaste") &&
     !composer.includes("composer__pasted"),
   "plain text paste remains editable text and wins over rich clipboard image hints",
@@ -210,8 +254,14 @@ check(
 check(
   app.includes('target.classList.contains("composer__input")') &&
     app.includes("pasteRequest={composerPasteRequest}") &&
-    composer.includes("pasteFromContextMenu") &&
-    composer.includes("await attachNativeClipboardImage(true)"),
+    contextPasteCallback.includes("clearNativeClipboardPasteTimer()") &&
+    contextPasteCallback.includes("clipboardPasteArbiterRef.current.endShortcut()") &&
+    contextPasteCallback.includes("const operation = new ClipboardPasteOperation()") &&
+    contextPasteCallback.includes("await attachDroppedPaths(paths, true)") &&
+    contextPasteCallback.includes("replacePlainTextAtCaret(pasted)") &&
+    contextPasteCallback.includes("clipboardItemFiles(await richClipboard.read())") &&
+    contextPasteCallback.includes("await attachClipboardFiles(files)") &&
+    contextPasteCallback.includes("await attachNativeClipboardImage(true, operation)"),
   "custom context-menu paste delegates images and files to Composer",
 );
 check(

@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/netclient"
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/monitor"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
 )
 
@@ -132,6 +133,7 @@ var bufPool = sync.Pool{
 }
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	ctx = monitor.WithRequest(ctx, req.RequestID, string(req.Purpose))
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	if err := json.NewEncoder(buf).Encode(c.buildRequest(req)); err != nil {

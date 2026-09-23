@@ -49,6 +49,8 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { AutomationPanel } from "./components/AutomationPanel";
 import { ToolLibraryPanel } from "./components/ToolLibraryPanel";
 import { SideChatPanel } from "./components/SideChatPanel";
+import { WorkMonitor } from "./components/WorkMonitor";
+import { workMonitorLabels } from "./lib/workMonitorLabels";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./components/ContextMenu";
 import { parseTodos } from "./lib/tools";
 import { shouldShowTodoPanel } from "./lib/todoVisibility";
@@ -553,6 +555,7 @@ export default function App() {
   const [updateDismissal, setUpdateDismissal] = useState({ version: "", dismissed: false });
   const [automationPanelOpen, setAutomationPanelOpen] = useState(false);
   const [toolLibraryPanelOpen, setToolLibraryPanelOpen] = useState(false);
+  const [workMonitorOpen, setWorkMonitorOpen] = useState(false);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [newSessionChooserOpen, setNewSessionChooserOpen] = useState(false);
@@ -598,6 +601,7 @@ export default function App() {
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
   const nextQueuedPromptIdRef = useRef(1);
+  const guidingQueuedPromptsRef = useRef(new Set<string>());
   const queuedPromptDispatchingRef = useRef(false);
   const tabMetasSignatureRef = useRef("");
   const promptModeSwitchingRef = useRef<Record<string, boolean>>({});
@@ -1525,14 +1529,22 @@ export default function App() {
   }, [activeTabId]);
 
   const guideQueuedPrompt = useCallback((prompt: QueuedPrompt) => {
-    steer(prompt.submitText);
-    removeQueuedPrompt(prompt.id);
-  }, [removeQueuedPrompt, steer]);
+    if (!activeTabId || guidingQueuedPromptsRef.current.has(prompt.id)) return;
+    const tabId = activeTabId;
+    guidingQueuedPromptsRef.current.add(prompt.id);
+    setQueuedPromptsByTab(current => ({ ...current, [tabId]: (current[tabId] ?? []).map(item => item.id === prompt.id ? { ...item, guided: true } : item) }));
+    void steer(prompt.displayText, prompt.submitText).then(() => removeQueuedPrompt(prompt.id)).catch(error => {
+      setQueuedPromptsByTab(current => ({ ...current, [tabId]: (current[tabId] ?? []).map(item => item.id === prompt.id ? { ...item, guided: false } : item) }));
+      showToast(String(error), "warn");
+    }).finally(() => {
+      guidingQueuedPromptsRef.current.delete(prompt.id);
+    });
+  }, [activeTabId, removeQueuedPrompt, showToast, steer]);
 
   const handleGuide = useCallback((displayText: string, submitText = displayText) => {
     const text = (submitText || displayText).trim();
     if (!text) return;
-    steer(text);
+    return steer(displayText, text);
   }, [steer]);
 
   // Startup and workspace/model rebuilds create a fresh controller in normal
@@ -1731,6 +1743,7 @@ export default function App() {
     if (!activeTabId || state.running || promptModeSwitching || promptModeSwitchFailed || state.approval || state.ask || state.messageAction) return;
     if (queuedPromptDispatchingRef.current) return;
     const nextPrompt = queuedPromptsByTab[activeTabId]?.[0];
+    if (nextPrompt?.guided || (nextPrompt && guidingQueuedPromptsRef.current.has(nextPrompt.id))) return;
     if (!nextPrompt) return;
     queuedPromptDispatchingRef.current = true;
     void submitPromptToAgent(nextPrompt.displayText, nextPrompt.submitText).then(() => {
@@ -2614,7 +2627,7 @@ export default function App() {
 		  onViewChanges={() => openRightDockMode("changed")}
         />
 
-        <aside className={`sidebar${responsiveSidebarCollapsed ? " sidebar--collapsed" : ""}`} aria-label={t("sidebar.navigation")}>
+        <aside className={`sidebar${responsiveSidebarCollapsed ? " sidebar--collapsed" : ""}${workMonitorOpen && !responsiveSidebarCollapsed && !settingsTarget && !histView ? " sidebar--monitor-open" : ""}`} aria-label={t("sidebar.navigation")}>
           <div className="sidebar__brand" aria-hidden={responsiveSidebarCollapsed}>
 			<img src={logoSymbol} alt="O.R.C.A." className="sidebar__brand-logo" draggable={false} />
 			<span className="sidebar__brand-text">O.R.C.A.</span>
@@ -2649,7 +2662,15 @@ export default function App() {
             />
           </section>
 
+          {workMonitorOpen && !responsiveSidebarCollapsed && !settingsTarget && !histView && (
+            <WorkMonitor key={activeTabId} tabId={activeTabId ?? ""} onClose={() => setWorkMonitorOpen(false)} />
+          )}
           <nav className="sidebar__nav">
+            <Tooltip label={workMonitorLabels(locale).name} fill side="right" disabled={sidebarNavTooltipDisabled}>
+              <button className="sidebar__navitem" aria-expanded={workMonitorOpen} onClick={() => { setWorkMonitorOpen(open => !open); setSidebarCollapsed(false); }}>
+                <Activity size={15} /><span>{workMonitorLabels(locale).name}</span>
+              </button>
+            </Tooltip>
             <Tooltip label={t("sidebar.allHistory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
               <button
                 className="sidebar__navitem"
@@ -2908,10 +2929,10 @@ export default function App() {
                     <div className="queued-prompts__item" key={prompt.id}>
                       <span className="queued-prompts__text" title={prompt.displayText}>{prompt.displayText}</span>
                       <div className="queued-prompts__actions">
-                        <button type="button" className="queued-prompts__guide" onClick={() => guideQueuedPrompt(prompt)}>
+                        <button type="button" className="queued-prompts__guide" disabled={prompt.guided} aria-busy={prompt.guided} onClick={() => guideQueuedPrompt(prompt)}>
                           {t("queuedPrompts.guide")}
                         </button>
-                        <button type="button" className="queued-prompts__remove" aria-label={t("queuedPrompts.remove")} onClick={() => removeQueuedPrompt(prompt.id)}>
+                        <button type="button" className="queued-prompts__remove" disabled={prompt.guided} aria-label={t("queuedPrompts.remove")} onClick={() => removeQueuedPrompt(prompt.id)}>
                           <Trash2 size={13} />
                         </button>
                       </div>

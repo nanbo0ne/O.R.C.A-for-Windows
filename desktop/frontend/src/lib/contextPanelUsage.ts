@@ -7,11 +7,17 @@ export interface ContextPanelUsageSummary {
   completionTokens: number;
   totalTokens: number;
   reasoningTokens: number;
+  sessionReasoningTokensAvailable: boolean;
+  sessionReasoningTokensPartial: boolean;
   cacheHitTokens: number;
   cacheMissTokens: number;
   currentPromptTokens: number;
   currentCompletionTokens: number;
+  currentOutputTokens: number;
+  currentTotalTokens: number;
+  currentRequestAvailable: boolean;
   currentReasoningTokens: number;
+  currentReasoningTokensAvailable: boolean;
   currentCacheHitTokens: number;
   currentCacheMissTokens: number;
 }
@@ -79,17 +85,27 @@ export function computeContextPanelUsage({
     sessionCacheHitTokens > 0 ||
     sessionCacheMissTokens > 0
   );
-  const hasPanelBreakdown = Boolean(
+  const hasPanelBreakdown = info?.lastRequestAvailable === true || Boolean(
     positive(info?.promptTokens) > 0 ||
     positive(info?.completionTokens) > 0 ||
-    positive(info?.reasoningTokens) > 0 ||
+    positive(info?.reasoningTokens) > 0 || info?.reasoningTokensAvailable === true ||
     positive(info?.cacheHitTokens) > 0 ||
     positive(info?.cacheMissTokens) > 0
   );
 
   const currentPromptTokens = hasPanelBreakdown ? positive(info?.promptTokens) : inputTokensFromUsage(usage);
+  const currentRequestAvailable = hasPanelBreakdown || usage !== undefined;
   const currentCompletionTokens = hasPanelBreakdown ? positive(info?.completionTokens) : positive(usage?.completionTokens);
+  const currentTotalTokens = hasPanelBreakdown
+    ? (typeof info?.lastRequestTotalTokens === "number" ? positive(info.lastRequestTotalTokens) : currentPromptTokens + currentCompletionTokens)
+    : positive(usage?.totalTokens) || currentPromptTokens + currentCompletionTokens;
   const currentReasoningTokens = hasPanelBreakdown ? positive(info?.reasoningTokens) : positive(usage?.reasoningTokens);
+  const currentReasoningTokensAvailable = hasPanelBreakdown
+    ? info?.reasoningTokensAvailable === true || currentReasoningTokens > 0
+    : usage?.reasoningTokensAvailable === true || currentReasoningTokens > 0;
+  const currentOutputTokens = currentReasoningTokensAvailable
+    ? Math.max(0, currentCompletionTokens - currentReasoningTokens)
+    : currentCompletionTokens;
   const currentCacheHitTokens = hasPanelBreakdown ? positive(info?.cacheHitTokens) : positive(usage?.cacheHitTokens);
   const currentCacheMissTokens = hasPanelBreakdown ? positive(info?.cacheMissTokens) : positive(usage?.cacheMissTokens);
 
@@ -99,18 +115,24 @@ export function computeContextPanelUsage({
   const cacheHitTokens = hasSessionBreakdown ? sessionCacheHitTokens : currentCacheHitTokens;
   const cacheMissTokens = hasSessionBreakdown ? sessionCacheMissTokens : currentCacheMissTokens;
 
-  const totalTokens =
-    positive(info?.totalTokens) ||
-    positive(sessionTokens) ||
-    positive(usage?.totalTokens) ||
-    promptTokens + completionTokens;
+  const totalTokens = info
+    ? positive(info.totalTokens)
+    : typeof sessionTokens === "number"
+      ? positive(sessionTokens)
+      : context
+        ? positive(context.sessionTokens)
+        : positive(usage?.totalTokens) || promptTokens + completionTokens;
 
   const contextWindow = positive(context?.window);
   const panelWindow = positive(info?.windowTokens);
   const windowTokens = contextWindow || panelWindow;
   // A zero from either backend snapshot is authoritative after a controller
   // rebuild. Never substitute cumulative session usage for current occupancy.
-  const snapshotUse = positive(context?.used) || positive(info?.usedTokens);
+  const snapshotUse = typeof context?.used === "number"
+    ? positive(context.used)
+    : typeof info?.usedTokens === "number"
+      ? positive(info.usedTokens)
+      : 0;
 
   return {
     usedTokens: snapshotUse,
@@ -119,11 +141,17 @@ export function computeContextPanelUsage({
     completionTokens,
     totalTokens,
     reasoningTokens,
+    sessionReasoningTokensAvailable: info?.sessionReasoningTokensAvailable === true,
+    sessionReasoningTokensPartial: info?.sessionReasoningTokensPartial === true,
     cacheHitTokens,
     cacheMissTokens,
     currentPromptTokens,
     currentCompletionTokens,
+    currentOutputTokens,
+    currentTotalTokens,
+    currentRequestAvailable,
     currentReasoningTokens,
+    currentReasoningTokensAvailable,
     currentCacheHitTokens,
     currentCacheMissTokens,
   };

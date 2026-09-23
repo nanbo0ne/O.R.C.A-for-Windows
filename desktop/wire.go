@@ -86,14 +86,15 @@ type wireProfile struct {
 }
 
 type wireUsage struct {
-	RequestID        string                `json:"requestId,omitempty"`
-	PromptTokens     int                   `json:"promptTokens"`
-	CompletionTokens int                   `json:"completionTokens"`
-	TotalTokens      int                   `json:"totalTokens"`
-	CacheHitTokens   int                   `json:"cacheHitTokens"`
-	CacheMissTokens  int                   `json:"cacheMissTokens"`
-	ReasoningTokens  int                   `json:"reasoningTokens,omitempty"`
-	CacheDiagnostics *wireCacheDiagnostics `json:"cacheDiagnostics,omitempty"`
+	RequestID                string                `json:"requestId,omitempty"`
+	PromptTokens             int                   `json:"promptTokens"`
+	CompletionTokens         int                   `json:"completionTokens"`
+	TotalTokens              int                   `json:"totalTokens"`
+	CacheHitTokens           int                   `json:"cacheHitTokens"`
+	CacheMissTokens          int                   `json:"cacheMissTokens"`
+	ReasoningTokens          int                   `json:"reasoningTokens,omitempty"`
+	ReasoningTokensAvailable bool                  `json:"reasoningTokensAvailable,omitempty"`
+	CacheDiagnostics         *wireCacheDiagnostics `json:"cacheDiagnostics,omitempty"`
 	// Session-cumulative cache tokens — the status line shows the aggregate
 	// hit-rate Σhit/Σ(hit+miss), steadier than the single-turn CacheHitTokens.
 	SessionCacheHitTokens  int     `json:"sessionCacheHitTokens"`
@@ -201,7 +202,8 @@ func toWire(e event.Event) wireEvent {
 				PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens,
 				TotalTokens: u.TotalTokens, CacheHitTokens: u.CacheHitTokens,
 				CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
-				SessionCacheHitTokens: e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
+				ReasoningTokensAvailable: u.ReasoningTokensAvailable || u.ReasoningTokens > 0,
+				SessionCacheHitTokens:    e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
 			}
 			if e.CacheDiagnostics != nil {
 				w.Usage.CacheDiagnostics = toWireCacheDiagnostics(e.CacheDiagnostics)

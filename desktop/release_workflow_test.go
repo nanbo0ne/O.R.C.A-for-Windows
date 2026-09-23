@@ -119,7 +119,7 @@ func TestReleaseWorkflowGatesConfigMigrationWithLinuxRace(t *testing.T) {
 		t.Fatal("concurrency checks must run on the Linux gate")
 	}
 	race := workflowSection(gate, "- name: Test changed concurrency boundaries", "- name: Generate frontend bindings")
-	want := "run: go test -race ./internal/agent ./internal/control ./internal/event ./internal/provider/openai ./internal/billing ./internal/localai ./internal/config -count=1 -p=1"
+	want := "run: go test -race ./internal/agent ./internal/control ./internal/event ./internal/monitor ./internal/provider/openai ./internal/billing ./internal/localai ./internal/config -count=1 -p=1"
 	if !strings.Contains(race, want) {
 		t.Fatal("race gate must include config migration and retain the existing packages")
 	}
@@ -156,21 +156,21 @@ func TestReleaseWorkflowRepackagesSignedPortablePayload(t *testing.T) {
 	}
 }
 
-func TestInstallerAcceptanceUsesPublished309Baseline(t *testing.T) {
+func TestInstallerAcceptanceUsesPublished312Baseline(t *testing.T) {
 	body, err := os.ReadFile("../scripts/test-desktop-installer.ps1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	script := string(body)
 	for _, want := range []string{
-		"$ExpectedVersion = '3.0.12'",
+		"$ExpectedVersion = '3.0.13'",
 		"$assetName = 'O.R.C.A-for-Windows-windows-amd64-installer.exe'",
-		"[version]$productVersion -le [version]'3.0.11'",
-		"releases/tags/desktop-v3.0.11",
-		"Assert-Installation $upgradeDir '3.0.11' 'installed-311'",
+		"[version]$productVersion -le [version]'3.0.12'",
+		"releases/tags/desktop-v3.0.12",
+		"Assert-Installation $upgradeDir '3.0.12' 'installed-312'",
 		"'SHA256SUMS.txt'",
-		"$pinnedOldSize = 91209298",
-		"78899ac2e4d82e3ea21d550f4e355526bb1577b4f3620769cf47693fd5e961c3",
+		"$pinnedOldSize = 91212149",
+		"3bdc8cbd0ae418684829526afc2650b9d870a392002a29b345df5cefb7d95b1b",
 		"$oldHash -ine $checksumRows[0].Groups[1].Value -or $oldHash -cne $pinnedOldHash",
 	} {
 		if !strings.Contains(script, want) {
@@ -190,10 +190,10 @@ func TestInstallerAcceptanceUsesPublished309Baseline(t *testing.T) {
 	}
 	workflow := readDesktopReleaseWorkflow(t)
 	for _, want := range []string{
-		"# Published upgrade baseline: desktop-v3.0.11.",
+		"# Published upgrade baseline: desktop-v3.0.12.",
 		"# Asset: O.R.C.A-for-Windows-windows-amd64-installer.exe",
-		"# Size: 91209298 bytes",
-		"# SHA256: 78899ac2e4d82e3ea21d550f4e355526bb1577b4f3620769cf47693fd5e961c3",
+		"# Size: 91212149 bytes",
+		"# SHA256: 3bdc8cbd0ae418684829526afc2650b9d870a392002a29b345df5cefb7d95b1b",
 		`"$seven_zip" t dist/O.R.C.A-for-Windows-windows-amd64-installer.exe`,
 	} {
 		if !strings.Contains(workflow, want) {
@@ -219,8 +219,8 @@ func TestReleaseDesktopVersionMetadataAgrees(t *testing.T) {
 		} `json:"info"`
 	}
 	readJSON("wails.json", &wails)
-	if wails.Info.ProductVersion != "3.0.12" {
-		t.Fatalf("Wails version = %q, want 3.0.12", wails.Info.ProductVersion)
+	if wails.Info.ProductVersion != "3.0.13" {
+		t.Fatalf("Wails version = %q, want 3.0.13", wails.Info.ProductVersion)
 	}
 	var windows struct {
 		Fixed map[string]string            `json:"fixed"`

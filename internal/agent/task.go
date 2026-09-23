@@ -315,19 +315,6 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 			}
 			return "", fmt.Errorf("background execution is not available in this context")
 		}
-		nested := subSinkFor(parentID, parent, parentTurnID)
-		childID := event.NewRequestID()
-		var childUsageReported atomic.Bool
-		if parent != nil && strings.TrimSpace(parentTurnID) != "" {
-			parent.Emit(event.Event{Kind: event.ChildStarted, TurnID: parentTurnID, ParentTurnID: parentTurnID, ChildID: childID})
-		}
-		childSink := event.FuncSink(func(e event.Event) {
-			if e.Kind == event.Usage {
-				childUsageReported.Store(true)
-				e.ChildID = childID
-			}
-			nested.Emit(e)
-		})
 		label := p.Description
 		if label == "" {
 			label = "task"
@@ -338,12 +325,9 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 				return "", err
 			}
 		}
+		childSink, childDone := taskLifecycleSink(parentID, parent, parentTurnID)
 		job := jm.Start("task", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
-			defer func() {
-				if parent != nil && strings.TrimSpace(parentTurnID) != "" {
-					parent.Emit(event.Event{Kind: event.ChildDone, TurnID: parentTurnID, ParentTurnID: parentTurnID, ChildID: childID, ChildUsageReported: childUsageReported.Load()})
-				}
-			}()
+			defer childDone()
 			defer run.Release()
 			answer, err := t.runSubSession(jobCtx, p.Prompt, selectedImages, subReg, childSink, maxSteps, prov, pricing, t.subagentEndpoint(modelRef, effortRef), ctxWin, run.Session)
 			if err != nil {
@@ -362,7 +346,9 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 
 	// Foreground: run synchronously, nesting events under this call.
 	defer run.Release()
-	answer, err := t.runSubSession(ctx, p.Prompt, selectedImages, subReg, subSink(ctx), maxSteps, prov, pricing, t.subagentEndpoint(modelRef, effortRef), ctxWin, run.Session)
+	childSink, childDone := taskLifecycleSink(parentID, parent, parentTurnID)
+	defer childDone()
+	answer, err := t.runSubSession(ctx, p.Prompt, selectedImages, subReg, childSink, maxSteps, prov, pricing, t.subagentEndpoint(modelRef, effortRef), ctxWin, run.Session)
 	if err != nil {
 		return "", errors.Join(err, t.transcripts.SaveFailed(run))
 	}
@@ -373,6 +359,30 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return FormatSubagentResult(answer, run.Ref, false), nil
 	}
 	return answer, nil
+}
+
+// Both foreground and background tasks expose the same observed lifecycle.
+// Begin only after preparation succeeds, and always pair it with a deferred end.
+func taskLifecycleSink(parentID string, parent event.Sink, turn string) (event.Sink, func()) {
+	nested := subSinkFor(parentID, parent, turn)
+	id := event.NewRequestID()
+	var usageReported atomic.Bool
+	valid := parent != nil && strings.TrimSpace(turn) != ""
+	if valid {
+		parent.Emit(event.Event{Kind: event.ChildStarted, TurnID: turn, ParentTurnID: turn, ChildID: id})
+	}
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Usage {
+			usageReported.Store(true)
+			e.ChildID = id
+		}
+		nested.Emit(e)
+	})
+	return sink, func() {
+		if valid {
+			parent.Emit(event.Event{Kind: event.ChildDone, TurnID: turn, ParentTurnID: turn, ChildID: id, ChildUsageReported: usageReported.Load()})
+		}
+	}
 }
 
 func (t *TaskTool) subagentEndpoint(modelRef, effort string) string {

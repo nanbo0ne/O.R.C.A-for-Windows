@@ -218,8 +218,9 @@ type Agent struct {
 	// new task). Cache miss for the next API call is unavoidable but limited
 	// to one call — the prefix stays stable otherwise.
 	steerMu       sync.Mutex
-	steerQueue    []string
+	steerQueue    []steerInput
 	steerConsumed bool
+	steerClosed   bool
 
 	// evidence is a per-user-turn ledger of host-observed tool receipts. It lets
 	// complete_step validate that cited evidence happened before the claim.
@@ -370,10 +371,35 @@ func midTurnSteerMessage(text string) string {
 
 // Steer queues a message for mid-turn injection.
 func (a *Agent) Steer(text string) {
+	a.SteerRich(RichInput{Text: text}, text, nil, "")
+}
+
+type steerInput struct {
+	Input           RichInput
+	Display         string
+	ID              string
+	AvailableImages []provider.ImageContent
+	ack             chan error
+}
+
+// SteerRich accepts only host-validated attachment snapshots.
+func (a *Agent) SteerRich(input RichInput, display string, available []provider.ImageContent, id string) {
+	a.TrySteerRich(input, display, available, id)
+}
+
+// TrySteerRich returns a buffered receipt resolved when guidance is consumed or
+// discarded. Admission and the final empty-queue seal share the same lock.
+func (a *Agent) TrySteerRich(input RichInput, display string, available []provider.ImageContent, id string) (<-chan error, bool) {
 	a.steerMu.Lock()
 	defer a.steerMu.Unlock()
-	a.steerQueue = append(a.steerQueue, text)
+	if a.steerClosed {
+		return nil, false
+	}
+	ack := make(chan error, 1)
+	input.Images = append([]provider.ImageContent(nil), input.Images...)
+	a.steerQueue = append(a.steerQueue, steerInput{Input: input, Display: display, ID: id, AvailableImages: append([]provider.ImageContent(nil), available...), ack: ack})
 	a.steerConsumed = false
+	return ack, true
 }
 
 // SteerConsumed returns true when the steer queue became empty after the last consume.
@@ -383,29 +409,42 @@ func (a *Agent) SteerConsumed() bool {
 	return a.steerConsumed
 }
 
-func (a *Agent) consumeSteer() (string, bool) {
+func (a *Agent) consumeSteer() (steerInput, bool) {
 	a.steerMu.Lock()
 	defer a.steerMu.Unlock()
 	if len(a.steerQueue) == 0 {
-		return "", false
+		return steerInput{}, false
 	}
 	t := a.steerQueue[0]
+	a.steerQueue[0] = steerInput{}
 	a.steerQueue = a.steerQueue[1:]
 	a.steerConsumed = len(a.steerQueue) == 0
 	return t, true
 }
 
-func (a *Agent) clearSteerQueue() {
+func (a *Agent) closeSteerQueue(cause error) {
 	a.steerMu.Lock()
 	defer a.steerMu.Unlock()
+	a.steerClosed = true
+	if cause == nil {
+		cause = errors.New("task ended")
+	}
+	for _, guidance := range a.steerQueue {
+		guidance.ack <- fmt.Errorf("guidance %q was not consumed; your draft is preserved: %w", guidance.ID, cause)
+		close(guidance.ack)
+	}
 	a.steerQueue = nil
 	a.steerConsumed = false
 }
 
-func (a *Agent) steerQueueLen() int {
+func (a *Agent) sealSteerIfEmpty() bool {
 	a.steerMu.Lock()
 	defer a.steerMu.Unlock()
-	return len(a.steerQueue)
+	if len(a.steerQueue) != 0 {
+		return false
+	}
+	a.steerClosed = true
+	return true
 }
 
 // CompactRatio returns the fraction of the window at which auto-compaction
@@ -517,6 +556,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		imageLoader:                  opts.ImageLoader,
 		missingImages:                map[string]bool{},
 		imageCache:                   map[string]provider.ImageContent{},
+		steerClosed:                  true,
 	}
 }
 
@@ -530,11 +570,12 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	return a.RunRich(ctx, RichInput{Text: input})
 }
 
-func (a *Agent) RunRich(ctx context.Context, input RichInput) error {
+func (a *Agent) RunRich(ctx context.Context, input RichInput) (runErr error) {
 	ctx, endTurn := WithParentTurn(ctx)
 	defer endTurn()
-	defer a.clearSteerQueue()
+	defer func() { a.closeSteerQueue(runErr) }()
 	a.steerMu.Lock()
+	a.steerClosed = false
 	a.steerConsumed = false
 	a.steerMu.Unlock()
 	if a.evidence != nil {
@@ -561,13 +602,19 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) error {
 				return err
 			}
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Consume a queued steer and persist it to the session so it
 		// survives tab switches and history replay. The model sees it as
 		// guidance (with a prefix), not a new task. One cache miss per
 		// steer is unavoidable — the model must see the new instruction.
-		if text, ok := a.consumeSteer(); ok {
-			a.session.Add(provider.Message{Role: provider.RoleUser, Content: midTurnSteerMessage(text)})
-			a.sink.Emit(event.Event{Kind: event.Steer, Text: text})
+		if guidance, ok := a.consumeSteer(); ok {
+			messageID := a.session.AddWithDisplay(provider.Message{Role: provider.RoleUser, Content: midTurnSteerMessage(guidance.Input.Text), Images: guidance.Input.Images}, guidance.Display)
+			ctx = WithTurnImages(ctx, append(TurnImages(ctx), guidance.AvailableImages...))
+			guidance.ack <- nil
+			close(guidance.ack)
+			a.sink.Emit(event.Event{Kind: event.Steer, Text: guidance.Display, MessageID: messageID, ItemID: guidance.ID})
 		}
 		schemas := a.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)
@@ -680,7 +727,7 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) error {
 			if readiness.applies {
 				event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, finalReadinessBlocks > 0))
 			}
-			if a.steerQueueLen() > 0 {
+			if !a.sealSteerIfEmpty() {
 				continue
 			}
 			a.sink.Emit(event.Event{Kind: event.AnswerCommitted, Text: text})
@@ -1014,6 +1061,11 @@ func (a *Agent) hydrateImageMessages(ctx context.Context, messages []provider.Me
 		}
 		images := make([]provider.ImageContent, 0, len(out[i].Images))
 		for _, image := range out[i].Images {
+			// Fresh host-validated snapshots take precedence over older path caches.
+			if image.Data != "" {
+				images = append(images, image)
+				continue
+			}
 			if cached, ok := a.imageCache[image.Path]; ok {
 				images = append(images, cached)
 				continue

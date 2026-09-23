@@ -2,6 +2,12 @@
 
 How DeepSeek-Orca ships, who can ship what, and the canary-before-stable flow.
 
+## Current desktop V3 flow
+
+For the current O.R.C.A. Desktop V3 release line, use `.github/workflows/release-desktop.yml` as the operational source of truth. Stable releases are `desktop-vX.Y.Z` tags; the workflow builds on native macOS, Windows, and Linux runners, enforces Minisign and (by default) SignPath, tests the Windows upgrade on an isolated CI runner, and creates a GitHub draft for review. Stable manual dispatch currently requires the `main` branch. After the draft and signatures are reviewed, publish it and separately stage/verify the website and stable update manifest before an atomic deployment. Do not use the legacy branch/channel instructions below to infer the current desktop workflow. Windows Authenticode and macOS notarization status must be reported accurately; native interaction on a user's computer and production-provider requests are not release-test substitutes.
+
+The remainder of this document preserves the older CLI/V1 trunk and canary guidance for historical reference. Check the relevant current workflow before applying any of those branch, approval, or deployment details to Desktop V3.
+
 ## Branch model: trunk + tags
 
 - **`main-v2`** is the single development line (the v2 / 1.x trunk). Every PR merges here.

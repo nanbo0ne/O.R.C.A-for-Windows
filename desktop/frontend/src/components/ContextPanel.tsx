@@ -143,15 +143,18 @@ export function ContextPanel({
   const {
     usedTokens,
     windowTokens,
-    promptTokens,
-    completionTokens,
     totalTokens,
     reasoningTokens,
+    sessionReasoningTokensAvailable,
+    sessionReasoningTokensPartial,
     cacheHitTokens,
     cacheMissTokens,
     currentPromptTokens,
-    currentCompletionTokens,
+    currentOutputTokens,
+    currentTotalTokens,
+    currentRequestAvailable,
     currentReasoningTokens,
+    currentReasoningTokensAvailable,
   } = computeContextPanelUsage({ context, info, usage, sessionTokens });
   const currency = (info?.sessionCurrency || context?.sessionCurrency || sessionCurrency || usage?.currency || "").trim();
   const costAvailable = currency.length > 0 && (info?.costAvailable === true || context?.costAvailable === true || usage?.costAvailable === true);
@@ -171,16 +174,6 @@ export function ContextPanel({
   const cachePct = cacheHitTokens + cacheMissTokens > 0
     ? Math.round((cacheHitTokens / (cacheHitTokens + cacheMissTokens)) * 100)
     : 0;
-  const otherTokens = Math.max(0, totalTokens - promptTokens - completionTokens - reasoningTokens);
-  const currentBreakdown = currentPromptTokens + currentCompletionTokens + currentReasoningTokens;
-  const displayPromptTokens = currentBreakdown > 0 ? currentPromptTokens : promptTokens;
-  const displayCompletionTokens = currentBreakdown > 0 ? currentCompletionTokens : completionTokens;
-  const displayReasoningTokens = currentBreakdown > 0 ? currentReasoningTokens : reasoningTokens;
-  const safeBreakdown = Math.max(displayPromptTokens + displayCompletionTokens + displayReasoningTokens, 1);
-  const promptPct = usagePct === null ? 0 : Math.min(100, (displayPromptTokens / safeBreakdown) * usagePct);
-  const completionPct = usagePct === null ? 0 : Math.min(100, (displayCompletionTokens / safeBreakdown) * usagePct);
-  const reasoningPct = usagePct === null ? 0 : Math.min(100, (displayReasoningTokens / safeBreakdown) * usagePct);
-  const otherPct = usagePct === null ? 0 : Math.max(0, Math.min(100, usagePct - promptPct - completionPct - reasoningPct));
   const eventTimes = [
     ...readFiles.map((file) => file.time),
     ...changedFiles.map((file) => file.latestTime ?? 0),
@@ -189,6 +182,9 @@ export function ContextPanel({
   const elapsed = info?.elapsedMs && info.elapsedMs > 0 ? info.elapsedMs : derivedElapsed;
   const requestCount = resolveContextPanelRequestCount(info, context);
   const hasCacheData = cacheHitTokens + cacheMissTokens > 0;
+  const cumulativeReasoning = sessionReasoningTokensAvailable
+    ? `${reasoningTokens.toLocaleString()}${sessionReasoningTokensPartial ? ` (${t("context.reasoningPartial")})` : ""}`
+    : t("context.reasoningNotProvided");
   const readRows = readFiles.map((f, i) => ({
     key: `${f.path}-${i}`,
     path: f.path,
@@ -220,10 +216,7 @@ export function ContextPanel({
                 {usagePct !== null && <div className="context-panel__percent">{usagePct}%</div>}
               </div>
               {hasContextWindow && <div className="context-panel__usage-track" aria-hidden="true">
-                <span className="context-panel__usage-segment context-panel__usage-segment--prompt" style={{ width: `${promptPct}%` }} />
-                <span className="context-panel__usage-segment context-panel__usage-segment--completion" style={{ width: `${completionPct}%` }} />
-                <span className="context-panel__usage-segment context-panel__usage-segment--reasoning" style={{ width: `${reasoningPct}%` }} />
-                <span className="context-panel__usage-segment context-panel__usage-segment--other" style={{ width: `${otherPct}%` }} />
+                <span className="context-panel__usage-segment context-panel__usage-segment--prompt" style={{ width: `${usagePct ?? 0}%` }} />
                 {compactPct > 0 && <span className="context-panel__compact-marker" style={{ left: `${Math.min(100, Math.max(0, compactPct))}%` }} />}
               </div>}
               {compactPct > 0 && (
@@ -233,21 +226,26 @@ export function ContextPanel({
                 </div>
               )}
             </div>
-            <div className="context-panel__breakdown">
-              <TokenLegend label={t("context.prompt")} value={promptTokens} color="prompt" />
-              <TokenLegend label={t("context.completion")} value={completionTokens} color="completion" />
-              <TokenLegend label={t("context.reasoning")} value={reasoningTokens} color="reasoning" />
-              <TokenLegend label={t("context.other")} value={otherTokens} color="other" />
-              <div className="context-panel__total">
-                <span>{t("context.total")}</span>
-                <strong>{hasContextWindow ? `${usedTokens.toLocaleString()} / ${windowTokens.toLocaleString()}` : usedTokens.toLocaleString()}</strong>
-              </div>
-            </div>
           </section>
           <section className="context-panel__section">
-            <SectionHeading title={t("context.runtimeMetrics")} />
+            <SectionHeading title={t("context.latestRequest")} />
+            {currentRequestAvailable ? <div className="context-panel__breakdown">
+              <TokenLegend label={t("context.prompt")} value={currentPromptTokens} color="prompt" />
+              <TokenLegend label={t(currentReasoningTokensAvailable ? "context.output" : "context.outputIncludesReasoning")} value={currentOutputTokens} color="completion" />
+              <TokenLegend label={t("context.reasoning")} value={currentReasoningTokensAvailable ? currentReasoningTokens.toLocaleString() : t("context.reasoningNotProvided")} color="reasoning" />
+              <div className="context-panel__total">
+                <span>{t("context.total")}</span>
+                <strong>{currentTotalTokens.toLocaleString()}</strong>
+              </div>
+            </div> : <div className="context-panel__breakdown">
+              <TokenLegend label={t("context.total")} value={t("context.reasoningNotProvided")} color="other" />
+            </div>}
+          </section>
+          <section className="context-panel__section">
+            <SectionHeading title={t("context.cumulativeUsage")} />
             <div className="context-panel__stats">
               <MetricCard label={t("context.sessionTokens")} value={totalTokens > 0 ? totalTokens.toLocaleString() : "-"} />
+              <MetricCard label={t("context.reasoningSubset")} value={cumulativeReasoning} />
               <MetricCard label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
               <MetricCard label={t("context.time")} value={fmtDuration(elapsed, t)} />
             </div>
@@ -341,12 +339,12 @@ function PreviewSection({
   );
 }
 
-function TokenLegend({ label, value, color }: { label: string; value: number; color: string }) {
+function TokenLegend({ label, value, color }: { label: string; value: number | string; color: string }) {
   return (
     <div className="context-panel__legend-row">
       <span className={`context-panel__legend-dot context-panel__legend-dot--${color}`} />
       <span>{label}</span>
-      <strong>{value.toLocaleString()}</strong>
+      <strong>{typeof value === "number" ? value.toLocaleString() : value}</strong>
     </div>
   );
 }

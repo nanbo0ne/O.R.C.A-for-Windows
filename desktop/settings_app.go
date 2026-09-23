@@ -742,7 +742,7 @@ func (a *App) rebuild() error {
 	path := agent.ContinueSessionPath(prevPath, ctrl.SessionDir(), ctrl.Label())
 	if len(carried) > 0 {
 		carried = withFreshSystemPrompt(carried, systemPromptFrom(ctrl.History()))
-		ctrl.Resume(&agent.Session{Messages: carried}, path)
+		ctrl.Resume(oldCtrl.SessionWithContext(carried), path)
 	} else if path != "" {
 		ctrl.SetSessionPath(path)
 	}
@@ -1761,7 +1761,7 @@ func (a *App) rebuildAutomationTabModel(tab *WorkspaceTab, modelRef string, expe
 	newCtrl.SetStepThinking(tab.stepThinking)
 	newCtrl.SetGoal(tab.goal)
 	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
-	resumeWithControllerSystem(newCtrl, carried, path)
+	resumeWithControllerSystem(newCtrl, carried, path, oldCtrl)
 
 	a.mu.Lock()
 	if current := a.tabs[tab.ID]; current != tab || tab.runtimeGeneration != generation || tab.Ctrl != expected {

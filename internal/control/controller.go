@@ -123,6 +123,7 @@ type Controller struct {
 	cpRoot  string
 	cpTurn  int
 	cpBound map[int]int
+	cpEpoch uint64
 
 	// promptMu serialises approval and ask prompts so at most one user decision is
 	// outstanding at a time (parallel read-only tool calls don't normally gate,
@@ -134,6 +135,7 @@ type Controller struct {
 	// under it is short and non-blocking.
 	mu              sync.Mutex
 	cancel          context.CancelFunc
+	activeContext   context.Context
 	running         bool
 	cancelRequested bool
 	activeTurnID    string
@@ -231,6 +233,10 @@ func (c *Controller) waitIfPaused(ctx context.Context) error {
 		if !paused {
 			return nil
 		}
+		c.mu.Lock()
+		monitorTurn := c.activeTurnID
+		c.mu.Unlock()
+		c.workMonitorState(monitorTurn, "paused")
 		if wait == nil {
 			time.Sleep(100 * time.Millisecond)
 			continue
@@ -254,6 +260,7 @@ func (c *Controller) SetPaused(paused bool) {
 		return
 	}
 	c.paused = paused
+	monitorTurn := c.activeTurnID
 	if paused {
 		if c.pauseWait == nil {
 			c.pauseWait = make(chan struct{})
@@ -263,6 +270,7 @@ func (c *Controller) SetPaused(paused bool) {
 		c.pauseWait = nil
 	}
 	c.mu.Unlock()
+	c.workMonitorState(monitorTurn, "wait") // the pause gate, not this request, confirms paused
 }
 
 func (c *Controller) Paused() bool {
@@ -502,8 +510,12 @@ func (c *Controller) rebindCheckpoints(sessionPath string) {
 	defer c.mu.Unlock()
 	c.cp = checkpoint.New(ckptDir(sessionPath), c.cpRoot)
 	c.cpTurn = c.cp.NextTurn() // continue numbering past any checkpoints on disk
-	c.cpBound = c.cp.Bounds()  // rebuilt from persisted checkpoints so a resumed
-	if c.cpBound == nil {      // session can still rewind conversation / fork
+	c.cpEpoch = 0
+	if c.executor != nil {
+		c.cpEpoch = c.executor.Session().ContextEpoch()
+	}
+	c.cpBound = c.cp.Bounds(c.cpEpoch) // rebuilt from persisted checkpoints so a resumed
+	if c.cpBound == nil {              // session can still rewind conversation / fork
 		c.cpBound = map[int]int{}
 	}
 }
@@ -516,12 +528,26 @@ func (c *Controller) beginCheckpoint(input string) {
 		return
 	}
 	c.mu.Lock()
+	c.refreshCheckpointEpochLocked()
 	turn := c.cpTurn
 	c.cpTurn++
 	msgIndex := len(c.executor.Session().Messages)
 	c.cpBound[turn] = msgIndex
 	c.mu.Unlock()
-	c.cp.Begin(turn, input, msgIndex)
+	c.cp.Begin(turn, input, msgIndex, c.executor.Session().ContextEpoch())
+}
+
+// A compressed context can reuse small indexes. Compare persisted epochs, not
+// merely index bounds, before offering conversation rewind or fork.
+func (c *Controller) refreshCheckpointEpochLocked() {
+	if c.executor == nil || c.cp == nil {
+		return
+	}
+	epoch := c.executor.Session().ContextEpoch()
+	if epoch != c.cpEpoch {
+		c.cpEpoch = epoch
+		c.cpBound = c.cp.Bounds(epoch)
+	}
 }
 
 // --- commands (frontend → controller) ---
@@ -537,11 +563,13 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		return
 	}
 	ctx, cancel := agent.WithParentTurn(context.Background())
+	ctx = c.workMonitorContext(ctx)
 	c.activeTurnID, _ = agent.ParentTurn(ctx)
 	id := c.activeTurnID
 	c.lastOutcome = ""
 	c.cancel = cancel
 	c.running = true
+	c.activeContext = ctx
 	c.cancelRequested = false
 	c.mu.Unlock()
 
@@ -557,6 +585,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 				c.mu.Lock()
 				c.running = false
 				c.cancel = nil
+				c.activeContext = nil
 				c.resetCancelledStateLocked()
 				c.lastOutcome = event.TurnOutcomeFailed
 				c.mu.Unlock()
@@ -568,6 +597,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		cancelled := c.cancelRequested
 		c.running = false
 		c.cancel = nil
+		c.activeContext = nil
 		outcome := event.TurnOutcomeSuccess
 		if cancelled || errors.Is(err, context.Canceled) {
 			outcome = event.TurnOutcomeCancelled
@@ -625,6 +655,7 @@ func (c *Controller) runTurn(ctx context.Context, input string) error {
 func (c *Controller) RunTurn(ctx context.Context, input string) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	ctx, endTurn := agent.WithParentTurn(ctx)
+	ctx = c.workMonitorContext(ctx)
 	defer endTurn()
 	c.mu.Lock()
 	if c.running {
@@ -634,6 +665,7 @@ func (c *Controller) RunTurn(ctx context.Context, input string) (err error) {
 	}
 	c.cancel = cancel
 	c.running = true
+	c.activeContext = ctx
 	c.cancelRequested = false
 	c.activeTurnID, _ = agent.ParentTurn(ctx)
 	c.lastOutcome = ""
@@ -643,6 +675,7 @@ func (c *Controller) RunTurn(ctx context.Context, input string) (err error) {
 		c.mu.Lock()
 		c.running = false
 		c.cancel = nil
+		c.activeContext = nil
 		c.lastOutcome = event.TurnOutcomeSuccess
 		if c.cancelRequested || errors.Is(err, context.Canceled) {
 			c.lastOutcome = event.TurnOutcomeCancelled
@@ -1379,6 +1412,7 @@ func (c *Controller) CancelTurn(expected string) CancelAck {
 	ack := CancelAck{TurnStatus: c.turnStatusLocked(), Accepted: accepted}
 	c.mu.Unlock()
 	if accepted {
+		c.workMonitorState(ack.TurnID, "cancelling")
 		cancel()
 	}
 	return ack
@@ -1690,11 +1724,42 @@ func (c *Controller) GoalStatus() string {
 
 // Compact runs one compaction pass on the executor's session on demand.
 // instructions is optional `/compact <focus>` guidance steering what to keep.
-func (c *Controller) Compact(ctx context.Context, instructions string) error {
+func (c *Controller) Compact(ctx context.Context, instructions string) (err error) {
 	if c.executor == nil {
 		return nil
 	}
-	return c.executor.CompactNow(ctx, instructions)
+	ctx, cancel := context.WithCancel(ctx)
+	ctx, endTurn := agent.WithParentTurn(ctx)
+	ctx = c.workMonitorContext(ctx)
+	defer endTurn()
+	c.mu.Lock()
+	if c.running {
+		c.mu.Unlock()
+		cancel()
+		return ErrTurnRunning
+	}
+	c.running, c.cancelRequested, c.cancel = true, false, cancel
+	c.activeTurnID, _ = agent.ParentTurn(ctx)
+	monitorTurn := c.activeTurnID
+	c.mu.Unlock()
+	defer func() { c.workMonitorCompleted(monitorTurn, err) }()
+	defer func() {
+		c.mu.Lock()
+		c.running, c.cancel = false, nil
+		c.resetCancelledStateLocked()
+		c.mu.Unlock()
+		cancel()
+	}()
+	beforeRewrite := c.executor.Session().RewriteVersion()
+	if err = c.executor.CompactNow(ctx, instructions); err != nil {
+		return err
+	}
+	if c.executor.Session().RewriteVersion() != beforeRewrite {
+		c.mu.Lock()
+		c.cpBound = map[int]int{}
+		c.mu.Unlock()
+	}
+	return c.Snapshot()
 }
 
 // maybeSessionStart fires the SessionStart hook exactly once per session, lazily
@@ -1831,11 +1896,20 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 		return c.rewindFail(fmt.Errorf("checkpoints unavailable"))
 	}
 	c.mu.Lock()
+	c.refreshCheckpointEpochLocked()
 	running := c.running
 	boundary, hasBound := c.cpBound[turn]
 	c.mu.Unlock()
 	if running {
 		return c.rewindFail(fmt.Errorf("cannot rewind while a turn is running"))
+	}
+	if scope == RewindConversation || scope == RewindBoth {
+		if !hasBound {
+			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d: the context has changed", turn))
+		}
+		if boundary > len(c.executor.Session().Snapshot()) {
+			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d: the conversation was compacted past this point", turn))
+		}
 	}
 
 	if scope == RewindCode || scope == RewindBoth {
@@ -1857,7 +1931,7 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 		if boundary > len(s.Messages) {
 			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d: the conversation was compacted past this point", turn))
 		}
-		s.Messages = s.Messages[:boundary]
+		c.executor.SetSession(s.ClonePrefix(boundary))
 		c.mu.Lock()
 		c.cpTurn = turn // renumber future turns from here; later turns are gone
 		for k := range c.cpBound {
@@ -1903,6 +1977,7 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 		return "", c.rewindFail(fmt.Errorf("fork needs session persistence, which is disabled"))
 	}
 	c.mu.Lock()
+	c.refreshCheckpointEpochLocked()
 	running := c.running
 	boundary, hasBound := c.cpBound[turn]
 	c.mu.Unlock()
@@ -1924,9 +1999,7 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 	if boundary > len(src) {
 		boundary = len(src)
 	}
-	forked := append([]provider.Message(nil), src[:boundary]...)
-	sess := agent.NewSession("")
-	sess.Messages = forked
+	sess := c.executor.Session().ClonePrefix(boundary)
 
 	newPath := agent.NewSessionPath(c.sessionDir, c.label)
 	if err := sess.Save(newPath); err != nil {
@@ -1955,6 +2028,7 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 func (c *Controller) CheckpointHasBoundary(turn int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.refreshCheckpointEpochLocked()
 	_, ok := c.cpBound[turn]
 	return ok
 }
@@ -1983,9 +2057,7 @@ func (c *Controller) Branch(name string) (string, error) {
 	parentPath := c.SessionPath()
 	parentID := agent.BranchID(parentPath)
 	src := c.executor.Session().Snapshot()
-	branched := append([]provider.Message(nil), src...)
-	sess := agent.NewSession("")
-	sess.Messages = branched
+	sess := c.executor.Session().ClonePrefix(len(src))
 
 	newPath := agent.NewSessionPath(c.sessionDir, c.label)
 	if err := sess.Save(newPath); err != nil {
@@ -1995,7 +2067,7 @@ func (c *Controller) Branch(name string) (string, error) {
 		Name:             strings.TrimSpace(name),
 		ParentID:         parentID,
 		ForkTurn:         -1,
-		ForkMessageIndex: len(branched),
+		ForkMessageIndex: len(src),
 	}); err != nil {
 		return "", c.rewindFail(err)
 	}
@@ -2108,6 +2180,7 @@ func (c *Controller) summarizeAt(ctx context.Context, turn int, from bool) error
 		return c.rewindFail(fmt.Errorf("checkpoints unavailable"))
 	}
 	c.mu.Lock()
+	c.refreshCheckpointEpochLocked()
 	running := c.running
 	boundary, hasBound := c.cpBound[turn]
 	c.mu.Unlock()
@@ -2303,6 +2376,21 @@ func (c *Controller) History() []provider.Message {
 		return nil
 	}
 	return c.executor.Session().Snapshot() // copy — a turn may be appending concurrently
+}
+
+// DisplayHistory is independent of the reduced context sent to the provider.
+func (c *Controller) DisplayHistory() []agent.DisplayEntry {
+	if c.executor == nil {
+		return nil
+	}
+	return c.executor.Session().DisplaySnapshot()
+}
+
+func (c *Controller) SessionWithContext(messages []provider.Message) *agent.Session {
+	if c.executor == nil {
+		return &agent.Session{Messages: messages}
+	}
+	return c.executor.Session().WithContext(messages)
 }
 
 // ContextSnapshot returns the most recent provider-reported prompt occupancy

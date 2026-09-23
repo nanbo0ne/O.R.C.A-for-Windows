@@ -141,6 +141,7 @@ type RuntimeSwitchRecord struct {
 	Phase          RuntimeSwitchPhase `json:"phase"`
 	Progress       int                `json:"progress"`
 	MessageIndex   int                `json:"messageIndex"`
+	DisplayAfterID string             `json:"displayAfterId,omitempty"`
 	CheckpointTurn int                `json:"checkpointTurn,omitempty"`
 	StartedAt      int64              `json:"startedAt"`
 	CompletedAt    int64              `json:"completedAt,omitempty"`
@@ -211,36 +212,39 @@ type readFileRecord struct {
 }
 
 type sessionUsageStats struct {
-	PromptTokens     int     `json:"promptTokens"`
-	CompletionTokens int     `json:"completionTokens"`
-	TotalTokens      int     `json:"totalTokens"`
-	ReasoningTokens  int     `json:"reasoningTokens"`
-	CacheHitTokens   int     `json:"cacheHitTokens"`
-	CacheMissTokens  int     `json:"cacheMissTokens"`
-	RequestCount     int     `json:"requestCount"`
-	ElapsedMs        int64   `json:"elapsedMs"`
-	SessionCost      float64 `json:"sessionCost,omitempty"`
-	CostAvailable    bool    `json:"costAvailable"`
-	SessionCurrency  string  `json:"sessionCurrency,omitempty"`
-	SessionCostUsd   float64 `json:"sessionCostUsd,omitempty"`
+	PromptTokens             int     `json:"promptTokens"`
+	CompletionTokens         int     `json:"completionTokens"`
+	TotalTokens              int     `json:"totalTokens"`
+	ReasoningTokens          int     `json:"reasoningTokens"`
+	ReasoningTokensAvailable bool    `json:"reasoningTokensAvailable,omitempty"`
+	ReasoningTokensPartial   bool    `json:"reasoningTokensPartial,omitempty"`
+	CacheHitTokens           int     `json:"cacheHitTokens"`
+	CacheMissTokens          int     `json:"cacheMissTokens"`
+	RequestCount             int     `json:"requestCount"`
+	ElapsedMs                int64   `json:"elapsedMs"`
+	SessionCost              float64 `json:"sessionCost,omitempty"`
+	CostAvailable            bool    `json:"costAvailable"`
+	SessionCurrency          string  `json:"sessionCurrency,omitempty"`
+	SessionCostUsd           float64 `json:"sessionCostUsd,omitempty"`
 
 	activeTurnStartedAt int64
 }
 
 type usageTelemetryEvent struct {
-	Turn             int     `json:"turn"`
-	TurnID           string  `json:"turnId,omitempty"`
-	RequestID        string  `json:"requestId,omitempty"`
-	PromptTokens     int     `json:"promptTokens"`
-	CompletionTokens int     `json:"completionTokens"`
-	TotalTokens      int     `json:"totalTokens"`
-	ReasoningTokens  int     `json:"reasoningTokens"`
-	CacheHitTokens   int     `json:"cacheHitTokens"`
-	CacheMissTokens  int     `json:"cacheMissTokens"`
-	SessionCost      float64 `json:"sessionCost,omitempty"`
-	CostAvailable    bool    `json:"costAvailable"`
-	SessionCurrency  string  `json:"sessionCurrency,omitempty"`
-	SessionCostUsd   float64 `json:"sessionCostUsd,omitempty"`
+	Turn                     int     `json:"turn"`
+	TurnID                   string  `json:"turnId,omitempty"`
+	RequestID                string  `json:"requestId,omitempty"`
+	PromptTokens             int     `json:"promptTokens"`
+	CompletionTokens         int     `json:"completionTokens"`
+	TotalTokens              int     `json:"totalTokens"`
+	ReasoningTokens          int     `json:"reasoningTokens"`
+	ReasoningTokensAvailable bool    `json:"reasoningTokensAvailable,omitempty"`
+	CacheHitTokens           int     `json:"cacheHitTokens"`
+	CacheMissTokens          int     `json:"cacheMissTokens"`
+	SessionCost              float64 `json:"sessionCost,omitempty"`
+	CostAvailable            bool    `json:"costAvailable"`
+	SessionCurrency          string  `json:"sessionCurrency,omitempty"`
+	SessionCostUsd           float64 `json:"sessionCostUsd,omitempty"`
 }
 
 type turnTelemetryItem = event.TurnItem
@@ -258,7 +262,7 @@ type tabTelemetrySnapshot struct {
 
 func lastUsageTelemetryEvent(events []usageTelemetryEvent) (usageTelemetryEvent, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
-		if events[i].PromptTokens+events[i].CompletionTokens+events[i].TotalTokens+events[i].CacheHitTokens+events[i].CacheMissTokens+events[i].ReasoningTokens > 0 {
+		if events[i].PromptTokens+events[i].CompletionTokens+events[i].TotalTokens+events[i].CacheHitTokens+events[i].CacheMissTokens+events[i].ReasoningTokens > 0 || events[i].ReasoningTokensAvailable {
 			return events[i], true
 		}
 	}
@@ -349,6 +353,11 @@ func (t *WorkspaceTab) recordUsage(e event.Event) {
 	t.usageTelemetry.CompletionTokens += u.CompletionTokens
 	t.usageTelemetry.TotalTokens += usageTotalTokens(u)
 	t.usageTelemetry.ReasoningTokens += u.ReasoningTokens
+	if u.ReasoningTokensAvailable || u.ReasoningTokens > 0 {
+		t.usageTelemetry.ReasoningTokensAvailable = true
+	} else {
+		t.usageTelemetry.ReasoningTokensPartial = true
+	}
 	if e.SessionHit+e.SessionMiss > 0 {
 		t.usageTelemetry.CacheHitTokens = e.SessionHit
 		t.usageTelemetry.CacheMissTokens = e.SessionMiss
@@ -380,19 +389,20 @@ func (t *WorkspaceTab) recordUsage(e event.Event) {
 		currency = e.Pricing.Symbol()
 	}
 	t.usageTelemetryEvents = append(t.usageTelemetryEvents, usageTelemetryEvent{
-		Turn:             t.currentTelemetryTurn,
-		TurnID:           usageTurnID(e, t.currentTelemetryTurnID),
-		RequestID:        requestID,
-		PromptTokens:     u.PromptTokens,
-		CompletionTokens: u.CompletionTokens,
-		TotalTokens:      usageTotalTokens(u),
-		ReasoningTokens:  u.ReasoningTokens,
-		CacheHitTokens:   u.CacheHitTokens,
-		CacheMissTokens:  u.CacheMissTokens,
-		SessionCost:      cost,
-		CostAvailable:    officialCost,
-		SessionCostUsd:   cost,
-		SessionCurrency:  currency,
+		Turn:                     t.currentTelemetryTurn,
+		TurnID:                   usageTurnID(e, t.currentTelemetryTurnID),
+		RequestID:                requestID,
+		PromptTokens:             u.PromptTokens,
+		CompletionTokens:         u.CompletionTokens,
+		TotalTokens:              usageTotalTokens(u),
+		ReasoningTokens:          u.ReasoningTokens,
+		ReasoningTokensAvailable: u.ReasoningTokensAvailable || u.ReasoningTokens > 0,
+		CacheHitTokens:           u.CacheHitTokens,
+		CacheMissTokens:          u.CacheMissTokens,
+		SessionCost:              cost,
+		CostAvailable:            officialCost,
+		SessionCostUsd:           cost,
+		SessionCurrency:          currency,
 	})
 	turnID := usageTurnID(e, t.currentTelemetryTurnID)
 	if turnID != "" {
@@ -660,6 +670,19 @@ func (t *WorkspaceTab) telemetrySnapshot() tabTelemetrySnapshot {
 		}
 	}
 	usage.activeTurnStartedAt = 0
+	if usage.RequestCount > 0 && !usage.ReasoningTokensPartial && !usage.ReasoningTokensAvailable {
+		if len(events) == 0 {
+			usage.ReasoningTokensPartial = true
+		} else {
+			for _, receipt := range events {
+				if receipt.ReasoningTokensAvailable || receipt.ReasoningTokens > 0 {
+					usage.ReasoningTokensAvailable = true
+				} else {
+					usage.ReasoningTokensPartial = true
+				}
+			}
+		}
+	}
 	return tabTelemetrySnapshot{Version: 7, ReadFiles: records, Usage: usage, UsageEvents: events, Turns: turns, RuntimeSwitches: runtimeSwitches, RiskReviews: riskReviews}
 }
 
@@ -721,6 +744,11 @@ func usageStatsFromEvents(events []usageTelemetryEvent) sessionUsageStats {
 		usage.CompletionTokens += ev.CompletionTokens
 		usage.TotalTokens += firstNonZeroInt(ev.TotalTokens, ev.PromptTokens+ev.CompletionTokens)
 		usage.ReasoningTokens += ev.ReasoningTokens
+		if ev.ReasoningTokensAvailable || ev.ReasoningTokens > 0 {
+			usage.ReasoningTokensAvailable = true
+		} else {
+			usage.ReasoningTokensPartial = true
+		}
 		usage.CacheHitTokens += ev.CacheHitTokens
 		usage.CacheMissTokens += ev.CacheMissTokens
 		usage.RequestCount++
@@ -780,6 +808,7 @@ func (s *tabEventSink) RecordRiskReviewAudit(audit event.RiskReviewAudit) {
 }
 
 func (s *tabEventSink) Emit(e event.Event) {
+	s.observeWorkMonitor(e)
 	if e.Kind == event.ChildStarted || e.Kind == event.ChildDone {
 		// Child lifecycle is an internal accounting receipt. It must not become a
 		// frontend event, but it must be persisted so a parent finishing at the
@@ -4574,31 +4603,36 @@ func topicSummaryKey(scope, workspaceRoot, topicID string) string {
 
 // ContextPanelInfo is the right-side panel's data for one tab.
 type ContextPanelInfo struct {
-	UsedTokens              int               `json:"usedTokens"`
-	WindowTokens            int               `json:"windowTokens"`
-	WindowConfirmed         bool              `json:"windowConfirmed"`
-	WindowSource            string            `json:"windowSource,omitempty"`
-	ModelRef                string            `json:"modelRef,omitempty"`
-	PromptTokens            int               `json:"promptTokens"`
-	CompletionTokens        int               `json:"completionTokens"`
-	TotalTokens             int               `json:"totalTokens"`
-	ReasoningTokens         int               `json:"reasoningTokens"`
-	CacheHitTokens          int               `json:"cacheHitTokens"`
-	CacheMissTokens         int               `json:"cacheMissTokens"`
-	SessionPromptTokens     int               `json:"sessionPromptTokens,omitempty"`
-	SessionCompletionTokens int               `json:"sessionCompletionTokens,omitempty"`
-	SessionReasoningTokens  int               `json:"sessionReasoningTokens,omitempty"`
-	SessionCacheHitTokens   int               `json:"sessionCacheHitTokens,omitempty"`
-	SessionCacheMissTokens  int               `json:"sessionCacheMissTokens,omitempty"`
-	RequestCount            int               `json:"requestCount"`
-	ElapsedMs               int64             `json:"elapsedMs"`
-	SessionCost             float64           `json:"sessionCost"`
-	CostAvailable           bool              `json:"costAvailable"`
-	SessionCurrency         string            `json:"sessionCurrency,omitempty"`
-	SessionCostUsd          float64           `json:"sessionCostUsd,omitempty"`
-	Mock                    bool              `json:"mock,omitempty"`
-	ReadFiles               []readFileRecord  `json:"readFiles"`
-	ChangedFiles            []ChangedFileInfo `json:"changedFiles"`
+	UsedTokens                      int               `json:"usedTokens"`
+	WindowTokens                    int               `json:"windowTokens"`
+	WindowConfirmed                 bool              `json:"windowConfirmed"`
+	WindowSource                    string            `json:"windowSource,omitempty"`
+	ModelRef                        string            `json:"modelRef,omitempty"`
+	PromptTokens                    int               `json:"promptTokens"`
+	CompletionTokens                int               `json:"completionTokens"`
+	TotalTokens                     int               `json:"totalTokens"`
+	ReasoningTokens                 int               `json:"reasoningTokens"`
+	ReasoningTokensAvailable        bool              `json:"reasoningTokensAvailable,omitempty"`
+	LastRequestAvailable            bool              `json:"lastRequestAvailable,omitempty"`
+	LastRequestTotalTokens          int               `json:"lastRequestTotalTokens,omitempty"`
+	CacheHitTokens                  int               `json:"cacheHitTokens"`
+	CacheMissTokens                 int               `json:"cacheMissTokens"`
+	SessionPromptTokens             int               `json:"sessionPromptTokens,omitempty"`
+	SessionCompletionTokens         int               `json:"sessionCompletionTokens,omitempty"`
+	SessionReasoningTokens          int               `json:"sessionReasoningTokens,omitempty"`
+	SessionReasoningTokensAvailable bool              `json:"sessionReasoningTokensAvailable,omitempty"`
+	SessionReasoningTokensPartial   bool              `json:"sessionReasoningTokensPartial,omitempty"`
+	SessionCacheHitTokens           int               `json:"sessionCacheHitTokens,omitempty"`
+	SessionCacheMissTokens          int               `json:"sessionCacheMissTokens,omitempty"`
+	RequestCount                    int               `json:"requestCount"`
+	ElapsedMs                       int64             `json:"elapsedMs"`
+	SessionCost                     float64           `json:"sessionCost"`
+	CostAvailable                   bool              `json:"costAvailable"`
+	SessionCurrency                 string            `json:"sessionCurrency,omitempty"`
+	SessionCostUsd                  float64           `json:"sessionCostUsd,omitempty"`
+	Mock                            bool              `json:"mock,omitempty"`
+	ReadFiles                       []readFileRecord  `json:"readFiles"`
+	ChangedFiles                    []ChangedFileInfo `json:"changedFiles"`
 }
 
 type ChangedFileInfo struct {
@@ -4640,19 +4674,29 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 			info.UsedTokens = 0
 			info.WindowTokens = window
 		}
-		// Per-turn token breakdown from LastUsage (same snapshot as UsedTokens)
-		// so the donut segments are proportional to the current context fill,
-		// not inflated by cumulative session totals.
+		// Keep the latest request receipt distinct from context occupancy and session totals.
 		if u := ctrl.LastUsage(); u != nil {
+			info.LastRequestAvailable = true
 			info.PromptTokens = u.PromptTokens
 			info.CompletionTokens = u.CompletionTokens
 			info.ReasoningTokens = u.ReasoningTokens
+			info.ReasoningTokensAvailable = u.ReasoningTokensAvailable || u.ReasoningTokens > 0
+			info.LastRequestTotalTokens = usageTotalTokens(u)
 			info.CacheHitTokens = u.CacheHitTokens
 			info.CacheMissTokens = u.CacheMissTokens
 		}
 	}
-
 	telemetry := tab.telemetrySnapshot()
+	if last, ok := lastUsageTelemetryEvent(telemetry.UsageEvents); ok && !info.LastRequestAvailable {
+		info.LastRequestAvailable = true
+		info.PromptTokens = last.PromptTokens
+		info.CompletionTokens = last.CompletionTokens
+		info.ReasoningTokens = last.ReasoningTokens
+		info.ReasoningTokensAvailable = last.ReasoningTokensAvailable || last.ReasoningTokens > 0
+		info.LastRequestTotalTokens = last.TotalTokens
+		info.CacheHitTokens = last.CacheHitTokens
+		info.CacheMissTokens = last.CacheMissTokens
+	}
 	if records := telemetry.ReadFiles; records != nil {
 		info.ReadFiles = records
 	}
@@ -4661,6 +4705,8 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 	info.SessionPromptTokens = usage.PromptTokens
 	info.SessionCompletionTokens = usage.CompletionTokens
 	info.SessionReasoningTokens = usage.ReasoningTokens
+	info.SessionReasoningTokensAvailable = usage.ReasoningTokensAvailable
+	info.SessionReasoningTokensPartial = usage.ReasoningTokensPartial
 	info.SessionCacheHitTokens = usage.CacheHitTokens
 	info.SessionCacheMissTokens = usage.CacheMissTokens
 	info.RequestCount = usage.RequestCount

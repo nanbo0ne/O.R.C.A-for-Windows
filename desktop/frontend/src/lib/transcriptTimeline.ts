@@ -1,13 +1,14 @@
 import type { Item } from "./useController";
 
-export type TimelineProcessItem = Exclude<Item, { kind: "user" | "turn_stats" | "mode_switch" }>;
+export type TimelineProcessItem = Exclude<Item, { kind: "user" | "turn_stats" | "mode_switch" | "steer" | "compaction" }>;
 
 export type TimelineSegment =
   | { kind: "user"; item: Extract<Item, { kind: "user" }> }
   | { kind: "assistant"; item: Extract<Item, { kind: "assistant" }> }
   | { kind: "steer"; item: Extract<Item, { kind: "steer" }> }
+  | { kind: "compaction"; item: Extract<Item, { kind: "compaction" }> }
   | { kind: "mode_switch"; item: Extract<Item, { kind: "mode_switch" }> }
-  | { kind: "process"; id: string; items: TimelineProcessItem[]; completed: boolean }
+  | { kind: "process"; id: string; items: TimelineProcessItem[]; completed: boolean; defaultCollapsed?: boolean }
   | { kind: "stats"; item: Extract<Item, { kind: "turn_stats" }> }
   | {
       kind: "completed";
@@ -19,33 +20,22 @@ export type TimelineSegment =
 
 const timelineCache = new WeakMap<readonly Item[], Map<boolean, TimelineSegment[]>>();
 
-export function requiredWarmPage(warmTurnCount: number, questionTurn: number, pageSize: number): number {
-  if (warmTurnCount <= 0 || questionTurn >= warmTurnCount || pageSize <= 0) return 0;
-  return Math.max(1, Math.ceil((warmTurnCount - Math.max(0, questionTurn)) / pageSize));
-}
-
-export function visibleWarmStart(warmTurnCount: number, page: number, pageSize: number): number {
-  if (warmTurnCount <= 0) return 0;
-  if (page <= 0 || pageSize <= 0) return warmTurnCount;
-  return Math.max(0, warmTurnCount - page * pageSize);
-}
-
 function visibleProcessItem(item: Item): item is TimelineProcessItem {
   if (item.kind === "assistant") return Boolean(item.reasoning) || item.streaming;
   if (item.kind === "tool") return !item.parentId && item.name !== "todo_write" && item.name !== "exit_plan_mode";
-  return item.kind === "notice" || item.kind === "phase" || item.kind === "compaction" || item.kind === "steer";
+  return item.kind === "notice" || item.kind === "phase";
 }
 
-function pushProcess(out: TimelineSegment[], item: TimelineProcessItem, completed: boolean) {
+function pushProcess(out: TimelineSegment[], item: TimelineProcessItem, completed: boolean, defaultCollapsed = false) {
   const last = out[out.length - 1];
-  if (last?.kind === "process" && last.completed === completed) {
+  if (last?.kind === "process" && last.completed === completed && Boolean(last.defaultCollapsed) === defaultCollapsed) {
     last.items.push(item);
     return;
   }
-  out.push({ kind: "process", id: `process-${item.id}`, items: [item], completed });
+  out.push({ kind: "process", id: `process-${item.id}`, items: [item], completed, ...(defaultCollapsed ? { defaultCollapsed: true } : {}) });
 }
 
-function completedTurnSegment(items: readonly Item[], completed: boolean, fallbackID: string): TimelineSegment | null {
+function completedTurnSegment(items: readonly Item[], completed: boolean, fallbackID: string): Extract<TimelineSegment, { kind: "completed" }> | null {
   if (!completed) return null;
   const explicitStats = items.find((item): item is Extract<Item, { kind: "turn_stats" }> => item.kind === "turn_stats");
   if (explicitStats && (explicitStats.outcome ?? (explicitStats.success ? "success" : "failed")) !== "success") return null;
@@ -90,20 +80,36 @@ function completedTurnSegment(items: readonly Item[], completed: boolean, fallba
 }
 
 function buildTurn(items: readonly Item[], completed: boolean): TimelineSegment[] {
+  const hasBoundary = items.some((item) => item.kind === "steer" || item.kind === "compaction");
   const out: TimelineSegment[] = [];
   const stats = items.find((item): item is Extract<Item, { kind: "turn_stats" }> => item.kind === "turn_stats");
   const user = items.find((item): item is Extract<Item, { kind: "user" }> => item.kind === "user");
   if (user) out.push({ kind: "user", item: user });
   const collapsed = completedTurnSegment(items, completed, user?.id ?? stats?.id ?? "turn");
-  if (collapsed) {
+  if (collapsed && !hasBoundary) {
     out.push(collapsed);
     return out;
   }
   if (stats) out.push({ kind: "stats", item: stats });
 
+  // One pass preserves boundary order and one full-turn statistics row. Only
+  // verified successful turns fold their scoped process groups by default.
   items.forEach((item) => {
     if (item.kind === "user" || item.kind === "turn_stats") return;
+    if (item.kind === "steer" || item.kind === "compaction") {
+      out.push(item.kind === "steer" ? { kind: "steer", item } : { kind: "compaction", item });
+      return;
+    }
     if (item.kind === "assistant") {
+      if (collapsed) {
+        if (item.id === collapsed.final.id) {
+          if (item.reasoning.trim()) pushProcess(out, { ...item, text: "" }, true, true);
+          out.push({ kind: "assistant", item: collapsed.final });
+        } else if (item.text.trim() || item.reasoning.trim() || item.streaming) {
+          pushProcess(out, item, true, true);
+        }
+        return;
+      }
       // Live text lives outside items until Message arrives. Mount its consumer
       // even when this placeholder has no committed text or reasoning yet.
       if (item.streaming || item.text.trim()) {
@@ -115,7 +121,7 @@ function buildTurn(items: readonly Item[], completed: boolean): TimelineSegment[
       return;
     }
     if (item.kind === "mode_switch") out.push({ kind: "mode_switch", item });
-    else if (visibleProcessItem(item)) pushProcess(out, item, completed);
+    else if (visibleProcessItem(item)) pushProcess(out, item, completed, Boolean(collapsed));
   });
   return out;
 }
@@ -163,6 +169,7 @@ export function buildTimelineSegments(items: readonly Item[], running: boolean):
     for (const item of group) {
       if (item.kind === "mode_switch") out.push({ kind: "mode_switch", item });
       else if (item.kind === "steer") out.push({ kind: "steer", item });
+      else if (item.kind === "compaction") out.push({ kind: "compaction", item });
       else if (item.kind === "assistant") {
         if (item.streaming || item.text.trim()) out.push({ kind: "assistant", item });
         else if (item.reasoning) pushProcess(out, item, true);

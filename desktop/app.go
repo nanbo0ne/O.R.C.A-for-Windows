@@ -66,7 +66,8 @@ const singleInstanceID = product.SingleInstanceID
 // flow the other way: each tab's controller emits to a tabEventSink that
 // forwards events tagged with tabId to the webview via runtime.EventsEmit.
 type App struct {
-	ctx context.Context
+	ctx     context.Context
+	monitor workMonitor
 
 	// mu protects the tab map, tabOrder, activeTabID, and per-tab fields that are read
 	// from bound methods. All bound methods that touch a controller use activeCtrl().
@@ -1040,6 +1041,20 @@ func (a *App) SteerForTab(tabID, text string) {
 	}
 }
 
+// SteerDisplayForTab preserves visible attachments and rejects stale guidance.
+func (a *App) SteerDisplayForTab(tabID, display, input, expectedTurn, id string) error {
+	done, err := a.beginAppWork()
+	if err != nil {
+		return err
+	}
+	defer done()
+	ctrl := a.ctrlByTabID(tabID)
+	if ctrl == nil {
+		return fmt.Errorf("conversation is not ready; your draft is preserved")
+	}
+	return ctrl.SteerDisplay(input, display, expectedTurn, id)
+}
+
 // Approve answers a pending approval_request by ID: allow runs the call, session
 // also remembers the grant for the rest of the session.
 func (a *App) Approve(id string, allow, session, persist bool) {
@@ -1574,24 +1589,25 @@ func migrateForkSessionToWorkspace(sessionPath, sourceWorkspaceRoot, workspaceRo
 		return "", err
 	}
 	copied := map[string]string{}
-	for mi := range loaded.Messages {
-		for ii := range loaded.Messages[mi].Images {
-			image := &loaded.Messages[mi].Images[ii]
-			if next, ok := copied[image.Path]; ok {
-				image.Path = next
-				continue
-			}
-			source := image.Path
-			if sourceWorkspaceRoot != "" && !filepath.IsAbs(source) {
-				source = filepath.Join(sourceWorkspaceRoot, filepath.FromSlash(source))
-			}
-			next, err := control.SnapshotImageFile(source, workspaceRoot)
-			if err != nil {
-				continue
-			}
-			copied[image.Path] = next
-			image.Path = next
+	var attachmentErr error
+	loaded.RelocateImages(func(imagePath string) string {
+		if next, ok := copied[imagePath]; ok {
+			return next
 		}
+		source := imagePath
+		if sourceWorkspaceRoot != "" && !filepath.IsAbs(source) {
+			source = filepath.Join(sourceWorkspaceRoot, filepath.FromSlash(source))
+		}
+		next, err := control.SaveAttachmentFileAt(source, workspaceRoot)
+		if err != nil {
+			attachmentErr = fmt.Errorf("copy fork attachment %s: %w", imagePath, err)
+			return imagePath
+		}
+		copied[imagePath] = next
+		return next
+	})
+	if attachmentErr != nil {
+		return "", attachmentErr
 	}
 	targetPath := filepath.Join(targetDir, filepath.Base(sessionPath))
 	if _, err := os.Stat(targetPath); err == nil {
@@ -2148,24 +2164,48 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 				if index > 0 {
 					out = append(out, HistoryMessage{Role: "phase", Content: fmt.Sprintf("Orca 新对话段 · %s", segment.CreatedAt.Local().Format("01-02 15:04"))})
 				}
-				var messages []provider.Message
+				var entries []agent.DisplayEntry
 				if strings.EqualFold(filepath.Clean(segment.Path), currentPath) {
-					messages = ctrl.History()
+					entries = ctrl.DisplayHistory()
 				} else if session, err := agent.LoadSession(segment.Path); err == nil {
-					messages = session.Snapshot()
+					entries = session.DisplaySnapshot()
 				}
-				if len(messages) == 0 {
+				if len(entries) == 0 {
 					continue
 				}
 				telemetry := loadTelemetry(segment.Path + ".telemetry.json")
-				out = append(out, historyMessagesWithTurnsAndSwitches(messages, sessionDisplayResolver(filepath.Dir(segment.Path), segment.Path), telemetry.Turns, telemetry.RuntimeSwitches)...)
+				out = append(out, displayHistoryMessages(entries, sessionDisplayResolver(filepath.Dir(segment.Path), segment.Path), telemetry.Turns, telemetry.RuntimeSwitches)...)
 			}
 			return out
 		}
 	}
-	msgs := ctrl.History()
 	telemetry := loadTelemetry(ctrl.SessionPath() + ".telemetry.json")
-	return historyMessagesWithTurnsAndSwitches(msgs, sessionDisplayResolver(controllerSessionDir(ctrl), ctrl.SessionPath()), telemetry.Turns, telemetry.RuntimeSwitches)
+	return displayHistoryMessages(ctrl.DisplayHistory(), sessionDisplayResolver(controllerSessionDir(ctrl), ctrl.SessionPath()), telemetry.Turns, telemetry.RuntimeSwitches)
+}
+
+func displayHistoryMessages(entries []agent.DisplayEntry, resolve func(string) string, turns []turnTelemetryRecord, switches []RuntimeSwitchRecord) []HistoryMessage {
+	msgs := make([]provider.Message, len(entries))
+	positions := make(map[string]int, len(entries))
+	for i, e := range entries {
+		positions[e.ID] = i + 1
+		msgs[i] = e.Message
+		if e.Kind == "compaction" {
+			msgs[i] = provider.Message{Role: provider.Role("compaction"), Content: e.Summary}
+		}
+	}
+	anchored := append([]RuntimeSwitchRecord(nil), switches...)
+	for i := range anchored {
+		if id := anchored[i].DisplayAfterID; id != "" {
+			position, exists := positions[id]
+			if !exists {
+				// A removed branch anchor must not point at unrelated history.
+				anchored[i].MessageIndex = len(entries) + 1
+				continue
+			}
+			anchored[i].MessageIndex = position
+		}
+	}
+	return historyMessagesWithTurnsAndSwitches(msgs, resolve, turns, anchored, entries)
 }
 
 func historyMessages(msgs []provider.Message, resolveUserContent func(string) string) []HistoryMessage {
@@ -2176,7 +2216,7 @@ func historyMessagesWithTurns(msgs []provider.Message, resolveUserContent func(s
 	return historyMessagesWithTurnsAndSwitches(msgs, resolveUserContent, turns, nil)
 }
 
-func historyMessagesWithTurnsAndSwitches(msgs []provider.Message, resolveUserContent func(string) string, turns []turnTelemetryRecord, runtimeSwitches []RuntimeSwitchRecord) []HistoryMessage {
+func historyMessagesWithTurnsAndSwitches(msgs []provider.Message, resolveUserContent func(string) string, turns []turnTelemetryRecord, runtimeSwitches []RuntimeSwitchRecord, display ...[]agent.DisplayEntry) []HistoryMessage {
 	out := make([]HistoryMessage, 0, len(msgs))
 	switches := append([]RuntimeSwitchRecord(nil), runtimeSwitches...)
 	sort.SliceStable(switches, func(i, j int) bool {
@@ -2213,7 +2253,8 @@ func historyMessagesWithTurnsAndSwitches(msgs []provider.Message, resolveUserCon
 	}
 	for messageIndex, m := range msgs {
 		content := m.Content
-		if m.Role == provider.RoleUser {
+		steerText, steer := agent.SteerDisplayText(content)
+		if m.Role == provider.RoleUser && !steer {
 			content = resolveUserContent(m.Content)
 			if control.IsSyntheticUserMessage(content) {
 				continue
@@ -2230,6 +2271,22 @@ func historyMessagesWithTurnsAndSwitches(msgs []provider.Message, resolveUserCon
 			reasoning = m.ReasoningContent
 		}
 		hm := HistoryMessage{Role: string(m.Role), Content: content, Reasoning: reasoning}
+		if steer && m.Role == provider.RoleUser {
+			hm.Role, hm.Content = "steer", steerText
+		}
+		if len(display) > 0 && messageIndex < len(display[0]) {
+			e := display[0][messageIndex]
+			hm.MessageID = e.ID
+			if e.DisplayText != "" {
+				hm.Content = e.DisplayText
+			}
+			if e.Kind == "compaction" {
+				hm.Trigger, hm.Messages, hm.Summary, hm.Archive = e.Trigger, e.Messages, e.Summary, e.Archive
+				if e.Legacy {
+					hm.Level = "legacy"
+				}
+			}
+		}
 		if turnIndex >= 0 && turnIndex < len(turns) {
 			turn := turns[turnIndex]
 			hm.TurnID = turn.TurnID
@@ -2274,7 +2331,7 @@ func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return historyMessages(loaded.Snapshot(), sessionDisplayResolver(sessionDir, sessionPath)), nil
+	return displayHistoryMessages(loaded.DisplaySnapshot(), sessionDisplayResolver(sessionDir, sessionPath), nil, nil), nil
 }
 
 type previewEventRecord struct {
@@ -2423,24 +2480,27 @@ type ContextInfo struct {
 	SessionTokens   int     `json:"sessionTokens"`
 	CompactRatio    float64 `json:"compactRatio,omitempty"`
 
-	PromptTokens     int `json:"promptTokens,omitempty"`
-	CompletionTokens int `json:"completionTokens,omitempty"`
-	TotalTokens      int `json:"totalTokens,omitempty"`
-	ReasoningTokens  int `json:"reasoningTokens,omitempty"`
-	CacheHitTokens   int `json:"cacheHitTokens,omitempty"`
-	CacheMissTokens  int `json:"cacheMissTokens,omitempty"`
+	PromptTokens             int  `json:"promptTokens,omitempty"`
+	CompletionTokens         int  `json:"completionTokens,omitempty"`
+	TotalTokens              int  `json:"totalTokens,omitempty"`
+	ReasoningTokens          int  `json:"reasoningTokens,omitempty"`
+	ReasoningTokensAvailable bool `json:"reasoningTokensAvailable,omitempty"`
+	CacheHitTokens           int  `json:"cacheHitTokens,omitempty"`
+	CacheMissTokens          int  `json:"cacheMissTokens,omitempty"`
 
-	SessionPromptTokens     int     `json:"sessionPromptTokens,omitempty"`
-	SessionCompletionTokens int     `json:"sessionCompletionTokens,omitempty"`
-	SessionReasoningTokens  int     `json:"sessionReasoningTokens,omitempty"`
-	SessionCacheHitTokens   int     `json:"sessionCacheHitTokens,omitempty"`
-	SessionCacheMissTokens  int     `json:"sessionCacheMissTokens,omitempty"`
-	RequestCount            int     `json:"requestCount,omitempty"`
-	ElapsedMs               int64   `json:"elapsedMs,omitempty"`
-	SessionCost             float64 `json:"sessionCost,omitempty"`
-	CostAvailable           bool    `json:"costAvailable"`
-	SessionCurrency         string  `json:"sessionCurrency,omitempty"`
-	SessionCostUsd          float64 `json:"sessionCostUsd,omitempty"`
+	SessionPromptTokens             int     `json:"sessionPromptTokens,omitempty"`
+	SessionCompletionTokens         int     `json:"sessionCompletionTokens,omitempty"`
+	SessionReasoningTokens          int     `json:"sessionReasoningTokens,omitempty"`
+	SessionReasoningTokensAvailable bool    `json:"sessionReasoningTokensAvailable,omitempty"`
+	SessionReasoningTokensPartial   bool    `json:"sessionReasoningTokensPartial,omitempty"`
+	SessionCacheHitTokens           int     `json:"sessionCacheHitTokens,omitempty"`
+	SessionCacheMissTokens          int     `json:"sessionCacheMissTokens,omitempty"`
+	RequestCount                    int     `json:"requestCount,omitempty"`
+	ElapsedMs                       int64   `json:"elapsedMs,omitempty"`
+	SessionCost                     float64 `json:"sessionCost,omitempty"`
+	CostAvailable                   bool    `json:"costAvailable"`
+	SessionCurrency                 string  `json:"sessionCurrency,omitempty"`
+	SessionCostUsd                  float64 `json:"sessionCostUsd,omitempty"`
 }
 
 // ContextUsage returns the latest context-window gauge numbers.
@@ -2465,6 +2525,8 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 		info.SessionPromptTokens = usage.PromptTokens
 		info.SessionCompletionTokens = usage.CompletionTokens
 		info.SessionReasoningTokens = usage.ReasoningTokens
+		info.SessionReasoningTokensAvailable = usage.ReasoningTokensAvailable
+		info.SessionReasoningTokensPartial = usage.ReasoningTokensPartial
 		info.SessionCacheHitTokens = usage.CacheHitTokens
 		info.SessionCacheMissTokens = usage.CacheMissTokens
 		info.RequestCount = usage.RequestCount
@@ -2506,6 +2568,7 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 		info.CompletionTokens = u.CompletionTokens
 		info.TotalTokens = u.TotalTokens
 		info.ReasoningTokens = u.ReasoningTokens
+		info.ReasoningTokensAvailable = u.ReasoningTokensAvailable || u.ReasoningTokens > 0
 		info.CacheHitTokens = u.CacheHitTokens
 		info.CacheMissTokens = u.CacheMissTokens
 	}
@@ -3033,8 +3096,12 @@ func (a *App) SetConversationModeForTab(tabID string, mode string) (retErr error
 	startedAt := time.Now().UnixMilli()
 	switchID := fmt.Sprintf("mode-switch-%s-%d-%d", tab.ID, generation, startedAt)
 	history := []provider.Message(nil)
+	displayAfterID := ""
 	if oldCtrl != nil {
 		history = oldCtrl.History()
+		if entries := oldCtrl.DisplayHistory(); len(entries) > 0 {
+			displayAfterID = entries[len(entries)-1].ID
+		}
 	}
 	recorded := messagesHaveVisibleConversationContent(history)
 	tab.telemMu.Lock()
@@ -3044,7 +3111,7 @@ func (a *App) SetConversationModeForTab(tabID string, mode string) (retErr error
 		tab.startRuntimeSwitch(RuntimeSwitchRecord{
 			ID: switchID, Generation: generation, FromMode: fromMode, ToMode: mode,
 			AppliedMode: fromMode, Phase: RuntimeSwitchPreparing, Progress: 10,
-			MessageIndex: len(history), CheckpointTurn: checkpointTurn, StartedAt: startedAt,
+			MessageIndex: len(history), DisplayAfterID: displayAfterID, CheckpointTurn: checkpointTurn, StartedAt: startedAt,
 		})
 		a.persistRuntimeSwitches(tab)
 	}
@@ -3119,7 +3186,7 @@ func (a *App) SetConversationModeForTab(tabID string, mode string) (retErr error
 		carried = oldCtrl.History()
 	}
 	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
-	resumeWithControllerSystem(newCtrl, carried, path)
+	resumeWithControllerSystem(newCtrl, carried, path, oldCtrl)
 	emitPhase(RuntimeSwitchSwapping, 90, fromMode, "")
 
 	a.mu.Lock()
@@ -3172,7 +3239,7 @@ func assistantStoreDirForMode(mode string) string {
 	return store.Dir
 }
 
-func resumeWithControllerSystem(ctrl *control.Controller, carried []provider.Message, path string) {
+func resumeWithControllerSystem(ctrl *control.Controller, carried []provider.Message, path string, previous ...*control.Controller) {
 	if ctrl == nil {
 		return
 	}
@@ -3188,7 +3255,11 @@ func resumeWithControllerSystem(ctrl *control.Controller, carried []provider.Mes
 			messages = append(messages, message)
 		}
 	}
-	ctrl.Resume(&agent.Session{Messages: messages}, path)
+	session := &agent.Session{Messages: messages}
+	if len(previous) > 0 && previous[0] != nil {
+		session = previous[0].SessionWithContext(messages)
+	}
+	ctrl.Resume(session, path)
 }
 
 // CommandInfo describes one available slash command for the composer's "/" menu.
@@ -4540,7 +4611,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	newCtrl.SetGoal(tab.goal)
 
 	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
-	resumeWithControllerSystem(newCtrl, carried, path)
+	resumeWithControllerSystem(newCtrl, carried, path, oldCtrl)
 	a.mu.Lock()
 	if current := a.tabs[tab.ID]; current != tab || tab.runtimeGeneration != generation {
 		closed := current != tab
@@ -4664,7 +4735,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	newCtrl.SetStepThinking(tab.stepThinking)
 	newCtrl.SetGoal(tab.goal)
 	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
-	resumeWithControllerSystem(newCtrl, carried, path)
+	resumeWithControllerSystem(newCtrl, carried, path, oldCtrl)
 	a.mu.Lock()
 	if current := a.tabs[tab.ID]; current != tab || tab.runtimeGeneration != generation {
 		closed := current != tab

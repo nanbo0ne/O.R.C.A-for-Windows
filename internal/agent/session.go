@@ -15,8 +15,10 @@ import (
 // goroutine access goes through Snapshot.
 type Session struct {
 	mu             sync.RWMutex
+	saveMu         sync.Mutex
 	Messages       []provider.Message
 	rewriteVersion int // bumped each time the log is rewritten (compact/fold)
+	display        *displayState
 }
 
 // NewSession initializes a session with an optional system prompt.
@@ -29,10 +31,19 @@ func NewSession(system string) *Session {
 }
 
 // Add appends a message.
-func (s *Session) Add(m provider.Message) {
+func (s *Session) Add(m provider.Message) string {
+	return s.AddWithDisplay(m, "")
+}
+
+// AddWithDisplay keeps attachment display references out of the model input.
+func (s *Session) AddWithDisplay(m provider.Message, display string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ensureDisplayLocked()
 	s.Messages = append(s.Messages, m)
+	s.appendDisplayLocked(m)
+	s.display.Entries[len(s.display.Entries)-1].DisplayText = display
+	return s.display.ContextIDs[len(s.display.ContextIDs)-1]
 }
 
 // Replace swaps the whole message log — used by compaction, which rewrites the
@@ -40,6 +51,22 @@ func (s *Session) Add(m provider.Message) {
 func (s *Session) Replace(msgs []provider.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ensureDisplayLocked()
+	// Same-size edits (for example removing an internal goal marker) update
+	// their original display entries without discarding archived conversation.
+	if len(msgs) == len(s.Messages) {
+		byID := make(map[string]int, len(s.display.Entries))
+		for i, e := range s.display.Entries {
+			byID[e.ID] = i
+		}
+		for i, m := range msgs {
+			if j, ok := byID[s.display.ContextIDs[i]]; ok && s.display.Entries[j].Kind == "message" {
+				s.display.Entries[j].Message = m
+			}
+		}
+	} else {
+		s.display = nil
+	}
 	s.Messages = msgs
 }
 
@@ -53,10 +80,10 @@ func (s *Session) Snapshot() []provider.Message {
 }
 
 // RewriteVersion returns the current rewrite version.
-func (s *Session) RewriteVersion() int { return s.rewriteVersion }
+func (s *Session) RewriteVersion() int { s.mu.RLock(); defer s.mu.RUnlock(); return s.rewriteVersion }
 
 // IncrementRewrite bumps the rewrite version by 1.
-func (s *Session) IncrementRewrite() { s.rewriteVersion++ }
+func (s *Session) IncrementRewrite() { s.mu.Lock(); defer s.mu.Unlock(); s.rewriteVersion++ }
 
 // HasContent returns true when the session carries at least one user,
 // assistant, or tool message — i.e. more than just a system prompt. An

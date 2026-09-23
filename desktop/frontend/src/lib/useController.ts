@@ -54,7 +54,7 @@ type ItemLifecycle = {
 export type Item = ItemLifecycle & (
   | { kind: "user"; id: string; text: string; failed?: boolean }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean }
-  | { kind: "steer"; id: string; text: string }
+  | { kind: "steer"; id: string; text: string; optimistic?: boolean }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string }
   | {
@@ -89,6 +89,7 @@ export type Item = ItemLifecycle & (
       messages: number;
       summary: string;
       archive: string;
+      legacy?: boolean;
     }
   | {
       kind: "tool";
@@ -260,7 +261,8 @@ type Action =
   | { type: "session_hydrated" }
   | { type: "local_notice"; level: "info" | "warn"; text: string }
   | { type: "runtime_switch"; progress: RuntimeSwitchProgress }
-  | { type: "steer_sent"; text: string }
+  | { type: "steer_sent"; text: string; id?: string; turnId?: string }
+  | { type: "steer_failed"; id: string }
   | { type: "clearApproval" }
   | { type: "clearAsk" }
   | { type: "reset" };
@@ -313,13 +315,24 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     if (m.role === "compaction") {
       items.push({
         kind: "compaction",
-        id: `${idPrefix}${seq}`,
+        id: m.messageId || m.itemId || `${idPrefix}${seq}`,
+        messageId: m.messageId,
+        itemId: m.itemId,
+        turnId: m.turnId,
+        legacy: m.level === "legacy",
         pending: Boolean(m.pending),
         trigger: m.trigger ?? "",
         messages: m.messages ?? 0,
         summary: m.summary ?? "",
         archive: m.archive ?? "",
       });
+      seq++;
+      continue;
+    }
+    if (m.role === "steer") {
+      if (!m.content.trim()) continue;
+      items.push({ kind: "steer", id: m.messageId || m.itemId || `${idPrefix}${seq}`, text: m.content,
+        turnId: m.turnId, messageId: m.messageId, itemId: m.itemId });
       seq++;
       continue;
     }
@@ -342,7 +355,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     }
     if (m.role === "user") {
       if (m.content.trim() === "") continue;
-      items.push({ kind: "user", id: `${idPrefix}${seq}`, text: m.content, turnId: m.turnId });
+      items.push({ kind: "user", id: m.messageId || `${idPrefix}${seq}`, messageId: m.messageId, text: m.content, turnId: m.turnId });
       seq++;
       continue;
     }
@@ -694,9 +707,20 @@ function applyEvent(s: State, e: WireEvent): State {
     case "steer": {
       const text = (e.text ?? "").trim();
       if (!text) return s;
-      const existing = [...s.items].reverse().find((it) => it.kind === "steer" && it.text.trim() === text);
-      if (existing) return s;
-      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "steer", id: `s${s.seq}`, text }] };
+      const stableID = e.messageId || e.itemId;
+      const turnId = e.turnId || s.currentTurnId;
+      if (stableID && s.items.some((it) => it.kind === "steer" && !it.optimistic &&
+        (it.messageId === stableID || it.itemId === stableID || it.id === stableID))) return s;
+      // Consume one optimistic send, not every identical instruction in history.
+      const optimistic = s.items.findIndex((it) => it.kind === "steer" && it.optimistic && (e.itemId ? it.id === e.itemId : it.text === text && it.turnId === turnId));
+      if (optimistic >= 0) {
+        const items = s.items.map((it, index): Item => index === optimistic
+          ? { ...it as Extract<Item, { kind: "steer" }>, text, optimistic: false, messageId: e.messageId, itemId: e.itemId, turnId }
+          : it);
+        return { ...s, items };
+      }
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "steer", id: stableID || `s${s.seq}`, text,
+        messageId: e.messageId, itemId: e.itemId, turnId }] };
     }
     case "approval_request": return { ...s, approval: e.approval };
     case "ask_request": return { ...s, ask: e.ask };
@@ -850,8 +874,9 @@ export function reducer(s: State, a: Action): State {
     case "steer_sent": {
       const text = a.text.trim();
       if (!text) return s;
-      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "steer", id: `s${s.seq}`, text }] };
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "steer", id: a.id || `s${s.seq}`, text, optimistic: true, turnId: a.turnId || s.currentTurnId }] };
     }
+    case "steer_failed": return { ...s, items: s.items.filter(item => !(item.kind === "steer" && item.optimistic && item.id === a.id)) };
     case "clearApproval": return { ...s, approval: undefined };
     case "clearAsk": return { ...s, ask: undefined };
     case "reset": return { ...initialState, turnEpoch: s.turnEpoch + 1, effortPending: s.effortPending, effortRequestId: s.effortRequestId, meta: s.meta, context: { ...s.context, used: 0, sessionTokens: 0 }, balance: s.balance, effort: s.effort, jobs: s.jobs };
@@ -1281,14 +1306,14 @@ export function useController() {
     app.RunShellForTab(activeTabId, command).catch(() => {});
   }, [activeTabId, dispatchTo]);
 
-  const steer = useCallback((text: string) => {
-    if (!activeTabId) return;
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    // A steer is not a backend turn, so keep it out of user bubbles/turn
-    // counting. Still render it immediately so mid-turn guidance never feels lost.
-    dispatchTo(activeTabId, { type: "steer_sent", text: trimmed });
-    app.SteerForTab(activeTabId, trimmed).catch(() => {});
+  const steer = useCallback(async (display: string, input = display) => {
+    if (!activeTabId) throw new Error("Conversation is not ready");
+    if (!input.trim()) return;
+    const turnId = getOrCreateState(statesRef.current, activeTabId).currentTurnId || "";
+    const id = crypto.randomUUID();
+    dispatchTo(activeTabId, { type: "steer_sent", text: display.trim(), id, turnId });
+    try { await app.SteerDisplayForTab(activeTabId, display.trim(), input.trim(), turnId, id); }
+    catch (error) { dispatchTo(activeTabId, { type: "steer_failed", id }); throw error; }
   }, [activeTabId, dispatchTo]);
 
   const notice = useCallback((text: string, level: "info" | "warn" = "info") => {

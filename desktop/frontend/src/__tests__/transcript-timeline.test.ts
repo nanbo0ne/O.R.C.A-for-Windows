@@ -1,5 +1,5 @@
 import { historyMessagesToItems, initialState, reducer, type Item } from "../lib/useController";
-import { activityIndicatorPhase, buildTimelineSegments, requiredWarmPage, timelineKinds, visibleWarmStart } from "../lib/transcriptTimeline";
+import { activityIndicatorPhase, buildTimelineSegments, timelineKinds } from "../lib/transcriptTimeline";
 import { readFileSync } from "node:fs";
 import { readinessNoticeText } from "../lib/readinessNotice";
 import { en } from "../locales/en";
@@ -62,19 +62,19 @@ const consecutive: Item[] = [
   { kind: "compaction", id: "cc", pending: false, trigger: "auto", messages: 10, summary: "context summary", archive: "" },
   { kind: "tool", id: "ct3", name: "bash", args: "{}", readOnly: false, status: "running" },
 ];
-const consecutiveKinds = ["user", "process:tool:read,assistant,phase,tool:task,notice,assistant,phase,compaction,tool:bash"];
+const consecutiveKinds = ["user", "process:tool:read,assistant,phase,tool:task,notice,assistant,phase", "compaction", "process:tool:bash"];
 const consecutiveSegments = buildTimelineSegments(consecutive, true);
 equal("hidden reasoning and repeated phases do not fragment consecutive tool activity", timelineKinds(consecutiveSegments), consecutiveKinds);
 const consecutiveProcess = consecutiveSegments.find((segment) => segment.kind === "process");
 equal(
   "process details retain chronological IDs including repeated phases",
   consecutiveProcess?.kind === "process" ? consecutiveProcess.items.map((item) => item.id) : [],
-  ["ct1", "cr1", "cp1", "ct2", "cn", "cr2", "cp2", "cc", "ct3"],
+  ["ct1", "cr1", "cp1", "ct2", "cn", "cr2", "cp2"],
 );
 equal(
   "tool totals exclude nested subcalls and hidden workflow tools",
   consecutiveProcess?.kind === "process" ? consecutiveProcess.items.filter((item) => item.kind === "tool").length : 0,
-  3,
+  2,
 );
 const firstActivity = buildTimelineSegments(consecutive.slice(0, 3), true).find((segment) => segment.kind === "process");
 equal("appending reasoning, phases, and tools preserves the process expand-state key", consecutiveProcess?.id, firstActivity?.id);
@@ -118,7 +118,7 @@ for (const outcome of ["failed", "cancelled", "interrupted"] as const) {
   equal(`${outcome} preserves the running group's expand-state key`, terminalProcess?.id, consecutiveProcess?.id);
   equal(
     `${outcome} retains the terminal tool status`,
-    terminalProcess?.items.filter((item) => item.kind === "tool").map((item) => item.status),
+    terminalSegments.flatMap((segment) => segment.kind === "process" ? segment.items.filter((item) => item.kind === "tool").map((item) => item.status) : []),
     ["done", "done", outcome === "failed" ? "error" : "stopped"],
   );
 }
@@ -146,7 +146,7 @@ const settledReasoning = [...consecutive, { ...placeholder, streaming: false, re
 equal(
   "a reasoning-only placeholder joins activity when it settles",
   timelineKinds(buildTimelineSegments(settledReasoning, true)),
-  ["user", `${consecutiveKinds[1]},assistant`],
+  [...consecutiveKinds.slice(0, -1), `${consecutiveKinds[consecutiveKinds.length - 1]},assistant`],
 );
 
 const withStats: Item[] = [
@@ -165,10 +165,13 @@ const foldedActivity = buildTimelineSegments([
   { kind: "assistant", id: "cf", turnId: "ct", text: "All done.", reasoning: "final check", streaming: false, final: true },
   { kind: "turn_stats", id: "cs", turnId: "ct", success: true, outcome: "success" },
 ], false);
-const folded = foldedActivity.find((segment) => segment.kind === "completed");
-equal("successful completion still folds grouped activity into one completed turn", foldedActivity.map((segment) => segment.kind), ["user", "completed"]);
-equal("completed details retain all intermediate items in order", folded?.hidden.map((item) => item.id), [...repeatedStages.slice(1).map((item) => item.id), "cf"]);
-equal("the completed final answer is separate from its reasoning", folded?.final, { kind: "assistant", id: "cf", turnId: "ct", text: "All done.", reasoning: "", streaming: false, final: true });
+const folded = foldedActivity.filter((segment) => segment.kind === "process");
+equal("successful completion folds both sides of the standalone compaction boundary", foldedActivity.map((segment) => segment.kind), ["user", "stats", "process", "compaction", "process", "assistant"]);
+equal("scoped completed groups default to collapsed", folded.map((segment) => segment.defaultCollapsed), [true, true]);
+equal("completed details retain ordered tools and progress without hidden workflow calls", folded.flatMap((segment) => segment.items.map((item) => item.id)),
+  ["ct1", "cr1", "cp1", "ct2", "cn", "cr2", "cp2", "ct3", "stage1", "ct4", "stage2", "ct5", "cf"]);
+equal("the completed final answer is separate from its reasoning", foldedActivity.find((segment) => segment.kind === "assistant")?.item,
+  { kind: "assistant", id: "cf", turnId: "ct", text: "All done.", reasoning: "", streaming: false, final: true });
 
 const recoveredStats: Item[] = [
   { kind: "user", id: "ru1", text: "fix it" },
@@ -378,12 +381,6 @@ equal("running tool activity rotates counterclockwise", activityIndicatorPhase(a
 equal("disabled activity mark stays hidden", activityIndicatorPhase(chronology, false, true, false), undefined);
 equal("paused activity mark stays hidden", activityIndicatorPhase(chronology, true, true, true), undefined);
 equal("completed activity mark stays hidden", activityIndicatorPhase(failedStats, true, false, false), undefined);
-equal("latest hidden warm turn needs one page", requiredWarmPage(12, 11, 5), 1);
-equal("older warm turn requests enough pages before jumping", requiredWarmPage(12, 2, 5), 2);
-equal("cold history starts fully hidden", visibleWarmStart(70, 0, 20), 70);
-equal("one page reveals the newest warm turns", visibleWarmStart(70, 1, 20), 50);
-equal("enough pages reveal the oldest warm turn", visibleWarmStart(70, 4, 20), 0);
-
 const active = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
 const done = reducer(active, { type: "event", e: { kind: "turn_done" } });
 const backgroundNotice = reducer(done, {
@@ -400,7 +397,7 @@ equal("completed timeline has a flat activity rail", transcriptSource.includes('
 equal("completed process details do not create a nested process panel", transcriptSource.includes("<TimelineProcessGroup\n                      key={segment.id}"), false);
 equal("successful completed turns start collapsed", transcriptSource.includes("const [open, setOpen] = useState(false)"), true);
 equal("question rail does not scroll the transcript via scrollIntoView", transcriptSource.includes('el?.scrollIntoView({ block: "nearest" })'), false);
-equal("warm pagination renders from the hidden-turn boundary", transcriptSource.includes("warmStartTurn = shownWarmStart"), true);
+equal("older history auto-pages without forced collapsed cards", transcriptSource.includes("el.scrollTop < 320) loadEarlier()") && !transcriptSource.includes("<WarmTurnCard"), true);
 equal("question marker mouse events do not bubble into the rail", transcriptSource.includes("e.stopPropagation();"), true);
 equal("activity phase changes wait for the old single ring to fade out", transcriptSource.includes("}, 140);") && transcriptSource.includes("}, 160);"), true);
 equal("activity mark renders exactly one phase-keyed spinner element", transcriptSource.includes('<span key={visual.phase} className={`process-activity-spinner process-activity-spinner--${visual.phase}`} />'), true);

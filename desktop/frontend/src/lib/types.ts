@@ -63,6 +63,7 @@ export interface WireUsage {
   cacheHitTokens: number;
   cacheMissTokens: number;
   reasoningTokens?: number;
+  reasoningTokensAvailable?: boolean;
   // Session-cumulative cache tokens - the status bar shows the aggregate
   // hit-rate (hit/(hit+miss)), steadier than the single-turn cacheHitTokens.
   sessionCacheHitTokens: number;
@@ -221,11 +222,16 @@ export interface ContextPanelInfo {
   completionTokens: number;
   totalTokens: number;
   reasoningTokens: number;
+  reasoningTokensAvailable?: boolean;
+  lastRequestAvailable?: boolean;
+  lastRequestTotalTokens?: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
   sessionPromptTokens?: number;
   sessionCompletionTokens?: number;
   sessionReasoningTokens?: number;
+  sessionReasoningTokensAvailable?: boolean;
+  sessionReasoningTokensPartial?: boolean;
   sessionCacheHitTokens?: number;
   sessionCacheMissTokens?: number;
   requestCount?: number;
@@ -264,7 +270,7 @@ export interface HistoryMessage {
   role: string;
   content: string;
   reasoning?: string;
-  level?: "info" | "warn";
+  level?: "info" | "warn" | "legacy";
   toolCalls?: HistoryToolCall[];
   toolCallId?: string;
   toolName?: string;
@@ -357,11 +363,14 @@ export interface ContextInfo {
   completionTokens?: number;
   totalTokens?: number;
   reasoningTokens?: number;
+  reasoningTokensAvailable?: boolean;
   cacheHitTokens?: number;
   cacheMissTokens?: number;
   sessionPromptTokens?: number;
   sessionCompletionTokens?: number;
   sessionReasoningTokens?: number;
+  sessionReasoningTokensAvailable?: boolean;
+  sessionReasoningTokensPartial?: boolean;
   sessionCacheHitTokens?: number;
   sessionCacheMissTokens?: number;
   requestCount?: number;

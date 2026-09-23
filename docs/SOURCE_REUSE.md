@@ -1,17 +1,17 @@
 # 从此源码创建新项目 / Reusing this source
 
-此包是 O.R.C.A. Desktop 3.0.12 发布提交的源码，不是安装器或用户数据备份。归档只含已提交文件，不包含 `.git`、用户对话、本机配置、密钥、模型权重、依赖安装目录或编译缓存。提交编号与 ZIP 的 SHA-256 见包外同名交付记录；依赖需要联网安装。
+此包应由 O.R.C.A. Desktop 3.0.13 最终发布提交生成；当前源码归档尚未生成或验收。它不是安装器或用户数据备份。归档只含已提交文件，不包含 `.git`、用户对话、本机配置、密钥、模型权重、依赖安装目录、编译缓存或顶层历史 `release/` 目录。完成后，提交编号与 ZIP 的 SHA-256 应记录在包外同名交付记录；依赖需要联网安装。
 
-This is the source at the Desktop 3.0.12 release commit, not an installer or user-data backup. The accompanying delivery record identifies the commit and ZIP digest. Dependencies must be installed separately.
+Build the source archive from the final O.R.C.A. Desktop 3.0.13 release commit; the archive has not yet been created or verified. It is not an installer or user-data backup. Include committed source only, excluding `.git`, user conversations, local configuration, keys, model weights, dependency/build caches, and the top-level historical `release/` directory. Record the commit and ZIP SHA-256 in the accompanying delivery record. Dependencies must be installed separately.
 
 ## 本地构建 / Build
 
 1. 安装 `go.mod` 指定的 Go、Node.js 22、npm 和 Wails v2.12.0。按 `desktop/README.md` 安装目标系统依赖。
 2. 在 `desktop/frontend` 执行 `npm ci`、`npm run test:all`、`npm run build`。
 3. 根目录执行 `go test ./... -p=1`；`desktop` 中执行 `go test .`、`wails build`。Windows 安装器另需 NSIS。
-4. 正式打包流程见 `docs/build/desktop-v3.0.12.md` 与 `.github/workflows/release-desktop.yml`。发布工作流依赖你自己的仓库权限及签名 secrets，源码包不含这些凭据。
+4. 正式打包流程见 `docs/build/desktop-v3.0.13.md` 与 `.github/workflows/release-desktop.yml`。发布工作流依赖仓库权限及签名 secrets，源码包不含这些凭据。源码 ZIP 必须在最终提交确定后由 `git archive` 生成，不得从带有未提交或未跟踪文件的工作目录压缩。
 
-Install the declared Go version, Node.js 22 and Wails v2.12.0. Run frontend installation/tests/build, root and desktop Go tests, then `wails build` in `desktop`. Native packaging dependencies and release secrets are separate.
+Install the declared Go version, Node.js 22 and Wails v2.12.0. Run frontend installation/tests/build, root and desktop Go tests, then `wails build` in `desktop`. Native packaging dependencies and release secrets are separate. Create the source ZIP with `git archive` from the final release commit, excluding the top-level historical `release/` directory; verify archive contents, ZIP integrity and SHA-256 before replacing any prior delivered archive.
 
 ## 新项目必须单独设置 / New-project configuration
 

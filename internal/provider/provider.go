@@ -297,13 +297,14 @@ const (
 // the model's last reported choices[0].finish_reason so the agent can surface
 // abnormal terminations ("length", "content_filter", "repetition_truncation").
 type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	CacheHitTokens   int    // prompt tokens served from cache
-	CacheMissTokens  int    // prompt tokens not cached
-	ReasoningTokens  int    // subset of CompletionTokens spent on chain-of-thought
-	FinishReason     string // "stop", "tool_calls", "length", "content_filter", "repetition_truncation", …
+	PromptTokens             int
+	CompletionTokens         int
+	TotalTokens              int
+	CacheHitTokens           int    // prompt tokens served from cache
+	CacheMissTokens          int    // prompt tokens not cached
+	ReasoningTokens          int    // subset of CompletionTokens spent on chain-of-thought
+	ReasoningTokensAvailable bool   // distinguishes an upstream-reported zero from omitted usage details
+	FinishReason             string // "stop", "tool_calls", "length", "content_filter", "repetition_truncation", …
 }
 
 // Pricing is a provider's per-1M-token rates, used to estimate spend. Currency

@@ -67,7 +67,7 @@ func (a *Agent) PruneStaleToolResults() (PruneStats, error) {
 		next[i] = m
 		st.Results++
 	}
-	a.session.Replace(next)
+	a.session.RewriteContext(next, nil)
 	a.session.IncrementRewrite()
 	return st, nil
 }

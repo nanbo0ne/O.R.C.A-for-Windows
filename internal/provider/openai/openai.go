@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/monitor"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/netclient"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
 )
@@ -173,6 +174,7 @@ var bufPool = sync.Pool{
 }
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	ctx = monitor.WithRequest(ctx, req.RequestID, string(req.Purpose))
 	// A missing reasoning field does not establish that reasoning was lost:
 	// imported, non-thinking, and synthetic messages can legitimately omit it.
 	// Replay captured reasoning and let the provider validate unknown history.
@@ -632,16 +634,23 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 		miss = u.PromptTokens - hit
 	}
 	reasoning := 0
-	if u.CompletionTokensDetails != nil {
-		reasoning = u.CompletionTokensDetails.ReasoningTokens
+	reasoningAvailable := false
+	if u.CompletionTokensDetails != nil && u.CompletionTokensDetails.ReasoningTokens != nil {
+		reported := *u.CompletionTokensDetails.ReasoningTokens
+		// Invalid subset counts are unavailable, not a fabricated clamped receipt.
+		if reported >= 0 && reported <= u.CompletionTokens {
+			reasoning = reported
+			reasoningAvailable = true
+		}
 	}
 	return &provider.Usage{
-		PromptTokens:     u.PromptTokens,
-		CompletionTokens: u.CompletionTokens,
-		TotalTokens:      u.TotalTokens,
-		CacheHitTokens:   hit,
-		CacheMissTokens:  miss,
-		ReasoningTokens:  reasoning,
+		PromptTokens:             u.PromptTokens,
+		CompletionTokens:         u.CompletionTokens,
+		TotalTokens:              u.TotalTokens,
+		CacheHitTokens:           hit,
+		CacheMissTokens:          miss,
+		ReasoningTokens:          reasoning,
+		ReasoningTokensAvailable: reasoningAvailable,
 	}
 }
 
@@ -741,6 +750,6 @@ type wireUsage struct {
 		CachedTokens int `json:"cached_tokens"`
 	} `json:"prompt_tokens_details"`
 	CompletionTokensDetails *struct {
-		ReasoningTokens int `json:"reasoning_tokens"`
+		ReasoningTokens *int `json:"reasoning_tokens"`
 	} `json:"completion_tokens_details"`
 }

@@ -38,11 +38,12 @@ type FileSnap struct {
 // conversation-rewind boundary — persisted so a resumed session can rewind the
 // conversation and fork, not just the code.
 type Checkpoint struct {
-	Turn     int        `json:"turn"`
-	Time     time.Time  `json:"time"`
-	Prompt   string     `json:"prompt"`
-	MsgIndex int        `json:"msgIndex"`
-	Files    []FileSnap `json:"files"`
+	Turn         int        `json:"turn"`
+	Time         time.Time  `json:"time"`
+	Prompt       string     `json:"prompt"`
+	MsgIndex     int        `json:"msgIndex"`
+	ContextEpoch uint64     `json:"contextEpoch,omitempty"`
+	Files        []FileSnap `json:"files"`
 }
 
 // Meta is the picker-facing summary of a checkpoint (no file contents).
@@ -100,13 +101,16 @@ func (s *Store) load() {
 
 // Begin opens a checkpoint for a new user turn, finalizing the previous one. The
 // prompt labels it in the picker; msgIndex is the conversation-rewind boundary.
-func (s *Store) Begin(turn int, prompt string, msgIndex int) {
+func (s *Store) Begin(turn int, prompt string, msgIndex int, epoch ...uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cur != nil {
 		s.done = append(s.done, s.cur)
 	}
 	s.cur = &Checkpoint{Turn: turn, Time: time.Now(), Prompt: prompt, MsgIndex: msgIndex}
+	if len(epoch) > 0 {
+		s.cur.ContextEpoch = epoch[0]
+	}
 	s.seen = map[string]bool{}
 	s.persist(s.cur)
 }
@@ -114,14 +118,17 @@ func (s *Store) Begin(turn int, prompt string, msgIndex int) {
 // Bounds returns turn → MsgIndex over all checkpoints (persisted + current), so
 // the controller can rebuild its conversation-rewind boundaries after loading a
 // resumed session's checkpoints from disk.
-func (s *Store) Bounds() map[int]int {
+func (s *Store) Bounds(epoch ...uint64) map[int]int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m := make(map[int]int, len(s.done)+1)
 	for _, c := range s.done {
+		if len(epoch) > 0 && c.ContextEpoch != epoch[0] {
+			continue
+		}
 		m[c.Turn] = c.MsgIndex
 	}
-	if s.cur != nil {
+	if s.cur != nil && (len(epoch) == 0 || s.cur.ContextEpoch == epoch[0]) {
 		m[s.cur.Turn] = s.cur.MsgIndex
 	}
 	return m

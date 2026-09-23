@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/monitor"
 )
 
 // MaxRetries is the number of times SendWithRetry re-attempts the connection +
@@ -156,7 +158,13 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, provName, keyEn
 		if err != nil {
 			return nil, fmt.Errorf("%s: build request: %w", provName, err)
 		}
+		observed := monitor.ObserveHTTP(ctx, req)
 		resp, err := httpClient.Do(req)
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		observed(status, err)
 		if err != nil {
 			if !transientErr(err) {
 				return nil, fmt.Errorf("%s: request failed: %w", provName, err)

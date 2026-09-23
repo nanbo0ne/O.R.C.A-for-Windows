@@ -1,5 +1,15 @@
 # Changelog
 
+## Desktop 3.0.13 / 桌面版 3.0.13
+
+- 会话整理后仍可查看完整聊天记录，上下文用量显示更准确。
+- Keep the full readable conversation after context is condensed, and improve context-usage reporting.
+- 新增实时工作进度概览；仅显示应用实际观察到的活动。
+- Add a live work overview that shows only activity observed by the app.
+- 改进引导提示、图片和文件处理、粘贴体验，以及小屏权限窗口。
+- Improve guidance, image and file handling, pasting, and permission dialogs on smaller windows.
+- [Release notes / 发布说明](docs/releases/desktop-v3.0.13.md) · [Build / 构建](docs/build/desktop-v3.0.13.md) · [Verification pending / 验收待补](docs/audits/desktop-v3.0.13-verification.md)
+
 ## Desktop 3.0.12 / 桌面版 3.0.12
 
 - 修复结束检查误报：已恢复动作及被拒绝的清单更新不再错误中止回合；未完成待办保持原样，真正失败仍受检查约束。

@@ -6,6 +6,7 @@
 // developed and laid out without rebuilding the Go side.
 
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
+import type { MonitorSnapshot } from "./workMonitor";
 
 import { t } from "./i18n";
 import { DEEPSEEK_DEFAULT_EFFORT, DEEPSEEK_EFFORT_LEVELS, DEEPSEEK_FLASH_REF, isOfficialDeepSeekProvider, modelDisplayLabel, officialModelInfo, OFFICIAL_DEEPSEEK_MODELS, providerModelLabel, providerModelRef } from "./modelCatalog";
@@ -114,6 +115,7 @@ export interface AppBindings {
   RunShellForTab(tabID: string, command: string): Promise<void>;
   Steer(text: string): Promise<void>;
   SteerForTab(tabID: string, text: string): Promise<void>;
+  SteerDisplayForTab(tabID: string, display: string, input: string, expectedTurn: string, id: string): Promise<void>;
   Cancel(): Promise<void>;
   CancelTab(tabID: string): Promise<void>;
   RequestCancelTab(tabID: string): Promise<CancelAck>;
@@ -147,6 +149,9 @@ export interface AppBindings {
   Compact(): Promise<void>;
   NewSession(): Promise<void>;
   ClearSession(): Promise<void>;
+  MonitorSubscribe?(tabID: string): Promise<MonitorSnapshot>;
+  MonitorUnsubscribe?(generation: string): Promise<void>;
+  MonitorSnapshot?(generation: string, after: number): Promise<MonitorSnapshot>;
   History(): Promise<HistoryMessage[]>;
   HistoryForTab(tabID: string): Promise<HistoryMessage[]>;
   Checkpoints(): Promise<CheckpointMeta[]>;
@@ -1408,6 +1413,9 @@ function makeMockApp(): AppBindings {
         },
         async SteerForTab(_tabID, _text) {
           await this.Steer(_text);
+        },
+        async SteerDisplayForTab(_tabID, display, _input, _expectedTurn, id) {
+          await withMockTabScope(_tabID, async () => { emit({kind: "steer", text: display, itemId: id}); });
         },
         async Cancel() {
           cancelled = true;

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -330,9 +329,17 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	// Do not create an archive until the provider has returned a valid summary.
 	// A failed model request must leave both the live session and its on-disk
 	// trace untouched.
+	if err := ctx.Err(); err != nil {
+		a.emitCompactionAborted(trigger)
+		return err
+	}
+	tail := trimTailForCheckpoint(msgs, head, start, checkpoint, a.contextWindow, a.tailFloor())
+	// The token-budget pass can trim more than the summarised region. Preserve
+	// every removed original, including those extra tail messages.
+	removed := msgs[head : len(msgs)-len(tail)]
 	archived := ""
 	if a.archiveDir != "" {
-		path, err := archiveMessages(a.archiveDir, region)
+		path, err := archiveMessages(a.archiveDir, removed)
 		if err != nil {
 			a.emitCompactionAborted(trigger)
 			return fmt.Errorf("archive: %w", err)
@@ -340,7 +347,6 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		archived = path
 	}
 
-	tail := trimTailForCheckpoint(msgs, head, start, checkpoint, a.contextWindow, a.tailFloor())
 	compacted := make([]provider.Message, 0, head+1+len(tail))
 	compacted = append(compacted, msgs[:head]...)
 	compacted = append(compacted, provider.Message{
@@ -351,11 +357,15 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 			checkpointTagClose,
 	})
 	compacted = append(compacted, tail...)
-	a.session.Replace(compacted)
+	if err := ctx.Err(); err != nil {
+		a.emitCompactionAborted(trigger)
+		return err
+	}
+	a.session.RewriteContext(compacted, &DisplayEntry{Trigger: trigger, Messages: len(removed), Summary: checkpoint, Archive: archived})
 	a.session.IncrementRewrite()
 
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
-		Trigger: trigger, Messages: len(region), Summary: checkpoint, Archive: archived,
+		Trigger: trigger, Messages: len(removed), Summary: checkpoint, Archive: archived,
 	}})
 	return nil
 }
@@ -382,8 +392,15 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	archived := ""
 	if a.archiveDir != "" {
-		_, _ = archiveMessages(a.archiveDir, region) // best-effort traceability
+		archived, err = archiveMessages(a.archiveDir, region)
+		if err != nil {
+			return fmt.Errorf("archive: %w", err)
+		}
 	}
 	next := make([]provider.Message, 0, fromIdx+1)
 	next = append(next, msgs[:fromIdx]...)
@@ -391,7 +408,12 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 		Role:    provider.RoleUser,
 		Content: "Summary of the later conversation (compacted from here on):\n" + summary,
 	})
-	a.session.Replace(next)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a.session.RewriteContext(next, &DisplayEntry{Trigger: "from", Messages: len(region), Summary: summary, Archive: archived})
+	a.session.IncrementRewrite()
+	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: "from", Messages: len(region), Summary: summary, Archive: archived}})
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d later messages → summary", len(region))})
 	return nil
@@ -414,8 +436,15 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	archived := ""
 	if a.archiveDir != "" {
-		_, _ = archiveMessages(a.archiveDir, region)
+		archived, err = archiveMessages(a.archiveDir, region)
+		if err != nil {
+			return fmt.Errorf("archive: %w", err)
+		}
 	}
 	next := make([]provider.Message, 0, head+1+len(msgs)-toIdx)
 	next = append(next, msgs[:head]...)
@@ -424,7 +453,12 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 		Content: "Summary of earlier conversation (compacted up to here):\n" + summary,
 	})
 	next = append(next, msgs[toIdx:]...)
-	a.session.Replace(next)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a.session.RewriteContext(next, &DisplayEntry{Trigger: "up-to", Messages: len(region), Summary: summary, Archive: archived})
+	a.session.IncrementRewrite()
+	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: "up-to", Messages: len(region), Summary: summary, Archive: archived}})
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d earlier messages → summary", len(region))})
 	return nil
@@ -760,12 +794,18 @@ func archiveMessages(dir string, msgs []provider.Message) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, time.Now().Format("20060102-150405.000")+".jsonl")
-	f, err := os.Create(path)
+	f, err := os.CreateTemp(dir, time.Now().Format("20060102-150405.000")+"-*.jsonl")
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	path := f.Name()
+	ok := false
+	defer func() {
+		f.Close()
+		if !ok {
+			os.Remove(path)
+		}
+	}()
 
 	enc := json.NewEncoder(f)
 	for _, m := range msgs {
@@ -773,5 +813,12 @@ func archiveMessages(dir string, msgs []provider.Message) (string, error) {
 			return "", err
 		}
 	}
+	if err := f.Sync(); err != nil {
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	ok = true
 	return path, nil
 }

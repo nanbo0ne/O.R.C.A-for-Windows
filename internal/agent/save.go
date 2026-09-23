@@ -11,16 +11,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/fileutil"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
 )
 
-// Save writes the session's messages to path in JSONL — one provider.Message
-// per line — so a user can resume the conversation later. The file is
-// rewritten in full on every save: chat sessions are small (kilobytes), and
-// append-only would have to be reconciled with the compaction pass that
-// mutates the middle of session.Messages.
+// The first message carries optional display metadata. Keeping both histories
+// in the same atomic file prevents a crash from committing only one of them.
+// Legacy JSONL readers still see ordinary provider messages on every line.
+type savedMessage struct {
+	provider.Message
+	Display *displayState `json:"_orca_display,omitempty"`
+}
+
+// Save atomically persists model context and visible conversation together.
 func (s *Session) Save(path string) error {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
 	if path == "" {
 		return fmt.Errorf("empty session path")
 	}
@@ -35,18 +40,39 @@ func (s *Session) Save(path string) error {
 	}
 	tmpPath := tmp.Name()
 	enc := json.NewEncoder(tmp)
-	for _, m := range s.Snapshot() { // copy under the lock — a turn may be appending
-		if err := enc.Encode(m); err != nil {
+	s.mu.Lock()
+	s.ensureDisplayLocked()
+	msgs := append([]provider.Message(nil), s.Messages...)
+	display := *s.display
+	display.Entries = append([]DisplayEntry(nil), s.display.Entries...)
+	display.ContextIDs = append([]string(nil), s.display.ContextIDs...)
+	s.mu.Unlock()
+	for i, m := range msgs {
+		record := savedMessage{Message: m}
+		if i == 0 {
+			record.Display = &display
+		}
+		if err := enc.Encode(record); err != nil {
 			tmp.Close()
 			os.Remove(tmpPath)
 			return fmt.Errorf("encode message: %w", err)
 		}
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}
-	return fileutil.ReplaceFile(tmpPath, path)
+	// A failed rename must not fall back to truncating the only good copy.
+	// Both files are siblings; report filter-driver/permission failures intact.
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("save session: original preserved; complete recovery copy at %s: %w", tmpPath, err)
+	}
+	return nil
 }
 
 // LoadSession reads a JSONL file written by Save into a fresh Session value.
@@ -66,14 +92,23 @@ func LoadSession(path string) (*Session, error) {
 	// saved fine fail to reload.
 	dec := json.NewDecoder(f)
 	for {
-		var m provider.Message
+		var m savedMessage
 		if err := dec.Decode(&m); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
 			return nil, fmt.Errorf("decode %s: %w", path, err)
 		}
-		s.Messages = append(s.Messages, m)
+		if len(s.Messages) == 0 && m.Display != nil {
+			if m.Display.Version != 1 {
+				return nil, fmt.Errorf("unsupported display history version %d", m.Display.Version)
+			}
+			s.display = m.Display
+		}
+		s.Messages = append(s.Messages, m.Message)
+	}
+	if s.display != nil && len(s.display.ContextIDs) != len(s.Messages) {
+		return nil, fmt.Errorf("display history/context length mismatch")
 	}
 	return s, nil
 }
@@ -180,10 +215,30 @@ func previewSession(path string) (string, int) {
 	first := ""
 	turns := 0
 	for {
-		var m provider.Message
-		if err := dec.Decode(&m); err != nil {
+		var record savedMessage
+		if err := dec.Decode(&record); err != nil {
 			break // EOF or a malformed tail — return the preview gathered so far
 		}
+		if record.Display != nil {
+			for _, e := range record.Display.Entries {
+				m := e.Message
+				if e.Kind != "message" || m.Role != provider.RoleUser {
+					continue
+				}
+				if _, steer := SteerDisplayText(m.Content); steer {
+					continue
+				}
+				turns++
+				if first == "" {
+					first = strings.TrimSpace(HandoffTask(m.Content))
+					if r := []rune(first); len(r) > 80 {
+						first = string(r[:77]) + "…"
+					}
+				}
+			}
+			return first, turns
+		}
+		m := record.Message
 		if m.Role == provider.RoleUser {
 			turns++
 			if first == "" {

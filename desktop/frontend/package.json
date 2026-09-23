@@ -19,7 +19,8 @@
     "test:all": "tsc --noEmit -p tsconfig.test.json && tsx src/__tests__/ui-scale.test.ts && tsx src/__tests__/attachment-batch.test.ts && tsx src/__tests__/todo-panel-state.test.ts && tsx src/__tests__/anchored-popover-position.test.ts && tsx src/__tests__/update-check.test.ts && tsx src/__tests__/updater-ux.test.ts && tsx src/__tests__/composer-draft-persistence.test.ts && tsx src/__tests__/installer-shutdown.test.ts && tsx src/__tests__/vision-model-settings.test.ts && tsx src/__tests__/responsive-layout.test.ts && tsx src/__tests__/composer-running-action.test.ts && tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/local-ai-contract.test.ts && tsx src/__tests__/context-panel-usage.test.ts && tsx src/__tests__/goal-draft-mode.test.ts && tsx src/__tests__/workspace-layout.test.ts && tsx src/__tests__/tool-approval-mode.test.ts && tsx src/__tests__/send-failed.test.ts && tsx src/__tests__/message-selection-copy.test.ts && tsx src/__tests__/attachment-display.test.ts && tsx src/__tests__/command-palette-css.test.ts && tsx src/__tests__/transcript-timeline.test.ts",
     "test:streaming": "tsx src/__tests__/streaming-display.test.ts",
     "test:turn-controls": "tsx src/__tests__/cancel-turn.test.ts && tsx src/__tests__/effort-switcher.test.ts",
-    "posttest:all": "npm run test:streaming && npm run test:turn-controls"
+    "test:conversation-ui": "tsx src/__tests__/transcript-guidance.test.ts && tsx src/__tests__/work-monitor.test.ts && tsx src/__tests__/phase-drum.test.ts && tsx --test src/__tests__/composer-clipboard.test.ts",
+    "posttest:all": "npm run test:streaming && npm run test:turn-controls && npm run test:conversation-ui"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.2",

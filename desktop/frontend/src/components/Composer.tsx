@@ -3,7 +3,8 @@ import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEven
 import { ArrowUp, Brain, Check, ChevronDown, FileImage, FileText, Folder, Gauge, List, MessageSquare, MoreHorizontal, Paperclip, Pause, Play, Plus, RefreshCw, Search, Shield, ShieldAlert, ShieldCheck, Slash, Sparkles, Square, Target, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
-import { DedupIndex, sha256 } from "../lib/attachDedup";
+import { DedupIndex } from "../lib/attachDedup";
+import { ClipboardPasteArbiter, ClipboardPasteOperation, clipboardFiles, clipboardItemFiles, uniqueClipboardFiles, uniqueClipboardPaths } from "../lib/composerClipboard";
 import { app, onFilesDropped } from "../lib/bridge";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { clearLayoutSize } from "../lib/layoutPreferences";
@@ -134,25 +135,6 @@ function workspaceReferenceKey(ref: WorkspaceReference): string {
   return `${ref.isDir ? "dir" : "file"}:${ref.path}`;
 }
 
-function fileKey(file: File): string {
-  return `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
-}
-
-function clipboardFiles(data: DataTransfer): File[] {
-  const files = Array.from(data.files);
-  const seen = new Set(files.map(fileKey));
-  for (const item of Array.from(data.items)) {
-    if (item.kind !== "file") continue;
-    const file = item.getAsFile();
-    if (!file) continue;
-    const key = fileKey(file);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    files.push(file);
-  }
-  return files;
-}
-
 function clipboardHasImageHint(data: DataTransfer): boolean {
   const imageType = (value: string) => {
     const type = value.toLowerCase();
@@ -167,15 +149,6 @@ function isPasteShortcut(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
 
 function isYoloToggleShortcut(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
   return e.key.toLowerCase() === "y" && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
-}
-
-async function dataURLHash(dataUrl: string): Promise<string> {
-  try {
-    const res = await fetch(dataUrl);
-    return sha256(await res.blob());
-  } catch {
-    return "";
-  }
 }
 
 function composerAutoInputMaxHeight(node: HTMLTextAreaElement): number {
@@ -561,7 +534,7 @@ export function Composer({
     return () => { cancelled = true; };
   }, [attachments]);
   const nativeClipboardPasteTimerRef = useRef<number | null>(null);
-  const nativeClipboardPasteInFlightRef = useRef(false);
+  const clipboardPasteArbiterRef = useRef(new ClipboardPasteArbiter());
   // Snapshot of the current cwd so async callbacks (openPastChats) can detect
   // workspace switches and discard stale responses (issue #3601).
   const cwdRef = useRef(cwd);
@@ -575,7 +548,18 @@ export function Composer({
     nativeClipboardPasteTimerRef.current = null;
   };
 
-  useEffect(() => () => clearNativeClipboardPasteTimer(), []);
+  useEffect(() => {
+    const endShortcut = () => {
+      clearNativeClipboardPasteTimer();
+      clipboardPasteArbiterRef.current.endShortcut();
+    };
+    // A pointer/menu gesture separates pastes even if a shortcut had no event.
+    document.addEventListener("pointerdown", endShortcut, true);
+    return () => {
+      endShortcut();
+      document.removeEventListener("pointerdown", endShortcut, true);
+    };
+  }, []);
 
   // --- slash commands (whole-input "/token") ---
   const [commands, setCommands] = useState<CommandInfo[]>([]);
@@ -975,11 +959,6 @@ export function Composer({
 
   useEffect(() => () => clearPromptModeCloseTimer(), [clearPromptModeCloseTimer]);
 
-  const fileDedupKey = async (file: File): Promise<AttachmentDedupKey> => ({
-    hash: await sha256(file),
-    source: `file:${file.name}:${file.size}:${file.lastModified}`,
-  });
-
   const planModeOn = collaborationMode === "plan";
   const activeGoal = (goal ?? "").trim();
   const goalModeOn = collaborationMode === "goal";
@@ -1065,7 +1044,6 @@ export function Composer({
     const file = item.source;
     if (!file) return;
     try {
-      const key = await fileDedupKey(file);
       const dataUrl = await readFileAsDataURL(file);
       let path: string;
       let previewUrl: string | undefined;
@@ -1075,8 +1053,6 @@ export function Composer({
       } else {
         path = await app.SavePastedFile(file.name, dataUrl);
       }
-      rememberAttachment(path, key);
-      attachmentDedupKeysRef.current[item.id] = key;
       updateAttachment(item.id, { path, previewUrl, status: "ready", error: undefined });
     } catch (error) {
       console.warn("[composer] failed to attach file", item.displayName, error);
@@ -1091,17 +1067,13 @@ export function Composer({
   // the kernel stores them and we reference the saved path — attached, not ignored.
   const attachFiles = (files: File[]) => {
     const accepted: Attachment[] = [];
-    for (const file of files) {
-      const source = `file:${file.name}:${file.type}:${file.size}:${file.lastModified}`;
-      if (attachmentDedupRef.current.seen("", source)) continue;
+    for (const file of new Set(files)) {
       const item: Attachment = {
         id: `attachment-${Date.now()}-${attachmentSequenceRef.current++}`,
         displayName: file.name,
         status: "pending",
         source: file,
       };
-      attachmentDedupRef.current.add("", source);
-      attachmentDedupKeysRef.current[item.id] = { hash: "", source };
       accepted.push(item);
     }
     if (accepted.length === 0) return;
@@ -1112,6 +1084,15 @@ export function Composer({
     })();
   };
 
+  const attachClipboardFiles = async (files: File[]) => {
+    setPendingPaste((n) => n + 1);
+    try {
+      attachFiles(await uniqueClipboardFiles(files));
+    } finally {
+      setPendingPaste((n) => Math.max(0, n - 1));
+    }
+  };
+
   const retryAttachment = (item: Attachment) => {
     if (item.status !== "failed" || !item.source) return;
     updateAttachment(item.id, { status: "pending", error: undefined });
@@ -1119,47 +1100,41 @@ export function Composer({
     void processAttachment(item);
   };
 
-  const attachNativeClipboardImage = async (notifyOnError: boolean): Promise<boolean> => {
-    // Ctrl/Cmd+V can produce both a browser paste event and the delayed native
-    // clipboard fallback. Treat one in-flight native read as the paste unit so
-    // two async callbacks cannot both pass the dedup check.
-    if (nativeClipboardPasteInFlightRef.current) return true;
-    nativeClipboardPasteInFlightRef.current = true;
+  const attachNativeClipboardImage = (notifyOnError: boolean, operation: ClipboardPasteOperation): Promise<boolean> => operation.readNative(async () => {
     setPendingPaste((n) => n + 1);
     try {
       const path = await app.SaveClipboardImage();
       const previewUrl = await app.AttachmentDataURL(path);
-      const hash = await dataURLHash(previewUrl);
-      const key = { hash, source: hash ? `native-clipboard-hash:${hash}` : `native-clipboard:${path}` };
-      if (attachmentDedupRef.current.seen(key.hash, key.source)) return true;
-      rememberAttachment(path, key);
-      setAttachments((prev) => [...prev, { id: `attachment-${Date.now()}-${attachmentSequenceRef.current++}`, path, previewUrl, status: "ready" }]);
+      const id = `attachment-${Date.now()}-${attachmentSequenceRef.current++}`;
+      if (!operation.claim(() => setAttachments((prev) => prev.filter((item) => item.id !== id)))) return true;
+      setAttachments((prev) => [...prev, { id, path, previewUrl, status: "ready" }]);
       return true;
     } catch (error) {
+      if (operation.handled) return true;
       console.warn("[composer] failed to read native clipboard image", error);
       if (notifyOnError) showToast(t("composer.pasteImageFailed"), "warn");
       return false;
     } finally {
-      nativeClipboardPasteInFlightRef.current = false;
       setPendingPaste((n) => Math.max(0, n - 1));
     }
-  };
+  });
 
   // OS file drops arrive as absolute paths through the native bridge (the webview
   // withholds them from the HTML drop event); the kernel resolves each into a
   // workspace @reference or a stored attachment.
-  const attachDroppedPaths = async (paths: string[]) => {
+  const attachDroppedPaths = async (paths: string[], fromClipboard = false) => {
+    if (fromClipboard) paths = uniqueClipboardPaths(paths);
     setDragOver(false);
     setPendingPaste((n) => n + paths.length);
     for (const path of paths) {
       try {
         const key = { hash: "", source: `path:${path}` };
-        if (attachmentDedupRef.current.seen(key.hash, key.source)) continue;
+        if (!fromClipboard && attachmentDedupRef.current.seen(key.hash, key.source)) continue;
         const item = await app.AttachDropped(path);
         if (item.kind === "workspace") {
           addWorkspaceReference({ path: item.path, isDir: item.isDir });
         } else {
-          rememberAttachment(item.path, key);
+          if (!fromClipboard) rememberAttachment(item.path, key);
           setAttachments((prev) => [...prev, { id: `attachment-${Date.now()}-${attachmentSequenceRef.current++}`, path: item.path, previewUrl: item.previewUrl, displayName: baseName(path), status: "ready" }]);
         }
       } catch {
@@ -1191,48 +1166,51 @@ export function Composer({
   };
 
   const pasteFromContextMenu = async () => {
+    clearNativeClipboardPasteTimer();
+    clipboardPasteArbiterRef.current.endShortcut();
+    const operation = new ClipboardPasteOperation();
+    setPendingPaste((n) => n + 1);
     try {
-      const paths = await app.ReadClipboardFilePaths();
-      if (paths.length > 0) {
-        await attachDroppedPaths(paths);
-        return;
-      }
-    } catch {
-      // Continue with WebView and native image clipboard fallbacks.
-    }
-
-    try {
-      const pasted = await navigator.clipboard?.readText();
-      if (pasted) {
-        replacePlainTextAtCaret(pasted);
-        return;
-      }
-    } catch {
-      // Some WebView builds deny readText while still exposing image formats.
-    }
-
-    const richClipboard = navigator.clipboard as Clipboard & { read?: () => Promise<ClipboardItem[]> };
-    if (typeof richClipboard?.read === "function") {
       try {
-        const clipboardItems = await richClipboard.read();
-        const imageFiles: File[] = [];
-        for (const item of clipboardItems) {
-          const imageType = item.types.find((type) => type.startsWith("image/"));
-          if (!imageType) continue;
-          const blob = await item.getType(imageType);
-          const subtype = imageType.slice("image/".length).replace("jpeg", "jpg").replace(/[^a-z0-9]+/gi, "") || "png";
-          imageFiles.push(new File([blob], `clipboard-${Date.now()}-${imageFiles.length + 1}.${subtype}`, { type: imageType }));
-        }
-        if (imageFiles.length > 0) {
-          attachFiles(imageFiles);
+        const paths = await app.ReadClipboardFilePaths();
+        if (paths.length > 0) {
+          operation.claim();
+          await attachDroppedPaths(paths, true);
           return;
         }
       } catch {
-        // Native clipboard access below covers Wails WebView permission gaps.
+        // Continue with WebView and native clipboard fallbacks.
       }
-    }
 
-    await attachNativeClipboardImage(true);
+      try {
+        const pasted = await navigator.clipboard?.readText();
+        if (pasted) {
+          operation.useText();
+          replacePlainTextAtCaret(pasted);
+          return;
+        }
+      } catch {
+        // Some WebView builds deny readText while exposing other formats.
+      }
+
+      const richClipboard = navigator.clipboard as Clipboard & { read?: () => Promise<ClipboardItem[]> };
+      if (typeof richClipboard?.read === "function") {
+        try {
+          const files = await clipboardItemFiles(await richClipboard.read());
+          if (files.length > 0) {
+            operation.claim();
+            await attachClipboardFiles(files);
+            return;
+          }
+        } catch {
+          // Native access below covers Wails WebView permission gaps.
+        }
+      }
+
+      await attachNativeClipboardImage(true, operation);
+    } finally {
+      setPendingPaste((n) => Math.max(0, n - 1));
+    }
   };
 
   useEffect(() => {
@@ -1243,19 +1221,13 @@ export function Composer({
 
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     clearNativeClipboardPasteTimer();
+    const operation = clipboardPasteArbiterRef.current.browserPaste();
     const files = clipboardFiles(e.clipboardData);
     if (files.length > 0) {
       e.preventDefault();
-      attachFiles(files);
-      // Chromium/Wails can expose the same clipboard image both as a File and
-      // as a native path. The File already contains the complete image bytes;
-      // asking for native paths here would attach the same image a second time.
-      if (files.some((file) => file.type.toLowerCase().startsWith("image/"))) return;
-      void app.ReadClipboardFilePaths().then((paths) => {
-        const names = new Set(files.map((file) => file.name.toLowerCase()));
-        const additional = paths.filter((path) => !names.has(baseName(path).toLowerCase()));
-        if (additional.length > 0) void attachDroppedPaths(additional);
-      }).catch(() => {});
+      // Files contain the bytes for every format. Native paths are an alternate
+      // representation, not extra files identifiable by basename.
+      if (operation.claimBrowser()) void attachClipboardFiles(files);
       return;
     }
 
@@ -1263,18 +1235,25 @@ export function Composer({
     // Plain text always follows the textarea's native paste path, preserving
     // line breaks and the current selection without creating a hidden block.
     // Prefer it over image format hints carried by rich clipboard sources.
-    if (pasted !== "") return;
+    if (pasted !== "") {
+      operation.useText();
+      return;
+    }
 
     const hasImageHint = clipboardHasImageHint(e.clipboardData);
     e.preventDefault();
-    void app.ReadClipboardFilePaths().then((paths) => {
+    if (operation.browserHandled) return;
+    setPendingPaste((n) => n + 1);
+    void app.ReadClipboardFilePaths().then(async (paths) => {
       if (paths.length > 0) {
-        void attachDroppedPaths(paths);
+        if (operation.claimBrowser()) await attachDroppedPaths(paths, true);
       } else if (hasImageHint) {
-        void attachNativeClipboardImage(true);
+        await attachNativeClipboardImage(true, operation);
       }
-    }).catch(() => {
-      if (hasImageHint) void attachNativeClipboardImage(true);
+    }).catch(async () => {
+      if (hasImageHint) await attachNativeClipboardImage(true, operation);
+    }).finally(() => {
+      setPendingPaste((n) => Math.max(0, n - 1));
     });
   };
 
@@ -1567,10 +1546,14 @@ export function Composer({
 
     if (isPasteShortcut(e) && !composing) {
       clearNativeClipboardPasteTimer();
+      const operation = clipboardPasteArbiterRef.current.startShortcut();
       nativeClipboardPasteTimerRef.current = window.setTimeout(() => {
         nativeClipboardPasteTimerRef.current = null;
-        void attachNativeClipboardImage(false);
+        void attachNativeClipboardImage(false, operation);
       }, 160);
+    } else {
+      clearNativeClipboardPasteTimer();
+      clipboardPasteArbiterRef.current.endShortcut();
     }
 
     // Shift+Tab toggles plan mode only. Tool access is deliberately changed via
