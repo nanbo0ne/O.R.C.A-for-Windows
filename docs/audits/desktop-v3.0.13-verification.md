@@ -14,6 +14,7 @@ This release includes the local conversation/monitor round and the subsequent at
 - A delayed native clipboard fallback and a late browser paste event previously each attached a representation of the same content. Both now share one paste operation; duplicates within that operation are compared by content. A later deliberate paste or file-picker selection stays independent. Tests include images, documents, same-name/different-content files and mixed batches.
 - Guidance previously lost its structured images and displayed model-facing reference text. The controller now validates and snapshots attachments in the parent turn, stores separate display text, passes image bytes to a vision-capable model and updates the task image resolver for a text model. Reopening and cross-workspace forks preserve attachment references. Filesystem paths are not substituted for visible thumbnails.
 - Guidance admission is sealed atomically at completion. A correlated receipt is returned on consumption, not just enqueueing; cancellation/error rejects unconsumed guidance and leaves the draft. A later turn cannot receive an earlier queued guide.
+- The download page no longer overwrites pinned desktop version labels using the legacy CLI manifest. Canonical URLs now match the Mac download origin.
 
 ## Local evidence
 
@@ -41,3 +42,7 @@ Local regression and guidance review passed. CI race checks, three-platform pack
 The source ZIP is generated from that commit with Git blob comparison, excluding only the historical top-level `release/` binaries. It excludes personal state and untracked local audits. The previous local source ZIP is removed only after its replacement passes integrity checks; historical releases are not deleted.
 
 Windows Authenticode and macOS notarization are not supplied by this release setup. Minisign authenticates updater payloads; it is not an operating-system publisher signature. No system-DPI or live-provider performance claim is made.
+
+## Website build dependency note
+
+The separate `site/` build toolchain reports 9 npm audit findings (1 critical, 6 high, 1 moderate, 1 low). It is not part of the desktop bundle. The site is deployed as static output only, without an Astro server/adapter, untrusted image processing or dynamic user templates. The critical [Astro advisory](https://github.com/withastro/astro/security/advisories/GHSA-26w7-cxv4-gfx2) requires processing an untrusted AVIF image; this build does not use Astro image optimization. This scoped assessment is not a clean dependency audit. A separate Astro/toolchain update is required before reusing the website as a dynamic service or adding untrusted build inputs; no force/major dependency upgrade was mixed into this desktop patch.

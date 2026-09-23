@@ -143,16 +143,5 @@
     });
   });
 
-  /* refresh the Go-preview version from the published manifest between rebuilds */
-  fetch("https://dl.orca-agent.io/latest/latest.json", { cache: "no-cache" })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((d) => {
-      const v = String((d && d.version) || "").replace(/^v/, "");
-      if (!v) return;
-      document.querySelectorAll(".rxv").forEach((e) => { e.textContent = v; });
-      document.querySelectorAll("a.rxnotes").forEach((a) => {
-        a.href = a.href.replace(/releases\/tag\/v[^/]*$/, "releases/tag/v" + v);
-      });
-    })
-    .catch(() => {});
+  // Version labels and immutable download paths are built together.
 })();
