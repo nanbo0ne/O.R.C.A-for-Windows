@@ -2455,6 +2455,40 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   const [fetchingProvider, setFetchingProvider] = useState<string | null>(null);
   const [fetchResults, setFetchResults] = useState<Record<string, ProviderFetchResult>>({});
   const [modelDrafts, setModelDrafts] = useState<Record<string, ProviderModelDraft>>({});
+  // 鲸栈账号：登录一次即可拿到中转站的模型访问，不需要手动填 Base URL 和 Key。
+  const [whaleOpen, setWhaleOpen] = useState(false);
+  const [whaleEmail, setWhaleEmail] = useState("");
+  const [whalePassword, setWhalePassword] = useState("");
+  const [whaleError, setWhaleError] = useState("");
+  const [whaleBusy, setWhaleBusy] = useState(false);
+  const whaleReady = s.providers.some((p) => p.name === "鲸栈" && p.added && p.keySet);
+  const whaleInput: React.CSSProperties = { height: 32, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border-subtle, #d9dee5)", background: "transparent", fontSize: 13, minWidth: 180 };
+  const whaleSubmit = async (event: { preventDefault: () => void }) => {
+    event.preventDefault();
+    if (whaleBusy || !whaleEmail.trim() || !whalePassword) return;
+    setWhaleError("");
+    setWhaleBusy(true);
+    let failure = "";
+    try {
+      await apply(async () => {
+        try {
+          await app.WhaleStackSignIn(whaleEmail.trim(), whalePassword);
+        } catch (e) {
+          failure = String((e as Error)?.message ?? e);
+          throw e;
+        }
+      });
+    } catch {
+      /* apply already reported it; the card shows the same text inline */
+    } finally {
+      setWhaleBusy(false);
+      if (failure) setWhaleError(failure);
+      else {
+        setWhalePassword("");
+        setWhaleOpen(false);
+      }
+    }
+  };
   const groups = providerAccessGroups(s.providers.filter((p) => p.added), t);
 
   const setGroupFetchResult = (groupID: string, result: ProviderFetchResult | null) => {
@@ -2616,6 +2650,26 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
         </button>
       }
     >
+      <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 12, border: "1px solid var(--border-subtle, #e3e7ec)", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <strong style={{ fontSize: 13 }}>{t("settings.whalestackTitle")}</strong>
+          <span style={{ fontSize: 12, opacity: 0.65 }}>{whaleReady ? t("settings.whalestackReady") : t("settings.whalestackHint")}</span>
+          {!whaleOpen && (
+            <button type="button" className="btn btn--small" disabled={busy || whaleBusy} onClick={() => { setWhaleError(""); setWhaleOpen(true) }}>
+              {whaleReady ? t("settings.whalestackRelogin") : t("settings.whalestackSignIn")}
+            </button>
+          )}
+        </div>
+        {whaleOpen && (
+          <form onSubmit={whaleSubmit} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <input value={whaleEmail} onChange={(e) => setWhaleEmail(e.target.value)} placeholder={t("settings.whalestackEmail")} autoComplete="username" style={whaleInput} />
+            <input type="password" value={whalePassword} onChange={(e) => setWhalePassword(e.target.value)} placeholder={t("settings.whalestackPassword")} autoComplete="current-password" style={whaleInput} />
+            <button type="submit" className="btn btn--small btn--primary" disabled={whaleBusy || !whaleEmail.trim() || !whalePassword}>{whaleBusy ? t("settings.whalestackSigningIn") : t("settings.whalestackSubmit")}</button>
+            <button type="button" className="btn btn--small" disabled={whaleBusy} onClick={() => { setWhaleOpen(false); setWhaleError("") }}>{t("settings.whalestackCancel")}</button>
+          </form>
+        )}
+        {whaleError && <span style={{ color: "#dc2626", fontSize: 12 }}>{whaleError}</span>}
+      </div>
       <div className="provider-access-grid">
         {groups.length === 0 && adding === null && (
           <div className="provider-empty">
