@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -196,7 +197,7 @@ func TestCommandNonDarwin(t *testing.T) {
 		t.Fatalf("wrapped = %v, want %v on %s", wrapped, wantWrapped, runtime.GOOS)
 	}
 	if wrapped {
-		if len(cmd) < 4 || cmd[0] != "bwrap" || cmd[len(cmd)-3] != "sh" || cmd[len(cmd)-2] != "-c" {
+		if len(cmd) < 4 || filepath.Base(cmd[0]) != "bwrap" || cmd[len(cmd)-3] != "sh" || cmd[len(cmd)-2] != "-c" {
 			t.Fatalf("unexpected bwrap cmd: %v", cmd)
 		}
 		return
