@@ -188,8 +188,18 @@ func TestCommandNonDarwin(t *testing.T) {
 	}
 	spec := Spec{Mode: "enforce", WriteRoots: []string{"/tmp"}}
 	cmd, wrapped := Command(spec, Shell{Kind: ShellBash, Path: "sh"}, "echo hi")
+	// Linux gets bubblewrap when it is installed; every other non-darwin
+	// platform runs unconfined.
+	_, bwrapErr := exec.LookPath("bwrap")
+	wantWrapped := runtime.GOOS == "linux" && bwrapErr == nil
+	if wrapped != wantWrapped {
+		t.Fatalf("wrapped = %v, want %v on %s", wrapped, wantWrapped, runtime.GOOS)
+	}
 	if wrapped {
-		t.Error("non-darwin should never wrap")
+		if len(cmd) < 4 || cmd[0] != "bwrap" || cmd[len(cmd)-3] != "sh" || cmd[len(cmd)-2] != "-c" {
+			t.Fatalf("unexpected bwrap cmd: %v", cmd)
+		}
+		return
 	}
 	if len(cmd) != 3 || cmd[0] != "sh" || cmd[1] != "-c" || cmd[2] != "echo hi" {
 		t.Errorf("unexpected cmd: %v", cmd)
@@ -233,7 +243,11 @@ func TestAvailableNonDarwin(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("testing non-darwin path")
 	}
-	if Available() {
-		t.Error("non-darwin should report unavailable")
+	// Linux reports availability from bubblewrap on PATH; other non-darwin
+	// platforms have no OS sandbox.
+	_, bwrapErr := exec.LookPath("bwrap")
+	want := runtime.GOOS == "linux" && bwrapErr == nil
+	if got := Available(); got != want {
+		t.Errorf("Available() = %v, want %v on %s", got, want, runtime.GOOS)
 	}
 }
