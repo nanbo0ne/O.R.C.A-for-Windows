@@ -1,5 +1,15 @@
 # Changelog
 
+## Desktop 3.0.15 / 桌面版 3.0.15
+
+- 新增「用鲸栈账号登录」：在设置中登录鲸栈账号即可自动获得中转模型访问权限，无需手动填写 Base URL 与 API Key。
+- Add WhaleStack account sign-in: the app registers the relay provider and its models automatically, with no Base URL or API key to type in.
+- 中转 Key 由登录服务按账号派生，重新登录复用同一把 Key；失败原因直接显示在卡片内。
+- The relay key is derived per account and reused on later sign-ins; failures are reported inline.
+- 修复 Linux 沙箱测试，使发布门禁在 Linux runner 上可以通过。
+- Fix the Linux sandbox tests so the release gate passes on Linux runners.
+- [Release notes / 发布说明](docs/releases/desktop-v3.0.15.md) · [Build / 构建](docs/build/desktop-v3.0.15.md) · [Verification / 验收](docs/audits/desktop-v3.0.15-verification.md)
+
 ## Desktop 3.0.13 / 桌面版 3.0.13
 
 - 会话整理后仍可查看完整聊天记录，上下文用量显示更准确。
