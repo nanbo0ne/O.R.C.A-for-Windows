@@ -247,6 +247,7 @@ export interface AppBindings {
   DeleteProvider(name: string): Promise<void>;
   RemoveProviderAccess(name: string): Promise<void>;
   SetProviderKey(apiKeyEnv: string, value: string): Promise<void>;
+  WhaleStackSignIn(email: string, password: string): Promise<ProviderView>;
   ClearProviderKey(apiKeyEnv: string): Promise<void>;
   SetPermissionMode(mode: string): Promise<void>;
   SetAutoReviewModel(ref: string): Promise<void>;
@@ -2219,6 +2220,19 @@ function makeMockApp(): AppBindings {
       const p = settings.providers.find((x) => x.name === name);
       if (p?.builtIn) p.added = false;
       else settings.providers = settings.providers.filter((x) => x.name !== name);
+    },
+    async WhaleStackSignIn(email: string, _password: string) {
+      await delay(400);
+      if (!email.trim()) throw new Error("请输入用户名和密码");
+      const view: ProviderView = {
+        name: "鲸栈", builtIn: false, added: true, kind: "openai",
+        baseUrl: "https://router.aichat.diy/v1", modelsUrl: "", models: ["deepseek-flash", "deepseek-pro"],
+        default: "deepseek-flash", apiKeyEnv: "WHALESTACK_API_KEY", keySet: true, balanceUrl: "",
+        contextWindow: 0, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "",
+      };
+      const i = settings.providers.findIndex((x) => x.name === view.name);
+      if (i >= 0) settings.providers[i] = view; else settings.providers.push(view);
+      return view;
     },
     async SetProviderKey(apiKeyEnv: string, _value: string) {
       settings.providers.forEach((p) => {
