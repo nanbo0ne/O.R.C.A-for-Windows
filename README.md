@@ -1,12 +1,12 @@
 [English](README.en.md) | **简体中文**
 
-# O.R.C.A. 3.0.13
+# O.R.C.A. 3.0.15
 
 **O.R.C.A.**（**Open Reasoning & Computing Agent**）是面向真实工作的开源 AI 工作区：把模型对话、助手、编程、研究、文件与图片、工程工具、记忆和自动化放在同一个可暂停、可检查、可恢复的应用里。
 
-> **3.0.13** 让会话在内容整理后仍保留完整可读的聊天记录，改进上下文用量显示，并新增工作进度概览。引导提示更清楚，图片和文件处理、粘贴及小屏权限窗口也得到改进。进度概览只显示应用实际观察到的信息。
+> **3.0.15** 新增「用鲸栈账号登录」：在设置里填入鲸栈账号即可自动获得中转站的模型访问权限，无需手动填写 Base URL 或 API Key。会话记录、工作进度概览与小屏权限窗口等 3.0.13 改进全部保留。
 >
-> [双语发布说明](docs/releases/desktop-v3.0.13.md) · [构建清单](docs/build/desktop-v3.0.13.md) · [发布验收记录待补](docs/audits/desktop-v3.0.13-verification.md)
+> [双语发布说明](docs/releases/desktop-v3.0.15.md) · [构建清单](docs/build/desktop-v3.0.15.md) · [发布验收记录](docs/audits/desktop-v3.0.15-verification.md)
 
 ## 下载
 
@@ -14,11 +14,11 @@
 
 | 平台 | 包 | 说明 |
 | --- | --- | --- |
-| Windows x64 | [安装器](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.13/O.R.C.A-for-Windows-windows-amd64-installer.exe) · [便携版](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.13/O.R.C.A-for-Windows-windows-amd64.zip) | 云端功能；托管本地 AI 与电脑操控暂时禁用 |
-| macOS 12+ Universal | [DMG](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.13/O.R.C.A-macos-universal.dmg) | Intel 与 Apple Silicon；托管本地 AI 与电脑操控暂时禁用 |
-| Linux x64 | [DEB](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.13/O.R.C.A-linux-amd64.deb) | Debian / Ubuntu；需要匹配的 WebKitGTK 运行库，托管本地 AI 与电脑操控暂时禁用 |
+| Windows x64 | [安装器](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.15/O.R.C.A-for-Windows-windows-amd64-installer.exe) · [便携版](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.15/O.R.C.A-for-Windows-windows-amd64.zip) | 云端功能；托管本地 AI 与电脑操控暂时禁用 |
+| macOS 12+ Universal | [DMG](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.15/O.R.C.A-macos-universal.dmg) | Intel 与 Apple Silicon；托管本地 AI 与电脑操控暂时禁用 |
+| Linux x64 | [DEB](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.15/O.R.C.A-linux-amd64.deb) | Debian / Ubuntu；需要匹配的 WebKitGTK 运行库，托管本地 AI 与电脑操控暂时禁用 |
 
-- [3.0.13 发布页、校验文件与更新说明](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.13)
+- [3.0.15 发布页、校验文件与更新说明](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.15)
 - 下载时核对版本、平台与文件名。
 - Windows 发布者签名与 macOS 公证限制延续：Windows 包未作 Authenticode 发布者签名，macOS 包未公证。Minisign 用于更新完整性校验，不等于操作系统发布者认证。
 - 不要在文档提交 API key；正式包不内置任何供应商密钥。
@@ -190,7 +190,7 @@ wails build
 | 白屏或窗口异常 | WebView2/WebKitGTK/GTK 版本、GPU 驱动、Modern/Classic 选择；先重启并收集日志，再判断是否为原生问题 |
 | 更新器无响应 | 先访问主 manifest，再检查 GitHub 回退、签名/版本字段和系统代理；Windows 手动下载并退出安装，不要期待后台安装 |
 
-构建方式见[构建清单](docs/build/desktop-v3.0.13.md)；验收记录待发布门禁完成后补充：[详细验收记录](docs/audits/desktop-v3.0.13-verification.md)。桌面开发与平台细节见 [desktop/README.md](desktop/README.md)，办公产物边界见 [docs/ARTIFACT_RUNTIME.md](docs/ARTIFACT_RUNTIME.md)。
+构建方式见[构建清单](docs/build/desktop-v3.0.15.md)；验收记录见[详细验收记录](docs/audits/desktop-v3.0.15-verification.md)。桌面开发与平台细节见 [desktop/README.md](desktop/README.md)，办公产物边界见 [docs/ARTIFACT_RUNTIME.md](docs/ARTIFACT_RUNTIME.md)。
 
 ## 许可
 
