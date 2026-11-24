@@ -12,12 +12,7 @@ $script:checks = 0
 function Check([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message }; $script:checks++ }
 function Reject([scriptblock]$Action, [string]$Message) { $failed = $false; try { & $Action | Out-Null } catch { $failed = $true }; Check $failed $Message }
 function Put([string]$Path, [string]$Text) { [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path)); [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false)) }
-$go = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'Go/bin/go.exe'
-if (-not [IO.File]::Exists($go)) {
-    $command = Get-Command go.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($command) { $go = $command.Source }
-}
-$tools = @{go=$go}
+$tools = @{go=(Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'Go/bin/go.exe')}
 foreach ($key in @('wails', 'nsis', 'sevenZip')) { $tools[$key] = Join-Path $PSHOME 'pwsh.exe' }
 foreach ($key in @('node', 'npm')) { $tools[$key] = Join-Path $FixtureRoot "tools/$key.exe"; Put $tools[$key] "synthetic $key" }
 $npmCache = Join-Path $FixtureRoot 'npm-cache'; $goCache = Join-Path $FixtureRoot 'go-cache'

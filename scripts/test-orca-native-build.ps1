@@ -13,10 +13,6 @@ function Check([bool]$Condition, [string]$Message) { if (-not $Condition) { thro
 function Reject([scriptblock]$Action, [string]$Message) { $failed = $false; try { & $Action | Out-Null } catch { $failed = $true }; Check $failed $Message }
 function Put([string]$Path, [string]$Text) { [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path)); [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false)) }
 $go = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'Go/bin/go.exe'
-if (-not [IO.File]::Exists($go)) {
-    $command = Get-Command go.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($command) { $go = $command.Source }
-}
 $pwsh = Join-Path $PSHOME 'pwsh.exe'
 $tools = @{go=$go; wails=$pwsh; nsis=$pwsh; sevenZip=$pwsh}
 foreach ($key in @('node', 'npm')) { $tools[$key] = Join-Path $FixtureRoot "tools/$key.exe"; Put $tools[$key] "synthetic pinned $key" }

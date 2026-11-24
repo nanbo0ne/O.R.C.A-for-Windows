@@ -153,6 +153,7 @@ func TestBuildInfoLinkedExecutableFixtures(t *testing.T) {
 	if os.PathSeparator != '\\' {
 		t.Skip("Windows executable probe fixture")
 	}
+	requireProgramFilesGo(t)
 	if _, err := os.Stat(filepath.Join("..", "scripts", "test-orca-build-info.ps1")); err != nil {
 		t.Fatal(err)
 	}
