@@ -226,6 +226,13 @@ jobs:
 
       - name: Test native desktop
         working-directory: desktop
+        env:
+          # The Windows runner exposes TEMP through an 8.3 short name
+          # (C:\Users\RUNNER~1\...). Path-safety checks read that expansion as a
+          # junction and reject ordinary fixtures, so run the suite against the
+          # runner's long-form temp directory.
+          TMP: ${{ runner.os == 'Windows' && 'D:\a\_temp' || '' }}
+          TEMP: ${{ runner.os == 'Windows' && 'D:\a\_temp' || '' }}
         run: |
           if [ "${{ runner.os }}" = Linux ]; then
             go test -tags webkit2_41 ./... -count=1 -p=1
