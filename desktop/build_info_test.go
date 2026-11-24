@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
@@ -98,6 +99,9 @@ func TestBuildInfoIsFirstMainStatement(t *testing.T) {
 }
 
 func TestBuildInfoMainIsolatedProfile(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the isolated-profile probe uses the Windows AppData layout; this gate runs on the Windows runner")
+	}
 	if os.Getenv("ORCA_BUILD_INFO_TEST_CHILD") == "1" {
 		os.Args = []string{"synthetic-orca", buildInfoJSONArg}
 		main()

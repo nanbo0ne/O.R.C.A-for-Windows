@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -233,6 +234,9 @@ func TestBetaSessionAndInstallerBoundaries(t *testing.T) {
 }
 
 func TestBetaAccountMetadataRequiresIsolatedProfile(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the beta account store uses Windows DPAPI; this gate runs on the Windows runner")
+	}
 	base, root := withBetaProfile(t)
 	official := filepath.Join(os.Getenv("APPDATA"), "orca", "config.toml")
 	writeBetaFixture(t, official, "language='official-sentinel'\n")

@@ -102,7 +102,18 @@ func ValidateProfileDataPath(path string) error {
 	if err != nil {
 		return err
 	}
-	if !withinProfile(*home, abs) {
+	// Windows user directories are routinely reached through a short name or a
+	// junction (CI runners use C:\Users\RUNNER~1), so the lexical home and its
+	// resolved form are two different strings for the same tree. Comparing only
+	// one of them rejects ordinary profile paths as escapes.
+	resolvedHome := *home
+	if resolved, err := filepath.EvalSymlinks(*home); err == nil {
+		resolvedHome = resolved
+	}
+	insideHome := func(candidate string) bool {
+		return withinProfile(*home, candidate) || withinProfile(resolvedHome, candidate)
+	}
+	if !insideHome(abs) {
 		return errors.New("data path is outside the isolated profile")
 	}
 	for prefix := abs; ; prefix = filepath.Dir(prefix) {
@@ -111,10 +122,10 @@ func ValidateProfileDataPath(path string) error {
 			if err != nil {
 				return fmt.Errorf("resolve isolated profile path: %w", err)
 			}
-			if withinProfile(*home, prefix) && !withinProfile(*home, resolved) {
+			if insideHome(prefix) && !insideHome(resolved) {
 				return errors.New("isolated profile path resolves outside its root")
 			}
-			if !withinProfile(*home, prefix) {
+			if !insideHome(prefix) {
 				equal := filepath.Clean(prefix) == filepath.Clean(resolved)
 				if runtime.GOOS == "windows" {
 					equal = strings.EqualFold(filepath.Clean(prefix), filepath.Clean(resolved))

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -25,6 +26,9 @@ func TestBetaNativeBuildIsolationSyntheticFixtures(t *testing.T) {
 
 func runBetaSnapshotFixture(t *testing.T, name string) {
 	t.Helper()
+	if runtime.GOOS != "windows" {
+		t.Skip("source snapshot fixtures use Windows PowerShell paths; this gate runs on the Windows runner")
+	}
 	pwsh, err := exec.LookPath("pwsh")
 	if err != nil {
 		t.Skip("PowerShell 7 is required for source snapshot fixtures")

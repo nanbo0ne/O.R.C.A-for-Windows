@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -412,6 +413,9 @@ func TestBrowserConcurrentStateCommandsEvents(t *testing.T) {
 	wg.Wait()
 }
 func TestBrowserReleaseChannelEnabled(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("browser control ships on Windows; this gate runs on the Windows runner")
+	}
 	old := channel
 	channel = "stable"
 	defer func() { channel = old }()
