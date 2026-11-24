@@ -288,7 +288,7 @@ func estimateTextTokens(s string) int {
 // summarize so the UI can show a "compacting…" placeholder, and a Done event
 // (carrying the summary) replaces it.
 func (a *Agent) compact(ctx context.Context, trigger, instructions string, force bool) error {
-	msgs := a.session.Messages
+	msgs := a.session.Snapshot()
 	head, start, ok := a.planCompaction(msgs, minCompactMessages)
 	if !ok {
 		// A single huge message can still be worth folding. Keep the normal
@@ -306,6 +306,11 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	if !force && !foldEconomics(region) {
 		return nil
 	}
+	ctx, release, err := a.beginSummaryTask(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
 
@@ -361,8 +366,10 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		a.emitCompactionAborted(trigger)
 		return err
 	}
-	a.session.RewriteContext(compacted, &DisplayEntry{Trigger: trigger, Messages: len(removed), Summary: checkpoint, Archive: archived})
-	a.session.IncrementRewrite()
+	if err := a.session.commitCompaction(ctx, msgs, compacted, &DisplayEntry{Trigger: trigger, Messages: len(removed), Summary: checkpoint, Archive: archived}); err != nil {
+		a.emitCompactionAborted(trigger)
+		return err
+	}
 
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(removed), Summary: checkpoint, Archive: archived,
@@ -383,10 +390,15 @@ func (a *Agent) emitCompactionAborted(trigger string) {
 // boundary (a user message), so the split never severs a tool_call/result pair —
 // those live within one turn. A no-op when the region is empty.
 func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
-	msgs := a.session.Messages
+	msgs := a.session.Snapshot()
 	if fromIdx < 0 || fromIdx >= len(msgs) {
 		return nil
 	}
+	ctx, release, err := a.beginSummaryTask(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	region := msgs[fromIdx:]
 	summary, err := a.summarize(ctx, region, "")
 	if err != nil {
@@ -411,8 +423,9 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	a.session.RewriteContext(next, &DisplayEntry{Trigger: "from", Messages: len(region), Summary: summary, Archive: archived})
-	a.session.IncrementRewrite()
+	if err := a.session.commitCompaction(ctx, msgs, next, &DisplayEntry{Trigger: "from", Messages: len(region), Summary: summary, Archive: archived}); err != nil {
+		return err
+	}
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: "from", Messages: len(region), Summary: summary, Archive: archived}})
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d later messages → summary", len(region))})
@@ -423,7 +436,7 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 // a single summary, keeping toIdx onward verbatim ("summarize up to here"). toIdx
 // is a turn boundary, so no tool pair is split. A no-op when the region is empty.
 func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
-	msgs := a.session.Messages
+	msgs := a.session.Snapshot()
 	head := 0
 	if len(msgs) > 0 && msgs[0].Role == provider.RoleSystem {
 		head = 1
@@ -431,6 +444,11 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	if toIdx <= head || toIdx > len(msgs) {
 		return nil
 	}
+	ctx, release, err := a.beginSummaryTask(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	region := msgs[head:toIdx]
 	summary, err := a.summarize(ctx, region, "")
 	if err != nil {
@@ -456,8 +474,9 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	a.session.RewriteContext(next, &DisplayEntry{Trigger: "up-to", Messages: len(region), Summary: summary, Archive: archived})
-	a.session.IncrementRewrite()
+	if err := a.session.commitCompaction(ctx, msgs, next, &DisplayEntry{Trigger: "up-to", Messages: len(region), Summary: summary, Archive: archived}); err != nil {
+		return err
+	}
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: "up-to", Messages: len(region), Summary: summary, Archive: archived}})
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d earlier messages → summary", len(region))})
@@ -613,7 +632,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 		return checkpoint, nil
 	}
 	kind := classifyCompactionError(err)
-	if kind == compactionModelUnavailable || kind == compactionContextTooLarge || kind == compactionCancelled {
+	if provider.ReplayForbidden(err) || kind == compactionModelUnavailable || kind == compactionContextTooLarge || kind == compactionCancelled {
 		return "", &compactionError{kind: kind, err: err}
 	}
 
@@ -653,7 +672,25 @@ type summaryAttempt struct {
 	conversation    bool
 }
 
+// Keep provider identity valid until the checkpoint is committed, including
+// manual summaries that do not run inside the normal Agent turn loop.
+func (a *Agent) beginSummaryTask(ctx context.Context) (context.Context, func(), error) {
+	ctx, endTurn := WithParentTurn(ctx)
+	if scoped, ok := a.prov.(provider.TaskProvider); ok {
+		parent, _ := ParentTurn(ctx)
+		taskCtx, release, err := scoped.BeginTask(ctx, a.session.ConversationID(), parent)
+		if err != nil {
+			endTurn()
+			return nil, nil, err
+		}
+		return taskCtx, func() { release(); endTurn() }, nil
+	}
+	return ctx, endTurn, nil
+}
+
 func (a *Agent) summarizeAttempt(ctx context.Context, region []provider.Message, instructions string, attempt summaryAttempt) (string, error) {
+	ctx, cancel := context.WithCancel(provider.WithCancellationDiagnostic(ctx))
+	defer cancel()
 	sys := checkpointSystemPrompt
 	if strings.TrimSpace(instructions) != "" {
 		sys += "\n\nAdditional focus for this CONTEXT CHECKPOINT (prioritize keeping this):\n" + strings.TrimSpace(instructions)
@@ -670,9 +707,11 @@ func (a *Agent) summarizeAttempt(ctx context.Context, region []provider.Message,
 			a.sink.Emit(event.Event{Kind: event.Usage, ParentTurnID: parentTurnID, RequestID: requestID, ProviderEndpoint: a.providerEndpoint, Usage: usage, Pricing: requestPricing})
 		}
 	}()
+	parentTaskID, _ := ParentTurn(ctx)
 	ch, err := a.prov.Stream(ctx, provider.Request{
-		RequestID: requestID,
-		Purpose:   requestPurpose(attempt.purpose),
+		ParentTaskID: parentTaskID,
+		RequestID:    requestID,
+		Purpose:      requestPurpose(attempt.purpose),
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: sys},
 			{Role: provider.RoleUser, Content: renderTranscript(region)},
@@ -683,25 +722,47 @@ func (a *Agent) summarizeAttempt(ctx context.Context, region []provider.Message,
 		ReasoningEffortOverride: attempt.effortOverride,
 	})
 	if err != nil {
-		return "", err
+		return "", completionFailure(ctx, err)
 	}
 
 	var b strings.Builder
-	for chunk := range ch {
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", provider.NoRequestReplay(provider.CancellationError(ctx))
+		}
+		var chunk provider.Chunk
+		select {
+		case <-ctx.Done():
+			return "", provider.NoRequestReplay(provider.CancellationError(ctx))
+		case next, ok := <-ch:
+			if !ok {
+				return "", completionFailure(ctx, provider.NoRequestReplay(errors.New("summary stream ended without a completion marker")))
+			}
+			chunk = next
+		}
 		switch chunk.Type {
 		case provider.ChunkText:
 			b.WriteString(chunk.Text)
 		case provider.ChunkUsage:
 			usage = chunk.Usage
 		case provider.ChunkError:
-			return "", chunk.Err
+			if chunk.Err == nil {
+				return "", completionFailure(ctx, provider.NoRequestReplay(errors.New("summary stream failed without an error detail")))
+			}
+			return "", completionFailure(ctx, chunk.Err)
+		case provider.ChunkToolCallStart, provider.ChunkToolCall:
+			return "", completionFailure(ctx, provider.NoRequestReplay(errors.New("summary response unexpectedly requested a tool")))
+		case provider.ChunkDone:
+			if err := ctx.Err(); err != nil {
+				return "", provider.NoRequestReplay(provider.CancellationError(ctx))
+			}
+			s := strings.TrimSpace(b.String())
+			if s == "" {
+				return "", fmt.Errorf("summarizer returned empty output")
+			}
+			return s, nil
 		}
 	}
-	s := strings.TrimSpace(b.String())
-	if s == "" {
-		return "", fmt.Errorf("summarizer returned empty output")
-	}
-	return s, nil
 }
 
 func requestPurpose(p provider.RequestPurpose) provider.RequestPurpose {

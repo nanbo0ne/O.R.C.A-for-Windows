@@ -25,6 +25,9 @@ type pendingDesktopUpdate struct {
 func (a *App) Version() string { return version }
 
 func (a *App) CheckUpdate() (*UpdateInfo, error) {
+	if reason := disabledDesktopUpdateReason(); reason != "" {
+		return &UpdateInfo{Current: version, Err: reason}, nil
+	}
 	client, err := httpClient()
 	if err != nil {
 		return nil, err
@@ -62,6 +65,9 @@ func (a *App) CheckUpdate() (*UpdateInfo, error) {
 }
 
 func (a *App) OpenDownloadPage() {
+	if disabledDesktopUpdateReason() != "" {
+		return
+	}
 	a.updateMu.RLock()
 	address := a.updateURL
 	a.updateMu.RUnlock()
@@ -87,6 +93,9 @@ func (a *App) GetUpdateStatus() updateProgress {
 // selection is runtime-only: credentials, proxy settings, and user config are
 // never written as part of updater state.
 func (a *App) SetUpdateSource(source string) error {
+	if reason := disabledDesktopUpdateReason(); reason != "" {
+		return errors.New(reason)
+	}
 	source = strings.ToLower(strings.TrimSpace(source))
 	if source != updateSourceMac && source != updateSourceGitHub {
 		return errors.New("不支持的更新源")
@@ -110,6 +119,9 @@ func (a *App) SetUpdateSource(source string) error {
 }
 
 func (a *App) DownloadUpdate() error {
+	if reason := disabledDesktopUpdateReason(); reason != "" {
+		return errors.New(reason)
+	}
 	a.updateMu.Lock()
 	if a.updateCancel != nil || a.updateApplying.Load() {
 		a.updateMu.Unlock()
@@ -182,6 +194,9 @@ func (a *App) DownloadUpdate() error {
 }
 
 func (a *App) CancelUpdateDownload() error {
+	if reason := disabledDesktopUpdateReason(); reason != "" {
+		return errors.New(reason)
+	}
 	a.updateMu.Lock()
 	defer a.updateMu.Unlock()
 	if a.updateCancel != nil {
@@ -216,6 +231,9 @@ func (a *App) verifiedUpdate() (*pendingDesktopUpdate, error) {
 }
 
 func (a *App) ApplyUpdate() error {
+	if reason := disabledDesktopUpdateReason(); reason != "" {
+		return errors.New(reason)
+	}
 	if !canSelfUpdate() {
 		return errors.New("此安装方式需要打开下载的安装包完成更新")
 	}
@@ -260,6 +278,9 @@ func (a *App) ApplyUpdate() error {
 }
 
 func (a *App) OpenDownloadedUpdate() error {
+	if reason := disabledDesktopUpdateReason(); reason != "" {
+		return errors.New(reason)
+	}
 	pending, err := a.verifiedUpdate()
 	if err != nil {
 		return err

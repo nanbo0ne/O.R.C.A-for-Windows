@@ -2,6 +2,7 @@ import type { ContextInfo, ContextPanelInfo, WireUsage } from "./types";
 
 export interface ContextPanelUsageSummary {
   usedTokens: number;
+  contextAvailable: boolean;
   windowTokens: number;
   promptTokens: number;
   completionTokens: number;
@@ -136,6 +137,8 @@ export function computeContextPanelUsage({
 
   return {
     usedTokens: snapshotUse,
+    // Both values at zero are the backend's unavailable-context sentinel.
+    contextAvailable: windowTokens > 0 || snapshotUse > 0,
     windowTokens,
     promptTokens,
     completionTokens,

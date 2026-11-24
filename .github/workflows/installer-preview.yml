@@ -13,6 +13,8 @@ jobs:
     name: Windows installer preview and acceptance
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      ORCA_PREVIEW_VERSION: '3.0.14'
     defaults:
       run:
         shell: pwsh
@@ -94,34 +96,33 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Frontend tests failed.' }
 
       - name: Build preview installer
+        shell: bash
         run: |
-          ./scripts/build-installer-preview.ps1 -OutputDirectory "$env:GITHUB_WORKSPACE\preview-dist" *>&1 |
-            Tee-Object -FilePath "$env:GITHUB_WORKSPACE\preview-dist\reports\preview-build.log"
+          scripts/desktop-build.sh windows/amd64 "v${ORCA_PREVIEW_VERSION}" stable 2>&1 |
+            tee preview-dist/reports/preview-build.log
 
-      - name: Stage candidate for acceptance
+      - name: Test Windows installer upgrade and data retention
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $copies = @(
-            @{ Source = 'preview-dist\app\amd64\Orca.exe'; Destination = 'desktop\build\bin\Orca.exe' },
-            @{ Source = 'preview-dist\O.R.C.A-for-Windows-v3.0.10-windows-amd64-preview-installer.exe'; Destination = 'dist\O.R.C.A-for-Windows-windows-amd64-installer.exe' }
-          )
-          $hashes = foreach ($copy in $copies) {
-            $source = Join-Path $env:GITHUB_WORKSPACE $copy.Source
-            $destination = Join-Path $env:GITHUB_WORKSPACE $copy.Destination
-            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
-            Copy-Item -LiteralPath $source -Destination $destination -Force
+          ./scripts/test-desktop-installer.ps1 -ExpectedVersion $env:ORCA_PREVIEW_VERSION *>&1 |
+            Tee-Object -FilePath "$env:GITHUB_WORKSPACE\preview-dist\reports\acceptance.log"
+
+      - name: Stage tested preview artifacts
+        run: |
+          $packageNames = @('O.R.C.A-for-Windows-windows-amd64-installer.exe', 'O.R.C.A-for-Windows-windows-amd64.zip')
+          $hashes = foreach ($name in $packageNames) {
+            $source = Join-Path 'dist' $name
+            $destination = Join-Path 'preview-dist' $name
+            Copy-Item -LiteralPath $source -Destination $destination
             $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
             if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash) {
               throw "Candidate staging hash mismatch: $destination"
             }
-            [ordered]@{ source = $copy.Source; destination = $copy.Destination; sha256 = $hash }
+            [ordered]@{ file = $name; sha256 = $hash }
           }
           $hashes | ConvertTo-Json | Set-Content -LiteralPath "$env:GITHUB_WORKSPACE\preview-dist\reports\candidate-hashes.json" -Encoding utf8
-
-      - name: Test Windows installer upgrade and data retention
-        timeout-minutes: 15
-        run: |
-          ./scripts/test-desktop-installer.ps1 -ExpectedVersion '3.0.10' *>&1 |
-            Tee-Object -FilePath "$env:GITHUB_WORKSPACE\preview-dist\reports\acceptance.log"
 
       - name: Collect acceptance and build reports
         if: always() && runner.environment == 'github-hosted'
@@ -134,22 +135,13 @@ jobs:
               Copy-Item -LiteralPath $evidence -Destination (Join-Path $reports $attempt.Name) -Recurse -Force
             }
           }
-          $staging = Join-Path $env:GITHUB_WORKSPACE '.tmp\installer-preview'
-          if (Test-Path -LiteralPath $staging -PathType Container) {
-            foreach ($stage in Get-ChildItem -LiteralPath $staging -Directory) {
-              $log = Join-Path $stage.FullName 'build.log'
-              if (Test-Path -LiteralPath $log -PathType Leaf) {
-                Copy-Item -LiteralPath $log -Destination (Join-Path $reports "build-$($stage.Name).log")
-              }
-            }
-          }
 
       # Access follows the repository's Actions artifact permissions.
       - name: Upload preview candidate and reports
         if: always() && runner.environment == 'github-hosted'
         uses: actions/upload-artifact@v7
         with:
-          name: installer-preview-3.0.10-windows-amd64-${{ github.run_id }}-${{ github.run_attempt }}
+          name: installer-preview-${{ env.ORCA_PREVIEW_VERSION }}-windows-amd64-${{ github.run_id }}-${{ github.run_attempt }}
           path: preview-dist/
           if-no-files-found: error
           retention-days: 7

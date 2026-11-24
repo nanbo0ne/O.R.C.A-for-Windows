@@ -93,7 +93,9 @@ func (c *Config) Environment() map[string]string {
 	env := make(map[string]string)
 	for _, entry := range os.Environ() {
 		if key, value, ok := strings.Cut(entry, "="); ok {
-			env[key] = value
+			if ProfileEnvironmentKey(key) {
+				env[key] = value
+			}
 		}
 	}
 	if c != nil {
@@ -118,7 +120,7 @@ func environmentKey(key string) string {
 }
 
 func lookupScopedEnv(scope map[string]string, key string) (string, bool) {
-	if value, ok := os.LookupEnv(key); ok {
+	if value, ok := ProfileLookupEnv(key); ok {
 		return value, true
 	}
 	if value, ok := scope[key]; ok {
@@ -1385,11 +1387,6 @@ func LoadForRoot(root string) (*Config, error) {
 	cfg := Default()
 	cfg.env = projectEnv
 
-	projectTOML := product.ProjectConfigName
-	if root != "." {
-		projectTOML = filepath.Join(root, product.ProjectConfigName)
-	}
-
 	var tomlSources []string
 	if legacy := legacyUserConfigPath(); legacy != "" {
 		tomlSources = append(tomlSources, legacy)
@@ -1397,14 +1394,13 @@ func LoadForRoot(root string) (*Config, error) {
 	if uc := userConfigPath(); uc != "" {
 		tomlSources = append(tomlSources, uc)
 	}
-	legacyProjectTOML := product.LegacyProjectConfigName
-	if root != "." {
-		legacyProjectTOML = filepath.Join(root, product.LegacyProjectConfigName)
-	}
 	// Legacy files are read first; V3 names win without mutating tracked files.
-	tomlSources = append(tomlSources, legacyProjectTOML, projectTOML)
+	tomlSources = append(tomlSources, projectConfigSources(root)...)
 	sawConfigFile := false
 	for _, path := range tomlSources {
+		if err := ValidateProfileDataPath(path); err != nil {
+			return nil, err
+		}
 		if _, err := os.Stat(path); err == nil {
 			sawConfigFile = true
 			if err := migrateLegacyMCPTiersFile(path); err != nil {
@@ -1435,6 +1431,9 @@ func LoadForRoot(root string) (*Config, error) {
 	mcpFile := mcpJSONFile
 	if root != "." {
 		mcpFile = filepath.Join(root, mcpJSONFile)
+	}
+	if IsolatedProfileEnabled() {
+		mcpFile = ProjectStatePath(root, mcpJSONFile)
 	}
 	entries, err := loadMCPJSON(mcpFile)
 	if err != nil {
@@ -1606,6 +1605,11 @@ func mergeTOMLProviders(paths []string, fallback []ProviderEntry) ([]ProviderEnt
 // of resetting to defaults. .env is loaded so api_key_env resolution works while
 // the wizard decides which keys are still missing.
 func LoadForEdit(path string) *Config {
+	if err := ValidateProfileDataPath(path); err != nil {
+		cfg := Default()
+		cfg.loadErr = err
+		return cfg
+	}
 	cfgEnv := loadDotEnvForRoot(filepath.Dir(path))
 	cfg := Default()
 	cfg.env = cfgEnv
@@ -2243,7 +2247,7 @@ func retargetDesktopOfficialRef(ref string, access map[string]bool) string {
 }
 
 func userConfigPath() string {
-	dir, err := os.UserConfigDir()
+	dir, err := ProfileConfigDir()
 	if err != nil {
 		return ""
 	}
@@ -2251,6 +2255,9 @@ func userConfigPath() string {
 }
 
 func legacyUserConfigPath() string {
+	if IsolatedProfileEnabled() {
+		return ""
+	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return ""
@@ -2274,7 +2281,7 @@ func UserConfigPath() string { return userConfigPath() }
 // committed, and resolve from any working directory. "" when the user config dir
 // can't be resolved.
 func UserCredentialsPath() string {
-	dir, err := os.UserConfigDir()
+	dir, err := ProfileConfigDir()
 	if err != nil {
 		return ""
 	}
@@ -2282,6 +2289,9 @@ func UserCredentialsPath() string {
 }
 
 func LegacyUserCredentialsPath() string {
+	if IsolatedProfileEnabled() {
+		return ""
+	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return ""
@@ -2293,7 +2303,7 @@ func LegacyUserCredentialsPath() string {
 // traceability (one timestamped .jsonl per compaction). Empty if the user config
 // directory cannot be resolved, in which case archiving is skipped.
 func ArchiveDir() string {
-	dir, err := os.UserConfigDir()
+	dir, err := ProfileConfigDir()
 	if err != nil {
 		return ""
 	}
@@ -2304,7 +2314,7 @@ func ArchiveDir() string {
 // Used by `deepseek-orca chat --continue` / `--resume` to find the recent ones. Empty
 // if the user config dir can't be resolved - sessions then aren't saved.
 func SessionDir() string {
-	dir, err := os.UserConfigDir()
+	dir, err := ProfileConfigDir()
 	if err != nil {
 		return ""
 	}
@@ -2338,7 +2348,7 @@ func WorkspaceSlug(absPath string) string {
 // shares one root the user can wipe in a single rm. Empty when the OS dir is
 // unavailable - callers must tolerate that (caching is best-effort).
 func CacheDir() string {
-	dir, err := os.UserConfigDir()
+	dir, err := ProfileConfigDir()
 	if err != nil {
 		return ""
 	}
@@ -2349,7 +2359,7 @@ func CacheDir() string {
 // the user-global ORCA.md and the per-project auto-memory store live. Empty
 // when the user config dir can't be resolved, which disables user-scoped memory.
 func MemoryUserDir() string {
-	dir, err := os.UserConfigDir()
+	dir, err := ProfileConfigDir()
 	if err != nil {
 		return ""
 	}
@@ -2405,14 +2415,14 @@ func CommandDirs() []string {
 func CommandDirsForRoot(root string) []string {
 	root = resolveRoot(root)
 	var dirs []string
-	if home, err := os.UserHomeDir(); err == nil {
+	if home, err := ProfileHomeDir(); err == nil {
 		dirs = append(dirs, conventionSubdirsAsc(home, "commands")...)
 	}
-	if dir, err := os.UserConfigDir(); err == nil {
+	if dir, err := ProfileConfigDir(); err == nil {
 		dirs = append(dirs, filepath.Join(dir, product.LegacyConfigDirName, "commands"))
 		dirs = append(dirs, filepath.Join(dir, product.ConfigDirName, "commands"))
 	}
-	dirs = append(dirs, conventionSubdirsAsc(root, "commands")...)
+	dirs = append(dirs, ProjectConventionPaths(root, "commands")...)
 	return dirs
 }
 
@@ -2425,6 +2435,15 @@ func SourcePath() string {
 // root, or "" if none. Equivalent to SourcePath() when root is ".".
 func SourcePathForRoot(root string) string {
 	root = resolveRoot(root)
+	if IsolatedProfileEnabled() {
+		path := ProjectConfigPath(root)
+		if ValidateProfileDataPath(path) == nil {
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
+		}
+		return userConfigPath()
+	}
 	projectTOML := product.ProjectConfigName
 	if root != "." {
 		projectTOML = filepath.Join(root, product.ProjectConfigName)
@@ -2454,6 +2473,9 @@ func SourcePathForRoot(root string) string {
 
 // WriteFile writes the configuration to path as annotated TOML.
 func (c *Config) WriteFile(path string) error {
+	if err := ValidateProfileDataPath(path); err != nil {
+		return err
+	}
 	if c.loadErr != nil {
 		return c.loadErr
 	}
@@ -2692,6 +2714,15 @@ func (e *ProviderEntry) APIKey() string {
 // Configured reports whether the provider's api_key_env is set - the same check
 // Validate enforces, so pickers can filter on it.
 func (e *ProviderEntry) Configured() bool {
+	// The desktop account adapter authorizes each request with a scoped runtime
+	// credential. A catalog entry is not an API key and grants no server access.
+	if e.Kind == "orca-account" {
+		return true
+	}
+	// Web login/consent is checked by the adapter, never a global readiness env.
+	if e.Kind == "deepseekweb-beta" {
+		return true
+	}
 	return e.APIKey() != ""
 }
 

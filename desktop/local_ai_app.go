@@ -330,27 +330,30 @@ func localRuntimeProviderEntry(modelID string, status localai.RuntimeStatus) con
 }
 
 func (a *App) buildController(ctx context.Context, opts boot.Options, ownerTabID ...string) (*control.Controller, error) {
-	cfg, err := config.LoadForRoot(opts.WorkspaceRoot)
-	if err != nil {
-		return nil, err
+	trustedComputerUse := false
+	prepare := opts.PrepareRuntimeProviders
+	opts.PrepareRuntimeProviders = func(ctx context.Context, cfg *config.Config, model string) ([]config.ProviderEntry, error) {
+		trustedComputerUse = cfg.Desktop.ComputerUseFullAccess && cfg.Desktop.ComputerUseConsent == computerUseConsentVersion
+		var providers []config.ProviderEntry
+		if prepare != nil {
+			var err error
+			providers, err = prepare(ctx, cfg, model)
+			if err != nil {
+				return nil, err
+			}
+		}
+		local, err := a.prepareLocalRuntimeProviders(ctx, cfg, model)
+		return append(providers, local...), err
 	}
-	model := strings.TrimSpace(opts.Model)
-	if model == "" {
-		model = strings.TrimSpace(cfg.DefaultModel)
-	}
-	providers, err := a.prepareLocalRuntimeProviders(ctx, cfg, model)
-	if err != nil {
-		return nil, err
-	}
-	opts.RuntimeProviders = append(opts.RuntimeProviders, providers...)
 	if runtime.GOOS == "windows" && len(ownerTabID) > 0 && strings.TrimSpace(ownerTabID[0]) != "" {
 		opts.ExtraTools = append(opts.ExtraTools, a.computerTools(ownerTabID[0])...)
+		opts.ExtraTools = append(opts.ExtraTools, a.browserTools(ownerTabID[0])...)
 	}
 	ctrl, err := boot.Build(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	ctrl.SetTrustedComputerUseAccess(cfg.Desktop.ComputerUseFullAccess && cfg.Desktop.ComputerUseConsent == computerUseConsentVersion)
+	ctrl.SetTrustedComputerUseAccess(trustedComputerUse)
 	return ctrl, nil
 }
 

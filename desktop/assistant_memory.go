@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -545,6 +544,9 @@ func (a *App) generateAssistantMemoryUpdates(item assistantMemoryPendingItem, ms
 	if err != nil {
 		return nil, err
 	}
+	if err := automaticAuxiliaryAllowed(entry); err != nil {
+		return nil, err
+	}
 	prov, err := boot.NewProviderWithProxy(entry, netclient.ProxySpec{Mode: netclient.ModeAuto})
 	if err != nil {
 		return nil, err
@@ -559,25 +561,15 @@ func (a *App) generateAssistantMemoryUpdates(item assistantMemoryPendingItem, ms
 			{Role: provider.RoleUser, Content: assistantMemoryUpdateUserPrompt(item, msgs)},
 		},
 	}
-	ch, err := prov.Stream(ctx, req)
+	ch, err := prov.Stream(ctx, bindAuxiliaryRequest(ctx, auxiliaryMemory, req))
 	if err != nil {
 		return nil, err
 	}
-	var b strings.Builder
-	for chunk := range ch {
-		switch chunk.Type {
-		case provider.ChunkText:
-			b.WriteString(chunk.Text)
-		case provider.ChunkError:
-			if chunk.Err != nil {
-				return nil, chunk.Err
-			}
-		}
-	}
-	if err := ctx.Err(); err != nil && !errors.Is(err, context.Canceled) {
+	text, err := collectAuxiliaryText(ctx, ch)
+	if err != nil {
 		return nil, err
 	}
-	return parseAssistantMemoryUpdates(b.String())
+	return parseAssistantMemoryUpdates(text)
 }
 
 func (a *App) providerEntryForWorkspace(workspaceRoot string, modelRef string) (*config.ProviderEntry, error) {
@@ -585,19 +577,7 @@ func (a *App) providerEntryForWorkspace(workspaceRoot string, modelRef string) (
 	if err != nil {
 		return nil, err
 	}
-	ref := strings.TrimSpace(modelRef)
-	if ref == "" {
-		ref = cfg.DefaultModel
-	}
-	resolved, _, ok := cfg.ResolveModelWithFallback(ref)
-	if !ok {
-		return nil, fmt.Errorf("unknown model %q", ref)
-	}
-	entry, ok := cfg.ResolveModel(resolved)
-	if !ok {
-		return nil, fmt.Errorf("unknown model %q", resolved)
-	}
-	return entry, nil
+	return exactAuxiliaryProvider(cfg, modelRef)
 }
 
 const assistantMemoryUpdateSystemPrompt = `You update Orca's private assistant-mode profile memory.

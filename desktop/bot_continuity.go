@@ -19,13 +19,12 @@ func (a *App) decideBotContinuity(ctx context.Context, modelRef string, previous
 	if err != nil {
 		return false, err
 	}
-	resolved, _, ok := cfg.ResolveModelWithFallback(modelRef)
-	if !ok {
-		return false, fmt.Errorf("unknown bot model %q", modelRef)
+	entry, err := exactAuxiliaryProvider(cfg, modelRef)
+	if err != nil {
+		return false, err
 	}
-	entry, ok := cfg.ResolveModel(resolved)
-	if !ok {
-		return false, fmt.Errorf("unknown bot model %q", resolved)
+	if err := automaticAuxiliaryAllowed(entry); err != nil {
+		return false, err
 	}
 	prov, err := boot.NewProviderWithProxy(entry, cfg.NetworkProxySpec())
 	if err != nil {
@@ -35,23 +34,18 @@ func (a *App) decideBotContinuity(ctx context.Context, modelRef string, previous
 	prompt := fmt.Sprintf("Previous segment title: %s\nRecent user message: %s\nPrevious final answer: %s\nCurrent message: %s\n\nReply only RELATED or NEW.", previous.Title, userTail, assistantTail, strings.TrimSpace(current))
 	decisionCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	stream, err := prov.Stream(decisionCtx, provider.Request{Temperature: 0, MaxTokens: 12, Messages: []provider.Message{
+	stream, err := prov.Stream(decisionCtx, bindAuxiliaryRequest(decisionCtx, provider.RequestPurposeClassifier, provider.Request{Temperature: 0, MaxTokens: 12, Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "Decide whether a new mobile assistant message continues the prior conversation segment. RELATED only when carrying over prior context is clearly useful; otherwise NEW."},
 		{Role: provider.RoleUser, Content: prompt},
-	}})
+	}}))
 	if err != nil {
 		return false, err
 	}
-	var out strings.Builder
-	for chunk := range stream {
-		if chunk.Type == provider.ChunkError && chunk.Err != nil {
-			return false, chunk.Err
-		}
-		if chunk.Type == provider.ChunkText {
-			out.WriteString(chunk.Text)
-		}
+	out, err := collectAuxiliaryText(decisionCtx, stream)
+	if err != nil {
+		return false, err
 	}
-	answer := strings.ToUpper(strings.TrimSpace(out.String()))
+	answer := strings.ToUpper(strings.TrimSpace(out))
 	if strings.HasPrefix(answer, "RELATED") {
 		return true, nil
 	}

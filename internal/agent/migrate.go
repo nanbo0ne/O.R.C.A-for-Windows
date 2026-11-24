@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
 )
 
@@ -74,6 +75,9 @@ func MigrateLegacySessionsFromConfigDir(srcDir, globalDest string, projectDir fu
 }
 
 func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(string) string) (int, error) {
+	if config.IsolatedProfileEnabled() {
+		return 0, nil
+	}
 	if strings.TrimSpace(marker) == "" {
 		marker = legacyImportMarker
 	}

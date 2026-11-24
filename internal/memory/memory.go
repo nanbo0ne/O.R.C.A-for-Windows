@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 )
 
 // Set is everything memory loaded for one session: the hierarchical docs and a
@@ -62,6 +64,12 @@ func NormalizeProfile(profile string) string {
 // auto-memory index. It is best-effort and never errors — missing files just
 // mean less memory — so boot can call it unconditionally.
 func Load(opts Options) *Set {
+	if config.IsolatedProfileEnabled() {
+		opts.UserDir = config.MemoryUserDir()
+		if opts.AssistantStoreDir != "" && config.ValidateProfileDataPath(opts.AssistantStoreDir) != nil {
+			opts.AssistantStoreDir = ""
+		}
+	}
 	cwd := opts.CWD
 	if cwd == "" {
 		cwd = "."
@@ -116,6 +124,15 @@ func combineIndexes(shared, assistant string) string {
 // <userDir>, ScopeLocal → <cwd> with the *.local.md names, anything else → <cwd>.
 // Returns "" for ScopeUser when no user dir is configured.
 func (s *Set) DocPath(scope Scope) string {
+	if config.IsolatedProfileEnabled() {
+		if scope == ScopeUser {
+			return filepath.Join(config.MemoryUserDir(), defaultDocName)
+		}
+		if scope == ScopeLocal {
+			return config.ProjectStatePath(s.CWD, defaultLocalName)
+		}
+		return config.ProjectStatePath(s.CWD, defaultDocName)
+	}
 	dir := s.CWD
 	names, def := docNames, defaultDocName
 	switch scope {

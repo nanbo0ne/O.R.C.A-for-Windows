@@ -29,9 +29,10 @@ func TestElementFromPointPassesPOINTByValue(t *testing.T) {
 	}
 	var receivedThis, receivedPoint uintptr
 	element := uia.IUnKnown{}
-	vtbl := uia.IUIAutomationVtbl{ElementFromPoint: syscall.NewCallback(func(this, packed, result uintptr) uintptr {
+	vtbl := uia.IUIAutomationVtbl{ElementFromPoint: syscall.NewCallback(func(this, packed uintptr, result **uia.IUIAutomationElement) uintptr {
 		receivedThis, receivedPoint = this, packed
-		*(**uia.IUIAutomationElement)(unsafe.Pointer(result)) = (*uia.IUIAutomationElement)(unsafe.Pointer(&element))
+		runtime.GC()
+		*result = (*uia.IUIAutomationElement)(unsafe.Pointer(&element))
 		return 0
 	})}
 	object := struct{ vtbl *uia.IUIAutomationVtbl }{&vtbl}

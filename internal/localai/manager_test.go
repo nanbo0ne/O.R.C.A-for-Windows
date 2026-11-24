@@ -255,7 +255,8 @@ func TestPauseResumeWaitsForPreviousHTTPWorker(t *testing.T) {
 
 	var eventsMu sync.Mutex
 	var events []DownloadTask
-	m := NewManager(t.TempDir(), func(task DownloadTask) {
+	root := t.TempDir()
+	m := NewManagerWithModels(root, filepath.Join(root, "models"), func(task DownloadTask) {
 		eventsMu.Lock()
 		events = append(events, task)
 		eventsMu.Unlock()
@@ -293,13 +294,14 @@ func TestPauseResumeWaitsForPreviousHTTPWorker(t *testing.T) {
 	for {
 		m.mu.Lock()
 		state := m.tasks[task.ID].State
+		taskError := m.tasks[task.ID].Error
 		workers := len(m.workerDone)
 		m.mu.Unlock()
 		if state == TaskCompleted && workers == 0 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("rapid pause/resume did not settle: state=%s workers=%d", state, workers)
+			t.Fatalf("rapid pause/resume did not settle: state=%s workers=%d error=%q", state, workers, taskError)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -313,6 +315,10 @@ func TestPauseResumeWaitsForPreviousHTTPWorker(t *testing.T) {
 	part := filepath.Join(m.downloads, task.ID, artifact.Name+".part")
 	if ok, err := fileMatches(part, artifact); !ok || err != nil {
 		t.Fatalf("resumed part must remain intact: ok=%v err=%v", ok, err)
+	}
+	installed := filepath.Join(root, "models", task.TargetID, artifact.Name)
+	if ok, err := fileMatches(installed, artifact); !ok || err != nil {
+		t.Fatalf("resumed model must install in its fixture: ok=%v err=%v", ok, err)
 	}
 
 	eventsMu.Lock()

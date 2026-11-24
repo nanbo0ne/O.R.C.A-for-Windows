@@ -102,7 +102,7 @@ type Store struct {
 func New(opts Options) *Store {
 	home := opts.HomeDir
 	if home == "" {
-		if h, err := os.UserHomeDir(); err == nil {
+		if h, err := config.ProfileHomeDir(); err == nil {
 			home = h
 		}
 	}
@@ -118,9 +118,15 @@ func New(opts Options) *Store {
 			base = wd
 		}
 	}
-	custom := dedupePaths(resolveCustomPaths(opts.CustomPaths, base, home))
+	explicitHome := home
+	if config.IsolatedProfileEnabled() && opts.HomeDir == "" {
+		if actualHome, err := os.UserHomeDir(); err == nil {
+			explicitHome = actualHome
+		}
+	}
+	custom := dedupePaths(resolveCustomPaths(opts.CustomPaths, base, explicitHome))
 	excluded := map[string]bool{}
-	for _, p := range dedupePaths(resolveCustomPaths(opts.ExcludedPaths, base, home)) {
+	for _, p := range dedupePaths(resolveCustomPaths(opts.ExcludedPaths, base, explicitHome)) {
 		excluded[config.CanonicalSkillPath(p)] = true
 	}
 	stderr := opts.Stderr
@@ -171,8 +177,9 @@ func (s *Store) roots() []Root {
 	}
 	var dirs []de
 	if s.projectRoot != "" {
-		for _, c := range config.ConventionDirs {
-			dirs = append(dirs, de{filepath.Join(s.projectRoot, c, SkillsDirname), ScopeProject})
+		paths := config.ProjectConventionPaths(s.projectRoot, SkillsDirname)
+		for i := len(paths) - 1; i >= 0; i-- {
+			dirs = append(dirs, de{paths[i], ScopeProject})
 		}
 	}
 	for _, d := range s.customPaths {
@@ -183,6 +190,9 @@ func (s *Store) roots() []Root {
 	}
 	out := make([]Root, 0, len(dirs))
 	for _, d := range dirs {
+		if !config.ProfileDiscoveryAllowed(d.dir) {
+			continue
+		}
 		if s.excludedPaths[config.CanonicalSkillPath(d.dir)] {
 			continue
 		}
@@ -250,15 +260,29 @@ func pathStatus(dir string) PathStatus {
 // root wins) with built-ins folded in last, sorted by name so the prefix index
 // stays stable and cacheable.
 func (s *Store) List() []Skill {
+	return s.Enabled(s.ListAll())
+}
+
+// Enabled derives the executable view from the same discovery snapshot used by
+// the settings catalog. It does not rescan or retain a stale cross-project cache.
+func (s *Store) Enabled(all []Skill) []Skill {
+	out := make([]Skill, 0, len(all))
+	for _, sk := range all {
+		if !s.disabledName(sk.Name) {
+			out = append(out, sk)
+		}
+	}
+	return out
+}
+
+// ListAll includes disabled skills, preserving root precedence and exclusions.
+func (s *Store) ListAll() []Skill {
 	byName := map[string]Skill{}
 	for _, r := range s.roots() {
 		if r.Status != StatusOK {
 			continue
 		}
 		for _, sk := range s.discoverRoot(r) {
-			if s.disabledName(sk.Name) {
-				continue
-			}
 			if _, dup := byName[sk.Name]; !dup {
 				byName[sk.Name] = sk
 			}
@@ -266,9 +290,6 @@ func (s *Store) List() []Skill {
 	}
 	if !s.disableBuiltins {
 		for _, sk := range builtinSkills() {
-			if s.disabledName(sk.Name) {
-				continue
-			}
 			if _, dup := byName[sk.Name]; !dup {
 				byName[sk.Name] = sk
 			}
@@ -306,6 +327,9 @@ func (s *Store) discoverRoot(r Root) []Skill {
 }
 
 func (s *Store) scanDir(dir string, scope Scope, depth int, seen map[string]bool, out *[]Skill) {
+	if !config.ProfileDiscoveryAllowed(dir) {
+		return
+	}
 	key := filepath.Clean(dir)
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		key = filepath.Clean(resolved)
@@ -405,6 +429,9 @@ func (s *Store) readEntry(dir string, scope Scope, e os.DirEntry) (Skill, bool) 
 // filename stem when valid; a missing `description:` is a warning, not a failure
 // (the skill loads but won't appear in the model's index).
 func (s *Store) parse(path, stem string, scope Scope) (Skill, bool) {
+	if !config.ProfileDiscoveryAllowed(path) {
+		return Skill{}, false
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return Skill{}, false
@@ -451,12 +478,18 @@ func (s *Store) CreateWithContent(name string, scope Scope, content string) (str
 		if s.projectRoot == "" {
 			return "", fmt.Errorf("project scope requires a workspace — run from a project directory, or use global scope")
 		}
-		root = filepath.Join(s.projectRoot, config.ConventionDirs[0], SkillsDirname)
+		root = config.ProjectStatePath(s.projectRoot, SkillsDirname)
 	default:
 		root = filepath.Join(s.homeDir, config.ConventionDirs[0], SkillsDirname)
 	}
 	flat := filepath.Join(root, name+".md")
 	folder := filepath.Join(root, name, SkillFile)
+	if err := config.ValidateProfileDataPath(flat); err != nil {
+		return "", err
+	}
+	if err := config.ValidateProfileDataPath(folder); err != nil {
+		return "", err
+	}
 	if _, err := os.Stat(flat); err == nil {
 		return "", fmt.Errorf("skill %q already exists at %s", name, flat)
 	}
@@ -490,6 +523,9 @@ func loadBodyWithReferences(skillPath, body string) string {
 		return body
 	}
 	refsDir := filepath.Join(filepath.Dir(skillPath), "references")
+	if !config.ProfileDiscoveryAllowed(refsDir) {
+		return body
+	}
 	entries, err := os.ReadDir(refsDir)
 	if err != nil {
 		return body
@@ -507,6 +543,9 @@ func loadBodyWithReferences(skillPath, body string) string {
 	var b strings.Builder
 	b.WriteString(body)
 	for _, n := range names {
+		if !config.ProfileDiscoveryAllowed(filepath.Join(refsDir, n)) {
+			continue
+		}
 		content, err := os.ReadFile(filepath.Join(refsDir, n))
 		if err != nil {
 			continue

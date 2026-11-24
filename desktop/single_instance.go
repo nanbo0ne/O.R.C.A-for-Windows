@@ -14,8 +14,14 @@ func singleInstanceLock(app *App) *options.SingleInstanceLock {
 	if devModeEnabled(os.Getenv("ORCA_DEV")) {
 		return nil
 	}
+	instanceID := singleInstanceID
+	if betaEnabled() {
+		instanceID += ".beta"
+	} else if browserPreviewEnabled() {
+		instanceID += ".browser-preview"
+	}
 	return &options.SingleInstanceLock{
-		UniqueId: singleInstanceID,
+		UniqueId: instanceID,
 		OnSecondInstanceLaunch: func(options.SecondInstanceData) {
 			app.secondInstanceLaunch()
 		},

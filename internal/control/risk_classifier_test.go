@@ -86,6 +86,9 @@ func TestProviderRiskClassifierEmitsAttributedUsageReceipt(t *testing.T) {
 	if _, err := c.AssessWithParentTurn(context.Background(), permission.RiskInput{Tool: "read_file"}, "turn-parent"); err != nil {
 		t.Fatal(err)
 	}
+	if p.req.ParentTaskID != "turn-parent" {
+		t.Error("risk request lost its parent task")
+	}
 	if got.Kind != event.Usage || got.RequestID == "" || got.ParentTurnID != "turn-parent" || got.ProviderEndpoint != "https://api.deepseek.com" || got.Usage == nil {
 		t.Fatalf("risk usage receipt = %+v", got)
 	}

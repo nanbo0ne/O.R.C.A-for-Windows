@@ -97,6 +97,9 @@ func TestCompactionSummarizerEmitsAttributedUsageReceipt(t *testing.T) {
 		t.Fatalf("usage receipts = %d, want one", len(sinkEvents))
 	}
 	got := sinkEvents[0]
+	if prov.req.ParentTaskID != parentTurnID {
+		t.Error("compaction request lost its parent task")
+	}
 	if got.RequestID == "" || got.RequestID != prov.req.RequestID || got.ParentTurnID != parentTurnID || got.ProviderEndpoint != "https://api.deepseek.com" || got.Usage.TotalTokens != 100 {
 		t.Fatalf("compaction usage receipt = %+v, request=%+v", got, prov.req)
 	}

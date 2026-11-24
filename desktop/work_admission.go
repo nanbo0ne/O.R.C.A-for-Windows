@@ -10,6 +10,21 @@ import (
 
 var errUpdateWorkAdmission = errors.New("正在准备安装更新，请等待应用重新启动")
 
+// All entrypoints share identity admission, including deferred runtime sends.
+// Acquire before submitMu: web logout holds its gate while draining that mutex.
+func (a *App) beginIdentityAdmission(tabID string) (func(), error) {
+	releaseWeb, err := a.beginWebBetaAdmission(tabID)
+	if err != nil {
+		return nil, err
+	}
+	releaseAccount, err := a.beginOrcaAccountAdmission(tabID)
+	if err != nil {
+		releaseWeb()
+		return nil, err
+	}
+	return func() { releaseAccount(); releaseWeb() }, nil
+}
+
 // The read lock covers admission, not the lifetime of a provider call. The
 // reservation stays visible until work finishes or publishes Controller.Running.
 // No caller carries an RLock into another App method (RWMutex is not recursive).

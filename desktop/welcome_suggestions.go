@@ -113,16 +113,16 @@ func (a *App) generateWelcomeSuggestions() (welcomeSuggestionCache, error) {
 	if err != nil {
 		return welcomeSuggestionCache{}, err
 	}
-	modelRef, _, ok := cfg.ResolveModelWithFallback(cfg.Bot.Model)
-	if !ok {
-		modelRef, _, ok = cfg.ResolveModelWithFallback(cfg.DefaultModel)
+	modelRef := strings.TrimSpace(cfg.Bot.Model)
+	if modelRef == "" {
+		modelRef = cfg.DefaultModel
 	}
-	if !ok {
-		return welcomeSuggestionCache{}, os.ErrNotExist
+	entry, err := exactAuxiliaryProvider(cfg, modelRef)
+	if err != nil {
+		return welcomeSuggestionCache{}, err
 	}
-	entry, ok := cfg.ResolveModel(modelRef)
-	if !ok {
-		return welcomeSuggestionCache{}, os.ErrNotExist
+	if err := automaticAuxiliaryAllowed(entry); err != nil {
+		return welcomeSuggestionCache{}, err
 	}
 	prov, err := boot.NewProviderWithProxy(entry, cfg.NetworkProxySpec())
 	if err != nil {
@@ -188,20 +188,15 @@ func (a *App) generateWelcomeSuggestions() (welcomeSuggestionCache, error) {
 	prompt := welcomeSuggestionPrompt(string(data))
 	ctx, cancel := context.WithTimeout(a.bootContext(), 60*time.Second)
 	defer cancel()
-	stream, err := prov.Stream(ctx, provider.Request{Temperature: 0, MaxTokens: 500, Messages: []provider.Message{{Role: provider.RoleUser, Content: prompt}}})
+	stream, err := prov.Stream(ctx, bindAuxiliaryRequest(ctx, auxiliaryWelcome, provider.Request{Temperature: 0, MaxTokens: 500, Messages: []provider.Message{{Role: provider.RoleUser, Content: prompt}}}))
 	if err != nil {
 		return welcomeSuggestionCache{}, err
 	}
-	var output strings.Builder
-	for chunk := range stream {
-		if chunk.Type == provider.ChunkText {
-			output.WriteString(chunk.Text)
-		}
-		if chunk.Type == provider.ChunkError && chunk.Err != nil {
-			return welcomeSuggestionCache{}, chunk.Err
-		}
+	output, err := collectAuxiliaryText(ctx, stream)
+	if err != nil {
+		return welcomeSuggestionCache{}, err
 	}
-	prompts := parseWelcomeSuggestions(output.String())
+	prompts := parseWelcomeSuggestions(output)
 	if len(prompts) != 4 {
 		return welcomeSuggestionCache{}, os.ErrInvalid
 	}

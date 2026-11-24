@@ -37,6 +37,7 @@ func (s *Session) Add(m provider.Message) string {
 
 // AddWithDisplay keeps attachment display references out of the model input.
 func (s *Session) AddWithDisplay(m provider.Message, display string) string {
+	m.Files = cloneFileSnapshots(m.Files)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ensureDisplayLocked()
@@ -46,9 +47,22 @@ func (s *Session) AddWithDisplay(m provider.Message, display string) string {
 	return s.display.ContextIDs[len(s.display.ContextIDs)-1]
 }
 
+// AddToolResult stores the real outcome only in the display timeline, not in
+// the model protocol. Updating both under one lock keeps autosave consistent.
+func (s *Session) AddToolResult(m provider.Message, status, toolError string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureDisplayLocked()
+	s.Messages = append(s.Messages, m)
+	s.appendDisplayLocked(m)
+	e := &s.display.Entries[len(s.display.Entries)-1]
+	e.ToolStatus, e.ToolError = status, toolError
+}
+
 // Replace swaps the whole message log — used by compaction, which rewrites the
 // middle of the history.
 func (s *Session) Replace(msgs []provider.Message) {
+	msgs = cloneMessageFileSnapshots(msgs)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ensureDisplayLocked()
@@ -76,7 +90,7 @@ func (s *Session) Replace(msgs []provider.Message) {
 func (s *Session) Snapshot() []provider.Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]provider.Message(nil), s.Messages...)
+	return cloneMessageFileSnapshots(s.Messages)
 }
 
 // RewriteVersion returns the current rewrite version.

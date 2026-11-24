@@ -142,6 +142,7 @@ export function ContextPanel({
   const info = infoState && infoState.tabId === tabId ? infoState.info : null;
   const {
     usedTokens,
+    contextAvailable,
     windowTokens,
     totalTokens,
     reasoningTokens,
@@ -210,7 +211,7 @@ export function ContextPanel({
             <div className="context-panel__usage-visual">
               <div className="context-panel__usage-summary">
                 <div className="context-panel__usage-copy">
-                  <strong>{fmtTokens(usedTokens)}</strong>
+                  <strong>{contextAvailable ? fmtTokens(usedTokens) : t("context.reasoningNotProvided")}</strong>
                   {hasContextWindow && <span>/ {fmtTokens(windowTokens)} tokens</span>}
                 </div>
                 {usagePct !== null && <div className="context-panel__percent">{usagePct}%</div>}

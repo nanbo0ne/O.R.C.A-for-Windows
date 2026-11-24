@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/fileutil"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/tool"
 )
@@ -114,11 +115,17 @@ func NewSubagentStore(dir string) *SubagentStore {
 // ListSubagentsByParent returns persisted sub-agent artifacts whose metadata
 // declares the given parent session owner.
 func ListSubagentsByParent(sessionDir, parentSession string) ([]SubagentArtifact, error) {
+	if err := config.ValidateProfileDataPath(sessionDir); err != nil {
+		return nil, err
+	}
 	parentSession = strings.TrimSpace(parentSession)
 	if strings.TrimSpace(sessionDir) == "" || parentSession == "" {
 		return nil, nil
 	}
 	dir := filepath.Join(sessionDir, "subagents")
+	if err := config.ValidateProfileDataPath(dir); err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -136,6 +143,9 @@ func ListSubagentsByParent(sessionDir, parentSession string) ([]SubagentArtifact
 			continue
 		}
 		metaPath := filepath.Join(dir, entry.Name())
+		if err := config.ValidateProfileDataPath(metaPath); err != nil {
+			return nil, err
+		}
 		data, err := os.ReadFile(metaPath)
 		if err != nil {
 			return nil, err
@@ -319,6 +329,9 @@ func (s *SubagentStore) SaveFailed(run *SubagentRun) error {
 }
 
 func (s *SubagentStore) LoadMeta(ref string) (SubagentMeta, error) {
+	if err := config.ValidateProfileDataPath(s.metaPath(ref)); err != nil {
+		return SubagentMeta{}, err
+	}
 	var meta SubagentMeta
 	if !validSubagentRef(ref) {
 		return meta, fmt.Errorf("invalid subagent reference %q", ref)
@@ -400,6 +413,9 @@ func validateContinueOwner(meta SubagentMeta, spec SubagentSpec) error {
 }
 
 func (s *SubagentStore) lock(ref string) (func(), error) {
+	if err := config.ValidateProfileDataPath(s.dir); err != nil {
+		return nil, err
+	}
 	if !validSubagentRef(ref) {
 		return nil, fmt.Errorf("invalid subagent reference %q", ref)
 	}
@@ -428,6 +444,12 @@ func (s *SubagentStore) sessionPath(ref string) string { return filepath.Join(s.
 func (s *SubagentStore) metaPath(ref string) string    { return filepath.Join(s.dir, ref+".meta.json") }
 
 func (s *SubagentStore) saveMeta(meta SubagentMeta) error {
+	if err := config.ValidateProfileDataPath(s.dir); err != nil {
+		return err
+	}
+	if err := config.ValidateProfileDataPath(s.metaPath(meta.Ref)); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
 	}

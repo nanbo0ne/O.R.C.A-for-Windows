@@ -231,6 +231,7 @@ func (r *Registry) Schemas() []provider.ToolSchema {
 			Name:        t.Name(),
 			Description: t.Description(),
 			Parameters:  r.canon[name],
+			ReadOnly:    t.ReadOnly(),
 		})
 	}
 	return out

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 )
 
 // quickAddHeading marks the section quick-added notes accumulate under, so
@@ -17,6 +19,9 @@ const quickAddHeading = "## Notes"
 // the write side of the "#" quick-add: a plain file edit the user can later
 // reorganise by hand.
 func AppendDoc(path, note string) error {
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
 	note = oneLine(note)
 	if note == "" {
 		return nil
@@ -49,6 +54,9 @@ func AppendDoc(path, note string) error {
 // ensuring a single trailing newline. Used by Set.WriteDoc for the panel's
 // in-place editor (path validation happens in the caller).
 func writeDocFile(path, body string) error {
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err

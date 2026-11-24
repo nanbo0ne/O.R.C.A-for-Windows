@@ -135,10 +135,7 @@ func TestWindowsPackagingPrepOnlySkipsApplicationBuild(t *testing.T) {
 }
 
 func TestWindowsPackagingCreatesFreshPayloadParent(t *testing.T) {
-	bash, err := exec.LookPath("bash")
-	if err != nil {
-		t.Skip("bash is not installed")
-	}
+	bash := requireNativeBash(t)
 	body, err := os.ReadFile("../scripts/desktop-build.sh")
 	if err != nil {
 		t.Fatal(err)
@@ -247,9 +244,9 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`Preinstalled WebView2 is required`,
 		},
 		"official_baseline": {
-			`https://api.github.com/repos/nanbo0ne/O.R.C.A-for-Windows/releases/tags/desktop-v3.0.12`,
-			`https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.12/`,
-			`$release.tag_name -cne 'desktop-v3.0.12' -or $release.draft -or $release.prerelease`,
+			`https://api.github.com/repos/nanbo0ne/O.R.C.A-for-Windows/releases/tags/$baselineTag`,
+			`https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/$baselineTag/`,
+			`$release.tag_name -cne $baselineTag -or $release.draft -or $release.prerelease`,
 			`$assetName = 'O.R.C.A-for-Windows-windows-amd64-installer.exe'`,
 			`@($assetName, 'SHA256SUMS.txt')`,
 			`$assets.Count -ne 1`,
@@ -257,6 +254,8 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`[regex]::Escape($assetName)`,
 			`$oldHash -ine $checksumRows[0].Groups[1].Value -or $oldHash -cne $pinnedOldHash`,
 			`$pinnedOldSize = 91212149`,
+			`$pinnedOldSize = 91264104`,
+			`fccc37703c215351ac736af1adb1a15c9980b657da3aad662fcc6042da66b8e6`,
 			`$name -ceq $assetName -and [long]$assets[0].size -ne $pinnedOldSize`,
 			`$oldSize = (Get-Item -LiteralPath $oldInstaller).Length`,
 			`$oldSize -ne $pinnedOldSize`,
@@ -276,7 +275,7 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`$process.ExitCode -ne 0`,
 			"Owned-Path \"upgrade target with spaces `u{4e2d}`u{6587}\"",
 			"Owned-Path \"fresh target with spaces `u{4e2d}`u{6587}\"",
-			`Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir" 'install-310'`,
+			`Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir" 'install-baseline'`,
 			`Invoke-BoundedProcess $newInstaller '/S' 'upgrade-current'`,
 			`Invoke-BoundedProcess $newInstaller "/S /D=$freshDir" 'install-fresh'`,
 			`Invoke-BoundedProcess $uninstaller "/S _?=$target" $Label`,
@@ -298,7 +297,7 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`models\synthetic-tiny.gguf`,
 			`$markerHashes[$safe] = Get-SHA256 $safe`,
 			`(Get-SHA256 $path) -cne $markerHashes[$path]`,
-			`Assert-Markers 'installed-312'`,
+			`Assert-Markers 'installed-baseline'`,
 			`Assert-Markers 'upgraded-current'`,
 			`Assert-Markers $Label`,
 			`Invoke-DefaultUninstall $freshDir 'uninstall-fresh'`,
@@ -318,7 +317,7 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 			`$key.GetValue('DisplayVersion')`,
 			`GetVersionInfo($installedApp).ProductVersion`,
 			`$location -ine $target`,
-			`Assert-Installation $upgradeDir '3.0.12' 'installed-312'`,
+			`Assert-Installation $upgradeDir $baselineVersion 'installed-baseline'`,
 			`Assert-Installation $upgradeDir $productVersion 'upgraded-current'`,
 			`Assert-CurrentPayload $freshDir 'fresh-directory'`,
 			`Assert-CurrentPayload $upgradeDir 'upgraded-current'`,
@@ -348,8 +347,8 @@ func TestWindowsInstallerAcceptanceSourceContracts(t *testing.T) {
 	guard := strings.Index(script, "$env:GITHUB_ACTIONS -cne 'true'")
 	functions := strings.Index(script, "function Get-PlainPath")
 	firstWrite := strings.Index(script, "[void][IO.Directory]::CreateDirectory($ownedRoot)")
-	size := strings.Index(script, "throw 'Official 3.0.12 installer size mismatch.'")
-	checksum := strings.Index(script, "throw 'Official 3.0.12 installer SHA256 mismatch.'")
+	size := strings.Index(script, `throw "Official $baselineVersion installer size mismatch."`)
+	checksum := strings.Index(script, `throw "Official $baselineVersion installer SHA256 mismatch."`)
 	install := strings.Index(script, `Invoke-BoundedProcess $oldInstaller "/S /D=$upgradeDir"`)
 	if guard < 0 || functions <= guard || firstWrite <= functions || size < 0 || checksum <= size || install <= checksum {
 		t.Fatal("runner guards must precede side effects; baseline verification must precede installation")

@@ -66,6 +66,9 @@ type v11MigrationRecord struct {
 // EnsureV11StateMigration copies the V2 user tree into the V3 identity once.
 // Existing V3 files always win and the legacy tree is retained as the backup.
 func EnsureV11StateMigration() error {
+	if IsolatedProfileEnabled() {
+		return nil
+	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return err

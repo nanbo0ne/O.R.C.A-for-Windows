@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 )
 
 func taskImageRelativePath(workspace, path string) (string, error) {
@@ -85,6 +87,9 @@ func openTaskImageDir(parent *os.Root, name string) (*os.Root, error) {
 }
 
 func taskImagePathInfo(root *os.Root, rel string) (os.FileInfo, error) {
+	if !config.ProfileDiscoveryAllowed(filepath.Join(root.Name(), rel)) {
+		return nil, fmt.Errorf("image path belongs to a protected profile")
+	}
 	var info os.FileInfo
 	path := "."
 	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
@@ -171,6 +176,9 @@ func validateTaskImageDimensions(width, height int) error {
 }
 
 func snapshotTaskImage(root *os.Root, ext string, raw []byte) (string, error) {
+	if err := config.ValidateProfileDataPath(filepath.Join(root.Name(), ".orca", "attachments")); err != nil {
+		return "", err
+	}
 	parent := root
 	for _, dir := range []string{".orca", "attachments"} {
 		if err := parent.Mkdir(dir, 0o755); err != nil && !os.IsExist(err) {

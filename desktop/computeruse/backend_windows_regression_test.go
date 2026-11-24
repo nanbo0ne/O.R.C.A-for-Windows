@@ -142,8 +142,8 @@ func TestCurrentElementProtectionFailsClosedOnPropertyHRESULT(t *testing.T) {
 
 func syntheticElementForPropertyTest(passwordCode, nameCode uintptr) *uia.IUIAutomationElement {
 	vtbl := &uia.IUIAutomationElementVtbl{}
-	passwordGetter := syscall.NewCallback(func(_ uintptr, out uintptr) uintptr {
-		*(*int32)(unsafe.Pointer(out)) = 0
+	passwordGetter := syscall.NewCallback(func(_ uintptr, out *int32) uintptr {
+		*out = 0
 		return passwordCode
 	})
 	nameGetter := syscall.NewCallback(func(_ uintptr, _ uintptr) uintptr {
@@ -153,6 +153,35 @@ func syntheticElementForPropertyTest(passwordCode, nameCode uintptr) *uia.IUIAut
 	vtbl.Get_CurrentName = nameGetter
 	obj := &uiAutomationElementObject{vtbl: (*uia.IUnKnown)(unsafe.Pointer(vtbl))}
 	return (*uia.IUIAutomationElement)(unsafe.Pointer(obj))
+}
+
+func TestIntegritySIDBoundaries(t *testing.T) {
+	if _, err := integrityLevelFromSID(nil); err == nil {
+		t.Fatal("nil SID accepted")
+	}
+	if _, err := integrityLevelFromTokenInfo(make([]byte, 1)); err == nil {
+		t.Fatal("truncated label accepted")
+	}
+	empty := [8]byte{1, 0, 0, 0, 0, 0, 0, 5}
+	if _, err := integrityLevelFromSID((*windows.SID)(unsafe.Pointer(&empty[0]))); err == nil {
+		t.Fatal("SID with no sub-authorities accepted")
+	}
+	for _, tc := range []struct {
+		value   string
+		want    uint32
+		invalid bool
+	}{{"S-1-16-8192", 8192, false}, {"S-1-5-21-123-456-12288", 12288, false}} {
+		t.Run(tc.value, func(t *testing.T) {
+			sid, err := windows.StringToSid(tc.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := integrityLevelFromSID(sid)
+			if (err != nil) != tc.invalid || got != tc.want {
+				t.Fatalf("got %d, %v; want %d, invalid=%v", got, err, tc.want, tc.invalid)
+			}
+		})
+	}
 }
 
 func TestStaleHookCleanupCannotClearReplacement(t *testing.T) {

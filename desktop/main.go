@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"os"
 	"path/filepath"
@@ -99,10 +100,29 @@ func windowsWebview2GPUDisabled() bool {
 }
 
 func main() {
+	if handled, err := writeBuildInfoJSON(os.Args[1:], os.Stdout); handled {
+		if err != nil {
+			println("Build identity error:", err.Error())
+			os.Exit(2)
+		}
+		return
+	}
 	var restartWait time.Duration
 	os.Args, restartWait = consumeRestartWaitArg(os.Args)
 	if restartWait > 0 {
 		time.Sleep(restartWait)
+	}
+	if err := initializeBeta(); err != nil {
+		println("Beta isolation error:", err.Error())
+		return
+	}
+	if err := ensureWebBetaModelEntry(); err != nil {
+		println("Web Beta model registration error:", err.Error())
+		return
+	}
+	if err := isolateBrowserPreview(); err != nil {
+		println("Browser preview isolation error:", err.Error())
+		return
 	}
 	addExecutableDirToPATH()
 
@@ -121,7 +141,7 @@ func main() {
 	}
 
 	err := wails.Run(&options.App{
-		Title:     desktopWindowTitle(runtime.GOOS),
+		Title:     desktopTitle(runtime.GOOS),
 		Width:     width,
 		Height:    height,
 		MinWidth:  760,
@@ -131,12 +151,18 @@ func main() {
 		Frameless: desktopFrameless(runtime.GOOS, desktopStyle),
 		// Match the selected presentation so the initial webview background does not
 		// flash to a conflicting color before CSS loads.
-		BackgroundColour:   desktopBackground(desktopStyle),
-		AssetServer:        &assetserver.Options{Assets: assets, Middleware: app.workspaceMediaMiddleware()},
-		OnStartup:          app.startup,
-		OnDomReady:         app.domReady,
-		OnBeforeClose:      app.beforeClose,
-		OnShutdown:         app.shutdown,
+		BackgroundColour: desktopBackground(desktopStyle),
+		AssetServer:      &assetserver.Options{Assets: assets, Middleware: app.workspaceMediaMiddleware()},
+		OnStartup: func(ctx context.Context) {
+			app.startup(ctx)
+			startWebBetaBackground(app)
+		},
+		OnDomReady:    app.domReady,
+		OnBeforeClose: app.beforeClose,
+		OnShutdown: func(ctx context.Context) {
+			app.shutdown(ctx)
+			closeWebBeta()
+		},
 		Bind:               []any{app},
 		SingleInstanceLock: singleInstanceLock(app),
 
@@ -166,6 +192,8 @@ func main() {
 			// preference instead of being locked to dark.
 			Theme:                windows.SystemDefault,
 			WebviewGpuIsDisabled: windowsWebview2GPUDisabled(),
+			WindowClassName:      browserWindowClass(),
+			WebviewUserDataPath:  browserPreviewWebviewDataPath(),
 		},
 		Linux: &linux.Options{
 			ProgramName: product.Name,
@@ -189,6 +217,9 @@ func addExecutableDirToPATH() {
 	}
 	dir := filepath.Dir(exe)
 	if dir == "" || dir == "." {
+		return
+	}
+	if betaEnabled() && !betaRuntimePathAllowed(dir) {
 		return
 	}
 	path := os.Getenv("PATH")

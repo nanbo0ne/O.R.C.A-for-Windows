@@ -24,6 +24,12 @@ func loadDotEnv() map[string]string {
 // fallback. When root is "." it behaves like loadDotEnv().
 func loadDotEnvForRoot(root string) map[string]string {
 	values := make(map[string]string)
+	if IsolatedProfileEnabled() {
+		if path := UserCredentialsPath(); ValidateProfileDataPath(path) == nil {
+			loadDotEnvFile(path, values)
+		}
+		return values
+	}
 	dotEnvPath := ".env"
 	if root != "" && root != "." {
 		dotEnvPath = filepath.Join(root, ".env")
@@ -35,7 +41,7 @@ func loadDotEnvForRoot(root string) map[string]string {
 	if p := LegacyUserCredentialsPath(); p != "" {
 		loadDotEnvFile(p, values)
 	}
-	if home, err := os.UserHomeDir(); err == nil {
+	if home, err := ProfileHomeDir(); err == nil {
 		loadDotEnvFile(filepath.Join(home, ".env"), values)
 	}
 	return values
@@ -67,7 +73,7 @@ func loadDotEnvFile(path string, values map[string]string) {
 			continue
 		}
 		// A host variable, including an explicitly empty one, always wins.
-		if _, exists := os.LookupEnv(key); exists {
+		if _, exists := ProfileLookupEnv(key); exists {
 			continue
 		}
 		if _, exists := values[key]; !exists {

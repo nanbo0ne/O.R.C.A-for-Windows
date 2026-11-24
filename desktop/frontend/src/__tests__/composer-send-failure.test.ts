@@ -16,9 +16,11 @@ function check(value: boolean, label: string) {
   }
 }
 
-const composerSource = readFileSync(fileURLToPath(new URL("../components/Composer.tsx", import.meta.url)), "utf8");
-const appSource = readFileSync(fileURLToPath(new URL("../App.tsx", import.meta.url)), "utf8");
-const controllerSource = readFileSync(fileURLToPath(new URL("../lib/useController.ts", import.meta.url)), "utf8");
+// Source contracts must not depend on Git's checkout line endings.
+const readSource = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").replace(/\r\n/g, "\n");
+const composerSource = readSource("../components/Composer.tsx");
+const appSource = readSource("../App.tsx");
+const controllerSource = readSource("../lib/useController.ts");
 
 const baseDraft = {
   tabId: "tab-a",
@@ -74,8 +76,10 @@ check(/className="composer__btn composer__btn--send"\s+type="button"\s+aria-labe
 const parsed = ts.createSourceFile("Composer.tsx", composerSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let cancelCallback: ts.Expression | undefined;
 let clearCallback: ts.Expression | undefined;
+let submitCallback: ts.Expression | undefined;
 function visit(node: ts.Node) {
   if (ts.isVariableDeclaration(node) && node.name.getText(parsed) === "handleCancel") cancelCallback = node.initializer;
+  if (ts.isVariableDeclaration(node) && node.name.getText(parsed) === "submit") submitCallback = node.initializer;
   if (ts.isCallExpression(node) && node.expression.getText(parsed) === "submitComposerDraft") clearCallback = node.arguments[1];
   ts.forEachChild(node, visit);
 }
@@ -116,6 +120,30 @@ for (const nextText of ["", "original request", "new draft"]) {
   check(cleared === 5, "a subsequent uncancelled matching submission can still clear its draft");
 }
 check(composerSource.includes("submittingRef.current = true;\n    cancelledSubmissionRef.current = false;"), "each new submission resets its cancellation marker");
+
+for (const failure of [new Error("synthetic preparation failure"), "网页接入尚未打开"]) {
+  const submittingRef = { current: false };
+  const cancelledSubmissionRef = { current: true };
+  const snapshot = { ...baseDraft, sessionRefs: [{ id: "synthetic-reference" }] };
+  const prompts: unknown[] = [];
+  const submittingStates: boolean[] = [];
+  let rejected = false;
+  const submit = callback(submitCallback, {
+    disabled: false, submittingRef, cancelledSubmissionRef, text: snapshot.text,
+    pendingPaste: 0, attachments: [], workspaceRefs: [], sessionRefs: snapshot.sessionRefs,
+    goalModeOn: false, activeGoal: "", draftSnapshotRef: { current: snapshot },
+    setComposerPrompt: (value: unknown) => prompts.push(value),
+    setSubmitting: (value: boolean) => submittingStates.push(value),
+    sortComposerAttachments: (value: unknown) => value,
+    formatAttachmentDisplayReference: () => "", t: (key: string) => key,
+    buildSessionContext: async () => { throw failure; },
+  });
+  try { await submit(); } catch { rejected = true; }
+  check(!rejected, "preparation rejection is handled by the actual submit callback");
+  check(prompts[prompts.length - 1] === `msg.sendFailed: ${failure instanceof Error ? failure.message : failure}`, "preparation error is shown inline, including string bridge errors");
+  check(!submittingRef.current && submittingStates.join(",") === "true,false", "failed preparation releases the submit lock");
+  check(snapshot.text === baseDraft.text && snapshot.sessionRefs.length === 1, "failed preparation preserves the draft and references");
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

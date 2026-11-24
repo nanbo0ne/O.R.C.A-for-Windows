@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/proc"
 )
 
@@ -145,6 +146,9 @@ func SaveImageFile(path string) (string, error) {
 // SaveImageFileAt copies an image into workspaceRoot without changing the
 // process working directory.
 func SaveImageFileAt(path, workspaceRoot string) (string, error) {
+	if !config.ProfileDiscoveryAllowed(path) {
+		return "", fmt.Errorf("attachment source belongs to a protected profile")
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return "", err
@@ -193,6 +197,9 @@ func SnapshotImageFile(path, workspaceRoot string) (string, error) {
 }
 
 func readImageFile(path string) ([]byte, string, error) {
+	if !config.ProfileDiscoveryAllowed(path) {
+		return nil, "", fmt.Errorf("image source belongs to a protected profile")
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, "", err
@@ -223,6 +230,9 @@ func SaveAttachmentFile(path string) (string, error) {
 // SaveAttachmentFileAt copies a file into workspaceRoot without changing the
 // process working directory.
 func SaveAttachmentFileAt(path, workspaceRoot string) (string, error) {
+	if !config.ProfileDiscoveryAllowed(path) {
+		return "", fmt.Errorf("attachment source belongs to a protected profile")
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return "", err
@@ -419,6 +429,9 @@ func cleanAttachmentPathAt(path, workspaceRoot string) (string, error) {
 	}
 	absoluteRoot := filepath.Join(rootDir, root)
 	absolutePath := filepath.Join(rootDir, clean)
+	if err := config.ValidateProfileDataPath(absolutePath); err != nil {
+		return "", err
+	}
 	if err := rejectSymlinkComponents(absolutePath, absoluteRoot); err != nil {
 		return "", err
 	}
@@ -460,6 +473,9 @@ func ensureAttachmentRootAt(workspaceRoot string) error {
 		return err
 	}
 	root := filepath.Join(rootDir, ".orca", "attachments")
+	if err := config.ValidateProfileDataPath(root); err != nil {
+		return err
+	}
 	if info, err := os.Lstat(root); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("attachment directory must not be a symlink")
@@ -596,6 +612,9 @@ func workspaceRootPath(workspaceRoot string) (string, error) {
 }
 
 func createAttachmentFile(ext string) (string, *os.File, error) {
+	if err := ensureAttachmentRoot(); err != nil {
+		return "", nil, err
+	}
 	for range maxAttachmentCreateAttempts {
 		rel := attachmentPath(ext)
 		f, err := os.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)

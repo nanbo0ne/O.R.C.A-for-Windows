@@ -21,6 +21,9 @@ var configVersionLineRE = regexp.MustCompile(`(?m)^\s*config_version\s*=\s*([0-9
 // migrateMimoCredentialsV10 performs the one-time split of the credential slot
 // that V9 accidentally shared between the two official MiMo endpoints.
 func migrateMimoCredentialsV10(cfg *config.Config, tabs desktopTabsFile) bool {
+	if betaEnabled() || config.IsolatedProfileEnabled() {
+		return false
+	}
 	if cfg == nil || !userConfigPredatesV10() {
 		return false
 	}
@@ -129,6 +132,12 @@ func normalizeLegacyMimoDesktopState(cfg *config.Config, tabs *desktopTabsFile, 
 }
 
 func moveMimoCredentialToTokenPlan(path string) error {
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
+	if err := config.ValidateProfileDataPath(path + ".v9-mimo.bak"); err != nil {
+		return err
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -162,6 +171,9 @@ func moveMimoCredentialToTokenPlan(path string) error {
 }
 
 func atomicWriteEnvFile(path, contents string) error {
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -183,6 +195,9 @@ func atomicWriteEnvFile(path, contents string) error {
 }
 
 func writeMimoMigrationMarker(path string) error {
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -218,6 +233,9 @@ func removeDotEnv(key string) error {
 // upsertEnvFile merges KEY=value into a KEY=value file at path, preserving
 // comments and unrelated lines, writing atomically via a sibling temp + rename.
 func upsertEnvFile(path, key, value string) error {
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return nil
@@ -271,6 +289,9 @@ func upsertEnvFile(path, key, value string) error {
 }
 
 func removeEnvFile(path, key string) error {
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return nil
@@ -331,6 +352,9 @@ func removeEnvFile(path, key string) error {
 // when the file is absent.
 func envFileKeys(path string) map[string]bool {
 	keys := map[string]bool{}
+	if config.ValidateProfileDataPath(path) != nil {
+		return keys
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return keys
@@ -354,6 +378,9 @@ func envFileKeys(path string) map[string]bool {
 // credentials file is the single source of truth; a project's own .env is
 // user-owned and left untouched.
 func promoteProviderKeysToCredentials(cfg *config.Config) {
+	if betaEnabled() || config.IsolatedProfileEnabled() {
+		return
+	}
 	credPath := credentialsPath()
 	have := envFileKeys(credPath)
 	for _, p := range cfg.Providers {
@@ -377,6 +404,9 @@ func promoteProviderKeysToCredentials(cfg *config.Config) {
 // fallback the old migration wrote to), leaving every other line intact. No-op when
 // ~/.env is absent or the credentials store resolves to ~/.env itself.
 func removeHomeEnvKey(key string) {
+	if betaEnabled() || config.IsolatedProfileEnabled() {
+		return
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return

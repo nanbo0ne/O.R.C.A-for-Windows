@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/fileutil"
 )
 
 var desktopModelStateMu sync.Mutex
@@ -353,11 +354,6 @@ func writeDesktopModelState(path string, body []byte, validate func() error) err
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if validate != nil {
-		if err := validate(); err != nil {
-			return err
-		}
-	}
 	// A failed rename leaves the old file intact; never truncate it as fallback.
-	return os.Rename(f.Name(), path)
+	return fileutil.RenameReplaceChecked(f.Name(), path, validate)
 }

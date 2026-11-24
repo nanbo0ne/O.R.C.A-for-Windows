@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -952,11 +953,21 @@ func integrityLevelFromSID(sid *windows.SID) (uint32, error) {
 	if sid == nil || !sid.IsValid() {
 		return 0, fmt.Errorf("integrity SID is invalid")
 	}
-	count := sid.SubAuthorityCount()
+	// GetSidSubAuthority returns an integer address into this allocation. Read
+	// the validated SID bytes instead so Go-owned token buffers retain provenance.
+	length := sid.Len()
+	if length < 8 || length > 68 {
+		return 0, fmt.Errorf("integrity SID length is invalid")
+	}
+	data := unsafe.Slice((*byte)(unsafe.Pointer(sid)), int(length))
+	count := int(data[1])
 	if count == 0 {
 		return 0, fmt.Errorf("integrity SID has no sub-authorities")
 	}
-	return sid.SubAuthority(uint32(count - 1)), nil
+	if length != 8+4*count {
+		return 0, fmt.Errorf("integrity SID length is inconsistent")
+	}
+	return binary.LittleEndian.Uint32(data[length-4:]), nil
 }
 
 func sensitiveText(s string) bool {

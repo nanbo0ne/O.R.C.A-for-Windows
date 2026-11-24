@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/frontmatter"
 )
 
@@ -85,13 +86,23 @@ func AssistantStoreFor(userDir, cwd string) Store {
 // ClearAssistantStores removes every assistant-mode memory store under userDir
 // while leaving shared-agent memory untouched.
 func ClearAssistantStores(userDir string) error {
+	if err := config.ValidateProfileDataPath(userDir); err != nil {
+		return err
+	}
 	if strings.TrimSpace(userDir) == "" {
 		return nil
 	}
-	if err := os.RemoveAll(CanonicalAssistantStore(userDir).Dir); err != nil {
+	canonical := CanonicalAssistantStore(userDir).Dir
+	if err := config.ValidateProfileDataPath(canonical); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(canonical); err != nil {
 		return err
 	}
 	projectsDir := filepath.Join(userDir, "projects")
+	if err := config.ValidateProfileDataPath(projectsDir); err != nil {
+		return err
+	}
 	entries, err := os.ReadDir(projectsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -104,6 +115,9 @@ func ClearAssistantStores(userDir string) error {
 			continue
 		}
 		dir := filepath.Join(projectsDir, e.Name(), "assistant-memory")
+		if err := config.ValidateProfileDataPath(dir); err != nil {
+			return err
+		}
 		if err := os.RemoveAll(dir); err != nil {
 			return err
 		}
@@ -125,6 +139,9 @@ func slugify(absPath string) string {
 // Index returns the MEMORY.md contents (the per-line index of saved memories),
 // or "" if there are none yet. This is what loads into the cached prefix.
 func (s Store) Index() string {
+	if config.ValidateProfileDataPath(filepath.Join(s.Dir, indexFile)) != nil {
+		return ""
+	}
 	if s.Dir == "" {
 		return ""
 	}
@@ -154,6 +171,12 @@ func (s Store) Exists(name string) bool {
 // editor, and any future importer all go through here so the index never drifts
 // from the files. Returns the path written.
 func (s Store) Save(m Memory) (string, error) {
+	if err := config.ValidateProfileDataPath(s.Path(m.Name)); err != nil {
+		return "", err
+	}
+	if err := config.ValidateProfileDataPath(filepath.Join(s.Dir, indexFile)); err != nil {
+		return "", err
+	}
 	if s.Dir == "" {
 		return "", fmt.Errorf("memory store unavailable (no user config dir)")
 	}
@@ -178,6 +201,12 @@ func (s Store) Save(m Memory) (string, error) {
 // path and the user's way to prune a stale fact. A missing file is not an error;
 // the goal state (gone) holds either way.
 func (s Store) Delete(name string) error {
+	if err := config.ValidateProfileDataPath(s.Path(name)); err != nil {
+		return err
+	}
+	if err := config.ValidateProfileDataPath(filepath.Join(s.Dir, indexFile)); err != nil {
+		return err
+	}
 	if s.Dir == "" {
 		return fmt.Errorf("memory store unavailable (no user config dir)")
 	}
@@ -192,6 +221,9 @@ func (s Store) Delete(name string) error {
 }
 
 func removeMemoryFile(path string) error {
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
 	err := os.Remove(path)
 	if err == nil || os.IsNotExist(err) {
 		return nil
@@ -302,6 +334,9 @@ func (s Store) reindex(name string, m Memory) error {
 // by `/memory` and the desktop memory panel. Files that fail to parse are
 // skipped so one bad file never hides the rest.
 func (s Store) List() []Memory {
+	if config.ValidateProfileDataPath(s.Dir) != nil {
+		return nil
+	}
 	if s.Dir == "" {
 		return nil
 	}
@@ -326,6 +361,9 @@ func (s Store) List() []Memory {
 // frontmatter render writes; a file without frontmatter still loads with its
 // body and a name derived from the filename.
 func loadMemory(path string) (Memory, bool) {
+	if config.ValidateProfileDataPath(path) != nil {
+		return Memory{}, false
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return Memory{}, false

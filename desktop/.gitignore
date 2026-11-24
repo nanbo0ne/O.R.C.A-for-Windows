@@ -14,6 +14,14 @@
 /build/windows/installer/*
 !/build/windows/installer/project.nsi
 !/build/windows/installer/installer_guard.nsh
+!/build/windows/installer/beta.nsi
+!/build/windows/installer/beta_guard/
+/build/windows/installer/beta_guard/*
+!/build/windows/installer/beta_guard/main_windows.go
+!/build/windows/installer/beta_guard/main_windows_test.go
+!/build/windows/installer/render_beta_tools/
+/build/windows/installer/render_beta_tools/*
+!/build/windows/installer/render_beta_tools/main.go
 !/build/windows/installer/resources
 !/build/windows/installer/resources/*
 

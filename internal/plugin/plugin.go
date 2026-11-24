@@ -939,7 +939,7 @@ func (t *remoteTool) Execute(ctx context.Context, args json.RawMessage) (string,
 		"arguments": argMap,
 	})
 	if err != nil {
-		return "", err
+		return "", withoutStdioDiagnostic(err)
 	}
 	return parseToolResult(res)
 }

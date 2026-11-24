@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -476,7 +477,29 @@ func (t *stdioTransport) withStderr(err error) error {
 	if msg == "" {
 		return err
 	}
-	return fmt.Errorf("%w: stderr: %s", err, msg)
+	return &stdioDiagnosticError{cause: err, stderr: msg}
+}
+
+// stderr is local process diagnostics, not MCP tool-result content.
+type stdioDiagnosticError struct {
+	cause  error
+	stderr string
+}
+
+func (e *stdioDiagnosticError) Error() string {
+	return fmt.Sprintf("%v: stderr: %s", e.cause, e.stderr)
+}
+
+func (e *stdioDiagnosticError) Unwrap() error { return e.cause }
+
+func withoutStdioDiagnostic(err error) error {
+	for {
+		var diagnostic *stdioDiagnosticError
+		if !errors.As(err, &diagnostic) {
+			return err
+		}
+		err = diagnostic.cause
+	}
 }
 
 // wait reaps the child exactly once; cmd.Wait blocks until the stderr-copy

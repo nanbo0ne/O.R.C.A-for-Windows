@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -45,6 +46,14 @@ type Message struct {
 	ToolCallID         string         `json:"tool_call_id,omitempty"` // links a tool result to its call
 	Name               string         `json:"name,omitempty"`         // tool message: tool name
 	Images             []ImageContent `json:"images,omitempty"`       // user message image references; data is hydrated only for requests
+	Files              []FileContent  `json:"files,omitempty"`        // explicitly authorized snapshots; bytes are never persisted
+}
+
+type FileContent struct {
+	Name      string `json:"name"`
+	MediaType string `json:"media_type"`
+	Digest    string `json:"sha256"`
+	Data      []byte `json:"-"`
 }
 
 // ImageContent is a persisted local image reference. Data is deliberately not
@@ -70,6 +79,7 @@ type ToolSchema struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`
+	ReadOnly    bool            `json:"-"`
 }
 
 // RequestPurpose identifies the internal reason for a provider request. It is
@@ -83,10 +93,17 @@ const (
 	RequestPurposeCompaction         RequestPurpose = "compaction"
 	RequestPurposeCompactionFallback RequestPurpose = "compaction_fallback"
 	RequestPurposeClassifier         RequestPurpose = "classifier"
+	RequestPurposeBrowser            RequestPurpose = "browser"
 )
 
 // Request is a single completion request.
 type Request struct {
+	// ParentTaskID is host-only attribution shared by a turn and its auxiliary
+	// requests. It is never derived from message text or sent as model input.
+	ParentTaskID string
+	// Host-only binding identity; never inferred from model text or credentials.
+	ConversationID string
+	ContextEpoch   uint64
 	// RequestID is the client-generated identity for this provider request. It
 	// is carried for provider adapters and usage receipts; providers need not
 	// expose it remotely.
@@ -457,6 +474,18 @@ type Provider interface {
 	Stream(ctx context.Context, req Request) (<-chan Chunk, error)
 }
 
+// TaskProvider optionally binds an entire agent task to a provider identity.
+// The returned context must retain caller values and cancellation. Revoking
+// the identity cancels that context, never the caller's context. On success,
+// release must be non-nil and is called once after all work in the scope has
+// returned, including tools, gates and foreground subagents, not after Stream.
+// Nested scopes (including the same conversation/task) must not serialize or
+// wait on each other. Provider wrappers must forward this optional contract;
+// an underlying provider without it uses the caller context and a no-op release.
+type TaskProvider interface {
+	BeginTask(ctx context.Context, conversationID, parentTaskID string) (context.Context, func(), error)
+}
+
 // Config is a resolved provider instance configuration.
 type Config struct {
 	Name    string         // instance name, e.g. "deepseek"
@@ -464,6 +493,9 @@ type Config struct {
 	Model   string         // model id
 	APIKey  string         // resolved from api_key_env
 	Extra   map[string]any // kind-specific options
+	// HTTPClient is an optional host-owned transport (for scoped account auth and
+	// settlement receipts). It is never populated from persisted configuration.
+	HTTPClient *http.Client
 }
 
 // AuthError reports that a provider rejected the API key (HTTP 401/403). Its

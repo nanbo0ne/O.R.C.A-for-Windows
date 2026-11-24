@@ -24,6 +24,19 @@ const chronology: Item[] = [
   { kind: "tool", id: "t2", name: "bash", args: "{}", readOnly: false, status: "done" },
 ];
 
+const restoredTools = historyMessagesToItems([
+  { role: "assistant", content: "", toolCalls: [
+    { id: "failed", name: "bash", arguments: "{}" },
+    { id: "literal", name: "read_file", arguments: "{}" },
+    { id: "missing", name: "write_file", arguments: "{}" },
+  ] },
+  { role: "tool", content: "exit status 1", toolCallId: "failed", toolStatus: "error", toolError: "exit status 1" },
+  { role: "tool", content: "Error: an example in a file", toolCallId: "literal", toolStatus: "done" },
+  { role: "tool", content: "error: old failure", toolCallId: "legacy" },
+  { role: "tool", content: "not executed", toolCallId: "cancelled", toolStatus: "stopped", toolError: "context canceled" },
+], "restored").items.filter((item) => item.kind === "tool");
+equal("restored tool outcomes preserve errors and distinguish incomplete calls", restoredTools.map((item) => item.status), ["error", "done", "stopped", "error", "stopped"]);
+
 equal(
   "a live turn interleaves progress text and tool groups",
   timelineKinds(buildTimelineSegments(chronology, true)),
@@ -116,6 +129,7 @@ for (const outcome of ["failed", "cancelled", "interrupted"] as const) {
   equal(`${outcome} activity stays grouped without successful-turn folding`, timelineKinds(terminalSegments), ["user", "stats", ...consecutiveKinds.slice(1)]);
   const terminalProcess = terminalSegments.find((segment) => segment.kind === "process");
   equal(`${outcome} preserves the running group's expand-state key`, terminalProcess?.id, consecutiveProcess?.id);
+  equal(`${outcome} process is terminal without being folded as successful`, terminalProcess?.kind === "process" && terminalProcess.completed, true);
   equal(
     `${outcome} retains the terminal tool status`,
     terminalSegments.flatMap((segment) => segment.kind === "process" ? segment.items.filter((item) => item.kind === "tool").map((item) => item.status) : []),
@@ -369,7 +383,7 @@ equal(
 );
 equal(
   "failed process segment stays expanded after TurnDone",
-  lastCompletedProcess?.kind === "process" ? lastCompletedProcess.completed : undefined,
+  lastCompletedProcess?.kind === "process" ? Boolean(lastCompletedProcess.defaultCollapsed) : undefined,
   false,
 );
 equal("model activity rotates clockwise", activityIndicatorPhase(chronology, true, true, false), "model");

@@ -292,7 +292,7 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", err
 	}
 	parentID, parent, _, _ := CallContext(ctx)
-	parentTurnID, _ := ParentTurn(ctx)
+	parentTurnID, parentTurnLifetime := ParentTurn(ctx)
 	run, err := t.prepareTranscriptRun(subReg, modelRef, effortRef, ParentSession(ctx), parentID, p.ContinueFrom, p.ForkFrom)
 	if err != nil {
 		return "", err
@@ -329,6 +329,10 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		job := jm.Start("task", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
 			defer childDone()
 			defer run.Release()
+			// Carry attribution and its budget lifetime, not foreground cancellation.
+			if parentTurnID != "" {
+				jobCtx = context.WithValue(jobCtx, parentTurnContextKey{}, parentTurnContext{id: parentTurnID, lifetime: parentTurnLifetime})
+			}
 			answer, err := t.runSubSession(jobCtx, p.Prompt, selectedImages, subReg, childSink, maxSteps, prov, pricing, t.subagentEndpoint(modelRef, effortRef), ctxWin, run.Session)
 			if err != nil {
 				return FormatSubagentResult("", run.Ref, true), errors.Join(err, t.transcripts.SaveFailed(run))

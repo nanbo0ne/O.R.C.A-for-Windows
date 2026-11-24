@@ -11,6 +11,7 @@ import {
   FileText,
   FileJson,
   GitBranch,
+  Globe,
   History,
   MessageSquareText,
   MoreHorizontal,
@@ -24,7 +25,7 @@ import { modelDisplayLabel } from "./lib/modelCatalog";
 import type { ModelInfo } from "./lib/types";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onProjectTreeChanged, openExternal } from "./lib/bridge";
+import { app, onBrowserStateChanged, onProjectTreeChanged, openExternal } from "./lib/bridge";
 import { useInstallerShutdown } from "./lib/useInstallerShutdown";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
@@ -49,6 +50,9 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { AutomationPanel } from "./components/AutomationPanel";
 import { ToolLibraryPanel } from "./components/ToolLibraryPanel";
 import { SideChatPanel } from "./components/SideChatPanel";
+import { BrowserPanel, browserTaskRunning } from "./components/BrowserPanel";
+import { BetaConnectionsPanel } from "./components/BetaConnectionsPanel";
+import { NO_BETA, UNKNOWN_ACCOUNT_SUMMARY, readBetaAccountSummary, readBetaCapabilities, type BetaAccountSummary, type BetaCapabilities } from "./lib/betaBridge";
 import { WorkMonitor } from "./components/WorkMonitor";
 import { workMonitorLabels } from "./lib/workMonitorLabels";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./components/ContextMenu";
@@ -119,7 +123,7 @@ const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
 const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
-type RightDockMode = "context" | "files" | "changed" | "sideChat";
+type RightDockMode = "context" | "files" | "changed" | "sideChat" | "browser";
 type WorkspaceRevealRequest = { id: number; path: string };
 type WorkspaceFileListRequest = { id: number; paths: string[] };
 type WorkspaceChangeListEntry = { key: string; path: string; meta: string; time: string; detail: string };
@@ -573,6 +577,13 @@ export default function App() {
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
   const [rightDockMode, setRightDockMode] = useState<RightDockMode>("context");
+  const [browserAvailable, setBrowserAvailable] = useState(false);
+  const [betaCapabilities, setBetaCapabilities] = useState<BetaCapabilities>(NO_BETA);
+  const [betaConnectionsOpen, setBetaConnectionsOpen] = useState(false);
+  const [accountCatalogRevision, setAccountCatalogRevision] = useState(0);
+  const betaConnectionsAvailable = betaCapabilities.enabled && (betaCapabilities.account || betaCapabilities.web);
+  const [betaAccountSummary, setBetaAccountSummary] = useState<BetaAccountSummary>(UNKNOWN_ACCOUNT_SUMMARY);
+  const [browserTaskState, setBrowserTaskState] = useState("");
   const [workspaceRevealRequest, setWorkspaceRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
   const [workspaceChangeRevealRequest, setWorkspaceChangeRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
   const [workspaceFileListRequest, setWorkspaceFileListRequest] = useState<WorkspaceFileListRequest | null>(null);
@@ -669,6 +680,32 @@ export default function App() {
       }
     };
   }, []);
+
+  // The header capsule must show a sign-in that finished in the external
+  // browser, so it polls on its own cadence and again when the window regains
+  // focus. It stays still while the panel is open: the panel polls faster and
+  // reports through accountCatalogRevision.
+  useEffect(() => {
+    if (!betaConnectionsAvailable || betaConnectionsOpen) return;
+    let disposed = false;
+    let busy = false;
+    const refresh = () => {
+      if (busy) return;
+      busy = true;
+      void readBetaAccountSummary(betaCapabilities)
+        .then(value => { if (!disposed) setBetaAccountSummary(value); })
+        // A failed read must not leave the capsule reading "checking status"
+        // forever: fall back to the signed-out call to action, which opens the
+        // panel that reports the real error.
+        .catch(() => { if (!disposed) setBetaAccountSummary({ orca: "signed_out", orcaName: "", web: "idle" }); })
+        .finally(() => { busy = false; });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
+    return () => { disposed = true; window.clearInterval(timer); window.removeEventListener("focus", onFocus); };
+  }, [betaConnectionsAvailable, betaConnectionsOpen, betaCapabilities, accountCatalogRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -863,7 +900,7 @@ export default function App() {
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
   const responsiveSidebarCollapsed = responsiveLayoutCompact || sidebarCollapsed;
-  const responsiveWorkspacePanelOpen = workspacePanelOpen && !responsiveLayoutCompact;
+  const responsiveWorkspacePanelOpen = workspacePanelOpen && (!responsiveLayoutCompact || workspacePanelMaximized);
   const chatReservedWidth = responsiveWorkspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
   const workspacePanelAvailableWidth = availableWorkspacePanelWidth({
     viewportWidth,
@@ -889,6 +926,17 @@ export default function App() {
     () => tabMetas.find((tab) => tab.id === activeTabId) ?? tabMetas.find((tab) => tab.active),
     [activeTabId, tabMetas],
   );
+  const browserOwnerTabId = activeTabId || activeTab?.id || tabMetas[0]?.id || "";
+  const browserOwnerRef = useRef(browserOwnerTabId);
+  browserOwnerRef.current = browserOwnerTabId;
+  useEffect(() => {
+    const off = onBrowserStateChanged(({ ownerTabId, state: browserState }) => {
+      if (browserOwnerRef.current !== ownerTabId) return;
+      setBrowserTaskState(browserTaskRunning(browserState.taskState) ? browserState.taskState ?? "" : "");
+    });
+    return off;
+  }, []);
+  useEffect(() => { setBrowserTaskState(""); }, [browserOwnerTabId]);
   const activeQueuedPrompts = activeTabId ? queuedPromptsByTab[activeTabId] ?? [] : [];
   const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
   const legacyMode = activeTabId ? modesByTab[activeTabId] ?? "normal" : "normal";
@@ -940,7 +988,7 @@ export default function App() {
       if (!cancelled) setDisplayModel(model ? { tabId: activeTabId, model } : undefined);
     }).catch(() => { if (!cancelled) setDisplayModel(undefined); });
     return () => { cancelled = true; };
-  }, [activeTabId, state.context.modelRef, state.meta]);
+  }, [activeTabId, state.context.modelRef, state.meta, accountCatalogRevision]);
   const currentModel = displayModel && displayModel.tabId === activeTabId && displayModel.model.ref === state.context.modelRef ? displayModel.model : undefined;
   const currentModelLabel = modelDisplayLabel(state.context.modelRef || "", state.meta?.label, currentModel?.metadataSource === "deepseek_official");
   const displayedModelLabel = activeTabId
@@ -2007,6 +2055,9 @@ export default function App() {
       if (mode === "context") {
         nextMaximized = false;
         setWorkspacePanelMaximized(false);
+      } else if (mode === "browser" && (responsiveLayoutCompact || workspacePanelAvailableWidth < RIGHT_DOCK_MIN_RENDER_WIDTH)) {
+        nextMaximized = true;
+        setWorkspacePanelMaximized(true);
       } else {
         // Keep file/change views docked; the rendered dock width is clamped to
         // the viewport so opening it reflows instead of forcing maximize.
@@ -2018,7 +2069,7 @@ export default function App() {
       }
       setWorkspacePanelOpen(true);
     },
-    [closeTransientOverlays, rightDockMode, workspacePanelMaximized, workspacePanelOpen],
+    [closeTransientOverlays, responsiveLayoutCompact, rightDockMode, workspacePanelAvailableWidth, workspacePanelMaximized, workspacePanelOpen],
   );
 
   const closeWorkspacePanel = useCallback(() => {
@@ -2256,6 +2307,12 @@ export default function App() {
     setPaletteOpen(true);
     setPaletteSessions(await listSessions().catch(() => []));
   }, [closeTransientOverlays, listSessions]);
+  const openBetaConnections = useCallback(() => {
+    closeTransientOverlays();
+    setPaletteOpen(false);
+    setTopicOverflowOpen(false);
+    setBetaConnectionsOpen(true);
+  }, [closeTransientOverlays]);
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
@@ -2285,8 +2342,9 @@ export default function App() {
       hint: s.workspaceRoot || undefined,
       run: () => void onResumeSession(s),
     }));
+    if (betaConnectionsAvailable) cmds.push({ id: "cmd-beta-connections", group: t("palette.group.commands"), title: t("beta.connections"), keywords: ["account", "login", "deepseek", "beta"], run: openBetaConnections });
     return [...cmds, ...sessionItems];
-  }, [t, paletteSessions, handleNewTab, openAllHistory, openTrash, onResumeSession]);
+  }, [t, paletteSessions, handleNewTab, openAllHistory, openTrash, onResumeSession, betaConnectionsAvailable, openBetaConnections]);
   // Delete / rename act on disk, then re-fetch so the panel reflects the change.
   const onDeleteSession = useCallback(
     async (path: string) => {
@@ -2426,6 +2484,12 @@ export default function App() {
       : t("sidebar.collapse");
   const sidebarNavTooltipDisabled = !responsiveSidebarCollapsed;
   const browserPreviewChrome = typeof window !== "undefined" && !window.runtime;
+  useEffect(() => {
+    let current = true;
+    void app.BrowserAvailable().then((supported) => { if (current) setBrowserAvailable(supported); }).catch(() => { if (current) setBrowserAvailable(false); });
+    void readBetaCapabilities().then((value) => { if (current) setBetaCapabilities(value); });
+    return () => { current = false; };
+  }, []);
   const workspacePanelResetWidth = rightDockDetailActive
     ? RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH
     : defaultRightDockTreeWidth();
@@ -2595,6 +2659,16 @@ export default function App() {
 		  uiStyle={desktopUIStyle}
           platform={desktopPlatform}
           browserPreviewChrome={browserPreviewChrome}
+          browserAvailable={browserAvailable}
+          betaConnectionsAvailable={betaConnectionsAvailable}
+          betaAccount={{ account: betaCapabilities.account, web: betaCapabilities.web, summary: betaAccountSummary }}
+          onOpenBetaConnections={openBetaConnections}
+          browserTaskState={browserTaskState}
+          onStopBrowserTask={() => {
+            const owner = browserOwnerTabId;
+            if (!owner) return;
+            void app.BrowserCommand(owner, { op: "cancelTask" }).then(() => { if (browserOwnerRef.current === owner) setBrowserTaskState(""); }).catch((e: unknown) => showToast(e instanceof Error ? e.message : String(e), "error"));
+          }}
           sidebarTogglePressed={sidebarTogglePressed}
           sidebarExpandBlocked={sidebarExpandBlocked}
           sidebarCollapsed={responsiveSidebarCollapsed}
@@ -2625,6 +2699,7 @@ export default function App() {
 		  onCloseSession={() => { if (activeTabId) void closeTab(activeTabId); }}
 		  onOpenSettings={(tab) => setSettingsTarget(tab)}
 		  onViewChanges={() => openRightDockMode("changed")}
+          onOpenBrowser={() => openRightDockMode("browser")}
         />
 
         <aside className={`sidebar${responsiveSidebarCollapsed ? " sidebar--collapsed" : ""}${workMonitorOpen && !responsiveSidebarCollapsed && !settingsTarget && !histView ? " sidebar--monitor-open" : ""}`} aria-label={t("sidebar.navigation")}>
@@ -3120,6 +3195,9 @@ export default function App() {
                   <MessageSquareText size={13} />
                   <span className="workbench-dock__tab-label">{t("rightDock.sideChat")}</span>
                 </button>
+                {browserAvailable && <button type="button" role="tab" aria-selected={rightDockMode === "browser"} className={`workbench-dock__tab${rightDockMode === "browser" ? " workbench-dock__tab--active" : ""}`} onClick={() => openRightDockMode("browser")} title={t("rightDock.browser")}>
+                  <Globe size={13} /><span className="workbench-dock__tab-label">{t("rightDock.browser")}</span>
+                </button>}
               </div>
             </div>
             <div className="workbench-dock__body">
@@ -3140,6 +3218,8 @@ export default function App() {
                 />
               ) : rightDockMode === "sideChat" ? (
                 <SideChatPanel tabId={activeTabId} />
+              ) : rightDockMode === "browser" ? (
+                <BrowserPanel ownerTabId={browserOwnerTabId} visible={workspacePanelRenderable} onTaskStateChange={setBrowserTaskState} obstructed={betaConnectionsOpen || workspacePanelResizing || sidebarResizing || startupSplashHold || clearContextPending || Boolean(settingsTarget || histView || paletteOpen || newSessionChooserOpen || automationPanelOpen || toolLibraryPanelOpen || workMonitorOpen || topicExportOpen || topicOverflowOpen || textEditMenuPoint || selectionMenuPoint || state.approval || state.ask || state.messageAction)} />
               ) : (
                 <WorkspacePanel
                   open={workspacePanelRenderable}
@@ -3191,6 +3271,8 @@ export default function App() {
           onClose={closeHistory}
         />
       )}
+
+      {betaConnectionsAvailable && betaConnectionsOpen && <BetaConnectionsPanel capabilities={betaCapabilities} onClose={() => setBetaConnectionsOpen(false)} onAccountChanged={() => { closeTransientOverlays(); setAccountCatalogRevision(value => value + 1); void refreshMeta(); }} nativeObstructed={workspacePanelResizing || sidebarResizing || startupSplashHold || clearContextPending || Boolean(settingsTarget || histView || paletteOpen || newSessionChooserOpen || automationPanelOpen || toolLibraryPanelOpen || workMonitorOpen || topicExportOpen || topicOverflowOpen || textEditMenuPoint || selectionMenuPoint || state.approval || state.ask || state.messageAction || needsOnboarding)} />}
 
       {settingsTarget !== null && (
         <SettingsPanel

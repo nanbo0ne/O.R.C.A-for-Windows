@@ -119,10 +119,11 @@ func TestResolveShellDecisionTable(t *testing.T) {
 		{"git-bash on disk but probe fails", "windows", onPath("powershell"), gitBash, always, never, never, ShellPowerShell, ""},
 		{"no bash anywhere, pwsh", "windows", onPath("pwsh", "powershell"), gitBash, never, never, never, ShellPowerShell, ""},
 		{"no bash, only powershell", "windows", onPath("powershell"), gitBash, never, never, never, ShellPowerShell, ""},
-		{"windows, nothing found", "windows", onPath(), nil, never, never, never, ShellBash, ""},
+		{"windows, nothing found", "windows", onPath(), nil, never, never, never, ShellPowerShell, "powershell"},
 		{"linux, no bash → no PS fallback", "linux", onPath("powershell"), gitBash, always, always, never, ShellBash, ""},
 		{"wsl bash on PATH skipped for git-bash", "windows", onPath("bash", "powershell"), gitBash, always, always, wslIsPathBash, ShellBash, `C:\fake\Git\bin\bash.exe`},
 		{"wsl bash on PATH, no git → powershell not wsl", "windows", onPath("bash", "powershell"), gitBash, never, always, wslIsPathBash, ShellPowerShell, ""},
+		{"wsl bash with no native shell must not be fallback", "windows", onPath("bash"), nil, never, always, wslIsPathBash, ShellPowerShell, "powershell"},
 	}
 	for _, c := range cases {
 		got := resolveShell(c.goos, c.lookPath, c.exists, c.candidates, c.probe, c.isWSL)
@@ -145,6 +146,15 @@ func TestIsWindowsWSLBash(t *testing.T) {
 	}
 	if !isWindowsWSLBash(`c:\windows\system32\BASH.EXE`) {
 		t.Error("detection should be case-insensitive")
+	}
+	for _, alias := range []string{
+		`C:\Users\synthetic\AppData\Local\Microsoft\WindowsApps\bash.exe`,
+		`C:\Users\synthetic\AppData\Local\Microsoft\WindowsApps\MicrosoftCorporationII.WindowsSubsystemForLinux_8wekyb3d8bbwe\bash.exe`,
+		`C:\Program Files\WindowsApps\MicrosoftCorporationII.WindowsSubsystemForLinux_fixture\bash.exe`,
+	} {
+		if !isWindowsWSLBash(alias) {
+			t.Errorf("WindowsApps bash alias must not be used for a native workspace: %q", alias)
+		}
 	}
 	if isWindowsWSLBash(`C:\Program Files\Git\bin\bash.exe`) {
 		t.Error("Git-for-Windows bash must not be flagged as WSL")

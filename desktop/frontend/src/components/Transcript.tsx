@@ -137,6 +137,7 @@ function TimelineProcessGroup({
   subcalls,
   liveToolID,
   mode,
+  completed,
   open,
   onOpenChange,
   activity,
@@ -154,12 +155,12 @@ function TimelineProcessGroup({
   const visible = items.filter(isProcessItem);
   if (visible.length === 0) return null;
 
-  let label = t("process.compact.thinking");
+  let label = t(completed ? "process.timeline.details" : "process.compact.thinking");
   const runningTool = [...visible].reverse().find((item): item is ToolItem => item.kind === "tool" && item.status === "running");
   const toolCount = visible.filter((item) => item.kind === "tool").length;
   if (toolCount === 1) label = t("process.timeline.oneTool");
   else if (toolCount > 1) label = t("process.timeline.tools", { n: toolCount });
-  const running = visible.some(isProcessItemRunning);
+  const running = !completed && visible.some(isProcessItemRunning);
   const runningLabel = runningTool
     ? t(runningTool.readOnly ? "process.compact.reading" : "process.compact.tool")
     : t("process.compact.compacting");

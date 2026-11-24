@@ -18,6 +18,13 @@ func releaseCOM(object unsafe.Pointer) {
 	}
 }
 
+// A COM call can reenter Go and grow its stack. Unlike SyscallN's keepalive
+// boundary, this must force converted output pointers to escape the caller.
+//go:uintptrescapes
+func callCOM(method uintptr, args ...uintptr) (uintptr, uintptr, syscall.Errno) {
+	return syscall.SyscallN(method, args...)
+}
+
 func elementFromPoint(auto *uia.IUIAutomation, x, y int) (*uia.IUIAutomationElement, error) {
 	if auto == nil {
 		return nil, fmt.Errorf("UI Automation is unavailable")
@@ -31,9 +38,9 @@ func elementFromPoint(auto *uia.IUIAutomation, x, y int) (*uia.IUIAutomationElem
 	var ret uintptr
 	if unsafe.Sizeof(uintptr(0)) == 8 {
 		packed := uint64(uint32(int32(x))) | uint64(uint32(int32(y)))<<32
-		ret, _, _ = syscall.SyscallN(vtbl.ElementFromPoint, uintptr(unsafe.Pointer(auto)), uintptr(packed), uintptr(unsafe.Pointer(&result)))
+		ret, _, _ = callCOM(vtbl.ElementFromPoint, uintptr(unsafe.Pointer(auto)), uintptr(packed), uintptr(unsafe.Pointer(&result)))
 	} else {
-		ret, _, _ = syscall.SyscallN(vtbl.ElementFromPoint, uintptr(unsafe.Pointer(auto)), uintptr(int32(x)), uintptr(int32(y)), uintptr(unsafe.Pointer(&result)))
+		ret, _, _ = callCOM(vtbl.ElementFromPoint, uintptr(unsafe.Pointer(auto)), uintptr(int32(x)), uintptr(int32(y)), uintptr(unsafe.Pointer(&result)))
 	}
 	if int32(ret) < 0 {
 		return nil, uia.HResult(ret)

@@ -20,6 +20,28 @@ func (c *Controller) SteerDisplay(input, display, expectedTurn, id string) error
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if c.providerKind == "deepseekweb-beta" {
+		rich, err := c.resolveWebBetaInput(ctx, input, input)
+		if err != nil {
+			return err
+		}
+		c.mu.Lock()
+		if !c.running || c.cancelRequested || c.activeTurnID != turn || c.executor != exec || ctx.Err() != nil {
+			c.mu.Unlock()
+			return fmt.Errorf("guidance turn changed; draft retained")
+		}
+		ack, accepted := exec.TrySteerRich(rich, display, nil, id)
+		c.mu.Unlock()
+		if !accepted {
+			return fmt.Errorf("task no longer accepts guidance")
+		}
+		select {
+		case err := <-ack:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	for _, ref := range parseRefTokens(input) {
 		if isAttachmentRef(ref) && !fileRefExists(ref, c.cpRoot) {
 			return fmt.Errorf("guidance attachment @%s is unavailable; your draft is preserved", ref)

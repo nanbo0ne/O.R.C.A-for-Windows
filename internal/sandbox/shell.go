@@ -66,18 +66,24 @@ func resolveShell(goos string, lookPath func(string) (string, error), exists fun
 				return Shell{Kind: ShellPowerShell, Path: p}
 			}
 		}
+		// Never resolve "bash" again after rejecting a WSL launcher on PATH.
+		return Shell{Kind: ShellPowerShell, Path: "powershell"}
 	}
 	return Shell{Kind: ShellBash, Path: "bash"}
 }
 
 // isWindowsWSLBash reports whether a resolved bash path is the WSL launcher
-// Windows ships under %SystemRoot% (e.g. C:\Windows\System32\bash.exe). With WSL
-// installed it runs commands inside the Linux VM — where the Windows workspace is
-// a /mnt/<drive> path — so it must never be chosen for a native Windows workspace;
-// the only bash.exe Microsoft places under the Windows dir is that launcher.
+// Windows ships under %SystemRoot% or a Store WindowsApps alias. They run commands
+// inside a Linux VM, so must never be chosen for a native Windows workspace.
 func isWindowsWSLBash(path string) bool {
 	if runtime.GOOS != "windows" || path == "" {
 		return false
+	}
+	p := strings.ToLower(filepath.Clean(path))
+	// PATH may still contain the original user's aliases after LOCALAPPDATA is
+	// isolated. Recognize the path component without consulting that profile.
+	if filepath.Base(p) == "bash.exe" && strings.Contains(p, `\windowsapps\`) {
+		return true
 	}
 	win := os.Getenv("SystemRoot")
 	if win == "" {
@@ -86,7 +92,6 @@ func isWindowsWSLBash(path string) bool {
 	if win == "" {
 		return false
 	}
-	p := strings.ToLower(filepath.Clean(path))
 	root := strings.ToLower(filepath.Clean(win)) + string(filepath.Separator)
 	return strings.HasPrefix(p, root)
 }
@@ -123,11 +128,18 @@ func windowsBashCandidates() []string {
 		roots = append(roots, filepath.Join(v, "Programs"))
 	}
 	var out []string
+	seen := make(map[string]bool)
 	for _, r := range roots {
-		out = append(out,
+		for _, p := range []string{
 			filepath.Join(r, "Git", "bin", "bash.exe"),
 			filepath.Join(r, "Git", "usr", "bin", "bash.exe"),
-		)
+		} {
+			key := strings.ToLower(filepath.Clean(p))
+			if !seen[key] {
+				out = append(out, p)
+				seen[key] = true
+			}
+		}
 	}
 	return out
 }

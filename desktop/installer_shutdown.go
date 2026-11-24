@@ -87,6 +87,9 @@ func requestInstallerDraftFlush(ctx context.Context, timeout time.Duration) erro
 }
 
 func (a *App) startInstallerShutdownListener() {
+	if betaEnabled() {
+		return
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		log.Printf("installer shutdown listener: executable directory: %v", err)
@@ -98,6 +101,9 @@ func (a *App) startInstallerShutdownListener() {
 }
 
 func (a *App) listenForInstallerShutdown(ctx context.Context, dir string, quit func()) error {
+	if betaEnabled() {
+		return nil
+	}
 	if ctx == nil || quit == nil {
 		return errors.New("installer shutdown requires a context and quit callback")
 	}

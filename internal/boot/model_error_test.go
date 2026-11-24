@@ -2,14 +2,39 @@ package boot
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/event"
 
 	_ "github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider/openai"
 	_ "github.com/nanbo0ne/O.R.C.A-for-Windows/internal/tool/builtin"
 )
+
+func TestBuildExplicitWorkspaceOverridesEnclosingGitConfig(t *testing.T) {
+	if config.IsolatedProfileEnabled() {
+		t.Fatal("standard boot fixture unexpectedly inherited beta isolation")
+	}
+	outer := robustTempDir(t)
+	if err := os.Mkdir(filepath.Join(outer, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	inner := filepath.Join(outer, "nested-fixture")
+	writeFile(t, outer, "orca.toml", "default_model = 'enclosing-repo-model'\n")
+	writeFile(t, inner, "orca.toml", "default_model = 'fixture-missing-model'\n[codegraph]\nenabled = false\n")
+	t.Chdir(inner)
+	if got := resolveWorkspaceRoot(""); got != outer {
+		t.Fatalf("auto root = %q, want enclosing fixture %q", got, outer)
+	}
+	_, err := Build(context.Background(), Options{WorkspaceRoot: inner, Sink: event.Discard})
+	if !errors.Is(err, ErrUnknownModel) || !strings.Contains(err.Error(), "fixture-missing-model") {
+		t.Fatalf("explicit fixture config was not used: %v", err)
+	}
+}
 
 // TestBuildUnknownModelErrorIsActionable: a default_model that doesn't resolve
 // (e.g. a preset name after [[providers]] replaced the built-in presets) must
@@ -32,7 +57,7 @@ model = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `)
 
-	_, err := Build(context.Background(), Options{Sink: event.Discard})
+	_, err := Build(context.Background(), Options{Sink: event.Discard, WorkspaceRoot: dir})
 	if err == nil {
 		t.Fatal("expected an error for an unresolvable default_model")
 	}
@@ -67,6 +92,7 @@ api_key_env = "`+keyEnv+`"
 
 	var notices []string
 	ctrl, err := Build(context.Background(), Options{
+		WorkspaceRoot: dir,
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.Notice {
 				notices = append(notices, e.Text)

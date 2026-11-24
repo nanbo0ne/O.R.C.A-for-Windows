@@ -22,6 +22,16 @@ function eq(a: unknown, b: unknown, label: string) {
 
 console.log("\ncontext panel usage");
 
+eq(computeContextPanelUsage({}).contextAvailable, false, "missing context is not reported as measured zero");
+eq(computeContextPanelUsage({context: {used: 0, window: 0, sessionTokens: 0}}).contextAvailable, false,
+  "web provider unknown context remains unavailable");
+eq(computeContextPanelUsage({context: {used: 0, window: 10000, sessionTokens: 0}}).contextAvailable, true,
+  "empty context with a configured window retains its real zero");
+eq(computeContextPanelUsage({context: {used: 120, window: 0, sessionTokens: 500}}).contextAvailable, true,
+  "reported occupancy remains available without a known capacity");
+eq(computeContextPanelUsage({context: {used: 0, window: 0, sessionTokens: 50000}}).contextAvailable, false,
+  "cumulative usage cannot manufacture current occupancy");
+
 eq(
   computeContextPanelUsage({
     context: { used: 0, window: 1000000, sessionTokens: 19337 },

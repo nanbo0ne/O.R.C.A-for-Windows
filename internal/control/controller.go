@@ -95,6 +95,7 @@ type Controller struct {
 	balanceKey             string
 	balanceClient          *http.Client
 	modelRef               string
+	providerKind           string
 	contextWindowConfirmed bool
 	contextWindowSource    string
 
@@ -137,6 +138,7 @@ type Controller struct {
 	cancel          context.CancelFunc
 	activeContext   context.Context
 	running         bool
+	retired         bool
 	cancelRequested bool
 	activeTurnID    string
 	lastOutcome     event.TurnOutcome
@@ -349,10 +351,13 @@ type Options struct {
 	Cleanup       func()
 	// BalanceURL/BalanceKey wire the active provider's optional wallet-balance
 	// endpoint and bearer key; empty when the provider declares no balance_url.
-	BalanceURL             string
-	BalanceKey             string
-	BalanceClient          *http.Client
-	ModelRef               string
+	BalanceURL    string
+	BalanceKey    string
+	BalanceClient *http.Client
+	ModelRef      string
+	// ProviderKind is captured from the resolved entry at build time, not inferred
+	// from a mutable provider name or reloaded configuration.
+	ProviderKind           string
 	ContextWindowConfirmed bool
 	ContextWindowSource    string
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
@@ -431,6 +436,7 @@ func New(opts Options) *Controller {
 		balanceKey:                 opts.BalanceKey,
 		balanceClient:              opts.BalanceClient,
 		modelRef:                   strings.TrimSpace(opts.ModelRef),
+		providerKind:               opts.ProviderKind,
 		contextWindowConfirmed:     opts.ContextWindowConfirmed,
 		contextWindowSource:        strings.TrimSpace(opts.ContextWindowSource),
 		jobs:                       opts.Jobs,
@@ -558,6 +564,11 @@ func (c *Controller) refreshCheckpointEpochLocked() {
 // turn is already in flight.
 func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 	c.mu.Lock()
+	if c.retired {
+		c.mu.Unlock()
+		c.notice(ErrControllerRetired.Error())
+		return
+	}
 	if c.running {
 		c.mu.Unlock()
 		return
@@ -572,6 +583,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 	c.activeContext = ctx
 	c.cancelRequested = false
 	c.mu.Unlock()
+	waitDrain := captureWebTaskDrain(id)
 
 	c.autosaveWG.Add(1)
 	go func() {
@@ -582,6 +594,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
+				waitDrain()
 				c.mu.Lock()
 				c.running = false
 				c.cancel = nil
@@ -593,6 +606,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 			}
 		}()
 		err := body(ctx)
+		waitDrain()
 		c.mu.Lock()
 		cancelled := c.cancelRequested
 		c.running = false
@@ -658,6 +672,11 @@ func (c *Controller) RunTurn(ctx context.Context, input string) (err error) {
 	ctx = c.workMonitorContext(ctx)
 	defer endTurn()
 	c.mu.Lock()
+	if c.retired {
+		c.mu.Unlock()
+		cancel()
+		return ErrControllerRetired
+	}
 	if c.running {
 		c.mu.Unlock()
 		cancel()
@@ -669,9 +688,12 @@ func (c *Controller) RunTurn(ctx context.Context, input string) (err error) {
 	c.cancelRequested = false
 	c.activeTurnID, _ = agent.ParentTurn(ctx)
 	c.lastOutcome = ""
+	taskID := c.activeTurnID
 	c.mu.Unlock()
+	waitDrain := captureWebTaskDrain(taskID)
 
 	defer func() {
+		waitDrain()
 		c.mu.Lock()
 		c.running = false
 		c.cancel = nil
@@ -757,7 +779,7 @@ func (c *Controller) refreshSessionFromDisk() {
 
 func sameMessageBoundary(a, b provider.Message) bool {
 	return a.Role == b.Role && a.Content == b.Content && a.ReasoningContent == b.ReasoningContent &&
-		a.ToolCallID == b.ToolCallID && a.Name == b.Name && len(a.ToolCalls) == len(b.ToolCalls) && len(a.Images) == len(b.Images)
+		a.ToolCallID == b.ToolCallID && a.Name == b.Name && len(a.ToolCalls) == len(b.ToolCalls) && len(a.Images) == len(b.Images) && len(a.Files) == len(b.Files)
 }
 
 func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, display string) error {
@@ -794,8 +816,10 @@ func (c *Controller) runTurnWithRichDisplay(ctx context.Context, rich agent.Rich
 	}
 	rich.Text = input
 	var runErr error
-	if runner, ok := c.runner.(agent.RichRunner); ok && len(rich.Images) > 0 {
+	if runner, ok := c.runner.(agent.RichRunner); ok && (len(rich.Images) > 0 || len(rich.Files) > 0) {
 		runErr = runner.RunRich(ctx, rich)
+	} else if len(rich.Files) > 0 {
+		return fmt.Errorf("runner cannot accept file snapshots; attachments were not sent")
 	} else {
 		runErr = c.runner.Run(ctx, input)
 	}
@@ -1316,6 +1340,13 @@ func (c *Controller) runRefTurn(input, display string) {
 // "/path/File.kt:12: error" attach @/path/File.kt without rewriting the error.
 func (c *Controller) runRefTurnWithRefs(input, refLine, display string) {
 	c.runGuarded(func(ctx context.Context) error {
+		if c.providerKind == "deepseekweb-beta" {
+			rich, err := c.resolveWebBetaInput(ctx, input, refLine)
+			if err != nil {
+				return err
+			}
+			return c.runGoalLoopWithRichDisplay(ctx, rich, input, display)
+		}
 		block, availableImages, errs, imageErr := c.resolveRefsWithImages(ctx, refLine, true)
 		for _, e := range errs {
 			c.notice(e)
@@ -1552,6 +1583,8 @@ func (c *Controller) SteerConsumed() bool {
 // tool exists to get a genuine user decision, and YOLO only auto-approves
 // tool calls; it must not answer the user's questions for them.
 func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error) {
+	resume := provider.BeginTaskHumanWait(ctx)
+	defer resume()
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
 
@@ -1733,6 +1766,11 @@ func (c *Controller) Compact(ctx context.Context, instructions string) (err erro
 	ctx = c.workMonitorContext(ctx)
 	defer endTurn()
 	c.mu.Lock()
+	if c.retired {
+		c.mu.Unlock()
+		cancel()
+		return ErrControllerRetired
+	}
 	if c.running {
 		c.mu.Unlock()
 		cancel()
@@ -1742,8 +1780,10 @@ func (c *Controller) Compact(ctx context.Context, instructions string) (err erro
 	c.activeTurnID, _ = agent.ParentTurn(ctx)
 	monitorTurn := c.activeTurnID
 	c.mu.Unlock()
+	waitDrain := captureWebTaskDrain(monitorTurn)
 	defer func() { c.workMonitorCompleted(monitorTurn, err) }()
 	defer func() {
+		waitDrain()
 		c.mu.Lock()
 		c.running, c.cancel = false, nil
 		c.resetCancelledStateLocked()
@@ -2409,16 +2449,17 @@ func (c *Controller) ContextSnapshot() (int, int) {
 }
 
 type ContextMetadata struct {
-	ModelRef  string
-	Confirmed bool
-	Source    string
+	ModelRef     string
+	ProviderKind string
+	Confirmed    bool
+	Source       string
 }
 
 func (c *Controller) ContextMetadata() ContextMetadata {
 	if c == nil {
 		return ContextMetadata{}
 	}
-	return ContextMetadata{ModelRef: c.modelRef, Confirmed: c.contextWindowConfirmed, Source: c.contextWindowSource}
+	return ContextMetadata{ModelRef: c.modelRef, ProviderKind: c.providerKind, Confirmed: c.contextWindowConfirmed, Source: c.contextWindowSource}
 }
 
 func (c *Controller) PricingInfo() (bool, string) {
@@ -3368,6 +3409,8 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	}
 	c.mu.Unlock()
 
+	resume := provider.BeginTaskHumanWait(ctx)
+	defer resume()
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
 

@@ -21,6 +21,7 @@ type Runner interface {
 type RichInput struct {
 	Text   string
 	Images []provider.ImageContent
+	Files  []provider.FileContent
 }
 
 type RichRunner interface {
@@ -110,10 +111,24 @@ func (c *Coordinator) RunRich(ctx context.Context, input RichInput) error {
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing"})
 		return c.executor.RunRich(ctx, input)
 	}
+	// The executor consumes the plan, so its work still belongs to the planner's
+	// identity scope even when the executor itself is an ordinary API provider.
+	if scoped, ok := c.planner.(provider.TaskProvider); ok {
+		parentTaskID, _ := ParentTurn(ctx)
+		taskCtx, release, err := scoped.BeginTask(ctx, c.plannerSess.ConversationID(), parentTaskID)
+		if err != nil {
+			return fmt.Errorf("planner: %w", err)
+		}
+		defer release()
+		ctx = taskCtx
+	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.planner.Name() + " · planning"})
 	plan, err := c.plan(ctx, input.Text)
 	if err != nil {
 		return fmt.Errorf("planner: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing"})
 	input.Text = formatHandoff(input.Text, plan)
@@ -123,6 +138,9 @@ func (c *Coordinator) RunRich(ctx context.Context, input RichInput) error {
 // plan streams a plan from the planner and appends it to the planner session, so
 // that session grows prepend-only and stays cache-friendly.
 func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if c.plannerAgent != nil {
 		return c.planWithTools(ctx, input)
 	}
@@ -130,11 +148,17 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 
 	requestPricing := c.plannerPricing.SnapshotAt(time.Now())
 	requestID := event.NewRequestID()
-	ch, err := c.planner.Stream(ctx, provider.Request{
-		RequestID:   requestID,
-		Purpose:     provider.RequestPurposeTurn,
-		Messages:    c.plannerSess.Messages,
-		Temperature: c.temperature,
+	parentTaskID, _ := ParentTurn(ctx)
+	requestCtx, cancelRequest := context.WithCancel(ctx)
+	defer cancelRequest()
+	ch, err := c.planner.Stream(requestCtx, provider.Request{
+		ParentTaskID:   parentTaskID,
+		ConversationID: c.plannerSess.ConversationID(),
+		ContextEpoch:   c.plannerSess.ContextEpoch(),
+		RequestID:      requestID,
+		Purpose:        provider.RequestPurposeTurn,
+		Messages:       c.plannerSess.Messages,
+		Temperature:    c.temperature,
 	})
 	if err != nil {
 		return "", err
@@ -142,7 +166,21 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 
 	var text strings.Builder
 	var usage *provider.Usage
-	for chunk := range ch {
+streamLoop:
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		var chunk provider.Chunk
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case next, ok := <-ch:
+			if !ok {
+				break streamLoop
+			}
+			chunk = next
+		}
 		switch chunk.Type {
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
@@ -151,7 +189,12 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 			usage = chunk.Usage
 		case provider.ChunkError:
 			return "", chunk.Err
+		case provider.ChunkDone:
+			break streamLoop
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	// Closes the planner's raw text block (no markdown redraw) and prints its
 	// usage line, mirroring the old Fprintln + printUsage tail.

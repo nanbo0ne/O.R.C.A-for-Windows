@@ -1641,6 +1641,9 @@ func (a *App) CloseTab(tabID string) error {
 
 	a.markAssistantMemoryPendingForCandidate(leave, true)
 	// Tear down outside the lock.
+	if a.browser != nil {
+		a.browser.closeOwner(tabID)
+	}
 	if tab.Ctrl != nil {
 		tab.Ctrl.Cancel()
 		_ = tab.Ctrl.Snapshot()
@@ -2023,17 +2026,31 @@ func (a *App) drainRuntimeSubmits(tab *WorkspaceTab, queued []pendingRuntimeSubm
 	defer done()
 	for _, pending := range queued {
 		for {
+			releaseIdentity, err := a.beginIdentityAdmission(tab.ID)
+			if err != nil {
+				a.mu.Lock()
+				if a.tabs[tab.ID] == tab && pending.epoch == tab.pendingSubmitEpoch {
+					tab.pendingSubmitEpoch++
+					tab.pendingSubmitCount = 0
+					tab.pendingRuntimeSubmits = nil
+				}
+				a.mu.Unlock()
+				a.noticeForTab(tab.ID, err.Error())
+				return
+			}
 			tab.submitMu.Lock()
 			a.mu.Lock()
 			valid := a.tabs[tab.ID] == tab && pending.epoch == tab.pendingSubmitEpoch
 			a.mu.Unlock()
 			if !valid {
 				tab.submitMu.Unlock()
+				releaseIdentity()
 				return
 			}
 			ctrl := a.ctrlByTabID(tab.ID)
 			if ctrl == nil {
 				tab.submitMu.Unlock()
+				releaseIdentity()
 				return
 			}
 			if !ctrl.Running() {
@@ -2050,9 +2067,11 @@ func (a *App) drainRuntimeSubmits(tab *WorkspaceTab, queued []pendingRuntimeSubm
 				}
 				a.mu.Unlock()
 				tab.submitMu.Unlock()
+				releaseIdentity()
 				break
 			}
 			tab.submitMu.Unlock()
+			releaseIdentity()
 			select {
 			case <-time.After(50 * time.Millisecond):
 			case <-a.bootContext().Done():
@@ -2229,44 +2248,53 @@ func (a *App) maybeAutoTitleTopic(tab *WorkspaceTab) bool {
 		return false
 	}
 	defer done()
-	if tab == nil || strings.TrimSpace(tab.TopicID) == "" || tab.Ctrl == nil {
+	if tab == nil {
 		return false
 	}
-	titleRoot := tab.WorkspaceRoot
-	if tab.Scope == "global" {
+	a.mu.RLock()
+	topicID, workspaceRoot, scope, ctrl, modelRef := tab.TopicID, tab.WorkspaceRoot, tab.Scope, tab.Ctrl, tab.model
+	a.mu.RUnlock()
+	if strings.TrimSpace(topicID) == "" || ctrl == nil {
+		return false
+	}
+	if boundModel := ctrl.ContextMetadata().ModelRef; boundModel != "" {
+		modelRef = boundModel
+	}
+	sessionPath := ctrl.SessionPath()
+	titleRoot := workspaceRoot
+	if scope == "global" {
 		titleRoot = ""
 	}
-	if source := loadTopicTitleSource(titleRoot, tab.TopicID); source != topicTitleSourceAuto {
+	if source := loadTopicTitleSource(titleRoot, topicID); source != topicTitleSourceAuto {
 		return false
 	}
-	currentTitle := strings.TrimSpace(loadTopicTitle(titleRoot, tab.TopicID))
+	currentTitle := strings.TrimSpace(loadTopicTitle(titleRoot, topicID))
 	if currentTitle != "" && currentTitle != defaultTopicTitle && !isBrokenAutoTopicTitle(currentTitle) {
 		return false
 	}
-	sessionPath := tab.Ctrl.SessionPath()
 	if sessionPath == "" {
 		return false
 	}
 	nextTitle, updated := "", false
 	if userText, assistantText := topicTitleInputsFromSession(sessionPath); userText != "" && assistantText != "" {
 		nextTitle = topicTitleFromText(userText)
-		if generated, err := a.generateTopicTitleWithProvider(tab.WorkspaceRoot, userText, assistantText); err == nil && generated != "" {
+		if generated, err := a.generateTopicTitleWithProvider(workspaceRoot, userText, assistantText, modelRef); err == nil && generated != "" {
 			nextTitle = generated
 		}
-		if nextTitle != "" && nextTitle != loadTopicTitle(titleRoot, tab.TopicID) {
-			if err := setTopicTitleWithSource(titleRoot, tab.TopicID, nextTitle, topicTitleSourceAuto); err == nil {
+		if nextTitle != "" && nextTitle != loadTopicTitle(titleRoot, topicID) {
+			if err := setTopicTitleWithSource(titleRoot, topicID, nextTitle, topicTitleSourceAuto); err == nil {
 				updated = true
 			}
 		}
 	}
 	if !updated {
-		nextTitle, updated = autoTitleTopicFromSession(titleRoot, tab.TopicID, sessionPath)
+		nextTitle, updated = autoTitleTopicFromSession(titleRoot, topicID, sessionPath)
 		if !updated {
 			return false
 		}
 	}
-	a.updateOpenTopicTitle(tab.TopicID, nextTitle)
-	a.updateTopicSessionTitles(tab.TopicID, nextTitle)
+	a.updateOpenTopicTitle(topicID, nextTitle)
+	a.updateTopicSessionTitles(topicID, nextTitle)
 	a.emitProjectTreeChanged()
 	return true
 }
@@ -2411,12 +2439,17 @@ func (a *App) GenerateTopicTitle(scope, workspaceRoot, topicID string) (string, 
 	}
 	titleRoot := topicTitleRoot(scope, workspaceRoot)
 	sessionPath := ""
+	modelRef := ""
 	a.mu.RLock()
 	for _, tab := range a.tabs {
 		if tab == nil || tab.TopicID != topicID || tab.Ctrl == nil {
 			continue
 		}
 		sessionPath = tab.Ctrl.SessionPath()
+		modelRef = tab.Ctrl.ContextMetadata().ModelRef
+		if modelRef == "" {
+			modelRef = tab.model
+		}
 		break
 	}
 	a.mu.RUnlock()
@@ -2436,7 +2469,7 @@ func (a *App) GenerateTopicTitle(scope, workspaceRoot, topicID string) (string, 
 	fallback := topicTitleFromText(userText)
 	title := fallback
 	if assistantText != "" {
-		if generated, err := a.generateTopicTitleWithProvider(workspaceRoot, userText, assistantText); err == nil && generated != "" {
+		if generated, err := a.generateTopicTitleWithProvider(workspaceRoot, userText, assistantText, modelRef); err == nil && generated != "" {
 			title = generated
 		}
 	}
@@ -2452,27 +2485,17 @@ func (a *App) GenerateTopicTitle(scope, workspaceRoot, topicID string) (string, 
 	return title, nil
 }
 
-func (a *App) generateTopicTitleWithProvider(workspaceRoot, userText, assistantText string) (string, error) {
+func (a *App) generateTopicTitleWithProvider(workspaceRoot, userText, assistantText, modelRef string) (string, error) {
 	cfg, err := config.LoadForRoot(workspaceRoot)
 	if err != nil {
 		return "", err
 	}
-	ref := cfg.DefaultModel
-	a.mu.RLock()
-	for _, tab := range a.tabs {
-		if tab != nil && normalizeProjectRoot(tab.WorkspaceRoot) == normalizeProjectRoot(workspaceRoot) && strings.TrimSpace(tab.model) != "" {
-			ref = tab.model
-			break
-		}
+	entry, err := exactAuxiliaryProvider(cfg, modelRef)
+	if err != nil {
+		return "", err
 	}
-	a.mu.RUnlock()
-	resolved, _, ok := cfg.ResolveModelWithFallback(ref)
-	if !ok {
-		return "", fmt.Errorf("unknown model %q", ref)
-	}
-	entry, ok := cfg.ResolveModel(resolved)
-	if !ok {
-		return "", fmt.Errorf("unknown model %q", resolved)
+	if err := automaticAuxiliaryAllowed(entry); err != nil {
+		return "", err
 	}
 	prov, err := boot.NewProviderWithProxy(entry, netclient.ProxySpec{Mode: netclient.ModeAuto})
 	if err != nil {
@@ -2488,22 +2511,15 @@ func (a *App) generateTopicTitleWithProvider(workspaceRoot, userText, assistantT
 			{Role: provider.RoleUser, Content: "User request:\n" + userText + "\n\nAssistant reply:\n" + assistantText},
 		},
 	}
-	ch, err := prov.Stream(ctx, req)
+	ch, err := prov.Stream(ctx, bindAuxiliaryRequest(ctx, auxiliaryTitle, req))
 	if err != nil {
 		return "", err
 	}
-	var b strings.Builder
-	for chunk := range ch {
-		switch chunk.Type {
-		case provider.ChunkText:
-			b.WriteString(chunk.Text)
-		case provider.ChunkError:
-			if chunk.Err != nil {
-				return "", chunk.Err
-			}
-		}
+	text, err := collectAuxiliaryText(ctx, ch)
+	if err != nil {
+		return "", err
 	}
-	return cleanGeneratedTopicTitle(b.String()), nil
+	return cleanGeneratedTopicTitle(text), nil
 }
 
 func cleanGeneratedTopicTitle(text string) string {
@@ -2652,11 +2668,11 @@ func (a *App) saveTabsLocked() error {
 		return err
 	}
 	path := filepath.Join(dir, tabsFileName)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	previous, err := readDesktopModelState(path)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return replaceDesktopModelSnapshot(path, previous, b)
 }
 
 func (a *App) orderedTabIDsLocked() []string {
@@ -3211,25 +3227,28 @@ func topicTitlesPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicTitlesFile)
 	}
-	return filepath.Join(workspaceRoot, product.ProjectStateDir, topicTitlesFile)
+	return config.ProjectStatePath(workspaceRoot, topicTitlesFile)
 }
 
 func topicTitleSourcesPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicTitleSourcesFile)
 	}
-	return filepath.Join(workspaceRoot, product.ProjectStateDir, topicTitleSourcesFile)
+	return config.ProjectStatePath(workspaceRoot, topicTitleSourcesFile)
 }
 
 func topicCreatedAtsPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicCreatedAtsFile)
 	}
-	return filepath.Join(workspaceRoot, product.ProjectStateDir, topicCreatedAtsFile)
+	return config.ProjectStatePath(workspaceRoot, topicCreatedAtsFile)
 }
 
 func loadTopicTitles(workspaceRoot string) map[string]string {
 	m := map[string]string{}
+	if config.ValidateProfileDataPath(topicTitlesPath(workspaceRoot)) != nil {
+		return m
+	}
 	b, err := os.ReadFile(topicTitlesPath(workspaceRoot))
 	if err != nil {
 		return m
@@ -3240,6 +3259,9 @@ func loadTopicTitles(workspaceRoot string) map[string]string {
 
 func loadTopicTitleSources(workspaceRoot string) map[string]string {
 	m := map[string]string{}
+	if config.ValidateProfileDataPath(topicTitleSourcesPath(workspaceRoot)) != nil {
+		return m
+	}
 	b, err := os.ReadFile(topicTitleSourcesPath(workspaceRoot))
 	if err != nil {
 		return m
@@ -3250,6 +3272,9 @@ func loadTopicTitleSources(workspaceRoot string) map[string]string {
 
 func loadTopicCreatedAts(workspaceRoot string) map[string]int64 {
 	m := map[string]int64{}
+	if config.ValidateProfileDataPath(topicCreatedAtsPath(workspaceRoot)) != nil {
+		return m
+	}
 	b, err := os.ReadFile(topicCreatedAtsPath(workspaceRoot))
 	if err != nil {
 		return m
@@ -3264,6 +3289,12 @@ func saveTopicTitles(workspaceRoot string, m map[string]string) error {
 		return err
 	}
 	path := topicTitlesPath(workspaceRoot)
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
+	if err := config.ValidateProfileDataPath(path + ".tmp"); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -3280,6 +3311,12 @@ func saveTopicTitleSources(workspaceRoot string, m map[string]string) error {
 		return err
 	}
 	path := topicTitleSourcesPath(workspaceRoot)
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
+	if err := config.ValidateProfileDataPath(path + ".tmp"); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -3296,6 +3333,12 @@ func saveTopicCreatedAts(workspaceRoot string, m map[string]int64) error {
 		return err
 	}
 	path := topicCreatedAtsPath(workspaceRoot)
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
+	if err := config.ValidateProfileDataPath(path + ".tmp"); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -5003,6 +5046,9 @@ func loadPinnedTabSession(dir, sessionPath string) (*agent.Session, string, bool
 }
 
 func validatePinnedSessionPath(dir, sessionPath string) (string, bool) {
+	if config.ValidateProfileDataPath(dir) != nil {
+		return "", false
+	}
 	dir = strings.TrimSpace(dir)
 	sessionPath = strings.TrimSpace(sessionPath)
 	if dir == "" || sessionPath == "" {
@@ -5020,6 +5066,9 @@ func validatePinnedSessionPath(dir, sessionPath string) (string, bool) {
 	if err != nil || filepath.Ext(absPath) != ".jsonl" {
 		return "", false
 	}
+	if config.ValidateProfileDataPath(absPath) != nil {
+		return "", false
+	}
 	rel, err := filepath.Rel(absDir, absPath)
 	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
 		return "", false
@@ -5033,6 +5082,9 @@ func validatePinnedSessionPath(dir, sessionPath string) (string, bool) {
 }
 
 func tabPinnedSessionDir(sessionPath string) string {
+	if config.ValidateProfileDataPath(sessionPath) != nil {
+		return ""
+	}
 	sessionPath = strings.TrimSpace(sessionPath)
 	if sessionPath == "" {
 		return ""

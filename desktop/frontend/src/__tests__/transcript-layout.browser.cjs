@@ -33,18 +33,27 @@ async function settle(page) {
 // Runs before main.tsx mounts App. The native backend is never contacted.
 async function bootstrap(mock, emit, fixture) {
   if (window.go || window.runtime) throw new Error('Refusing to replace native desktop bindings');
-  const calls = { settings: [], save: [], fetch: [], keys: [], events: [], history: 0 };
+  const calls = { settings: [], save: [], fetch: [], keys: [], events: [], dialogs: [], history: 0 };
   const tabs = await mock.ListTabs();
   const tabId = tabs.find(tab => tab.active)?.id;
   const overrides = {
     async Settings() {
       const settings = await mock.Settings();
-      Object.assign(settings, { desktopLanguage: 'en', desktopTheme: 'light', desktopUIStyle: fixture.style,
+      Object.assign(settings, { desktopLanguage: fixture.language || 'en', desktopTheme: 'light', desktopUIStyle: fixture.style,
         processDisplayMode: fixture.detailed ? 'detailed' : 'compact', activityIndicatorEnabled: true, checkUpdates: false });
       if (fixture.providerKinds) settings.providerKinds = fixture.providerKinds;
       if (fixture.providers) settings.providers = [...settings.providers, ...fixture.providers];
       calls.settings.push({ providerKinds: settings.providerKinds });
       return settings;
+    },
+    async BrowserAvailable() { return fixture.browserAvailable ?? false; },
+    async PickExportFile(filename) {
+      if (fixture.slowNativeDialogs) {
+        calls.dialogs.push('open');
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        calls.dialogs.push('close');
+      }
+      return fixture.pickExportPath || `C:/downloads/${filename}`;
     },
     async History() { calls.history++; return structuredClone(fixture.history || []); },
     async HistoryForTab() { calls.history++; return structuredClone(fixture.history || []); },
@@ -69,15 +78,15 @@ async function bootstrap(mock, emit, fixture) {
   } };
 }
 
-async function appPage(browser, report, { url, style = 'modern', history = [], detailed = false, providerKinds,
-  providers, oldProviderDefault = false, width = 1366 } = {}) {
-  const context = await browser.newContext({ viewport: { width, height: 900 }, deviceScaleFactor: 1, locale: 'en-US' });
-  await context.addInitScript(style => {
+async function appPage(browser, report, { url, style = 'modern', language = 'en', history = [], detailed = false, providerKinds,
+  providers, oldProviderDefault = false, width = 1366, browserAvailable = false, pickExportPath, slowNativeDialogs = false } = {}) {
+  const context = await browser.newContext({ viewport: { width, height: 900 }, deviceScaleFactor: 1, locale: language === 'zh' ? 'zh-CN' : 'en-US' });
+  await context.addInitScript(({ style, language }) => {
     localStorage.setItem('orca-ui-style', style);
-    localStorage.setItem('orca-lang', 'en');
+    localStorage.setItem('orca-lang', language);
     localStorage.setItem('orca-theme', 'light');
-  }, style);
-  const fixture = { style, history, detailed, providerKinds, providers };
+  }, { style, language });
+  const fixture = { style, language, history, detailed, providerKinds, providers, browserAvailable, pickExportPath, slowNativeDialogs };
   await context.route('**/*', async route => {
     const requestURL = new URL(route.request().url());
     if (requestURL.origin !== url.origin) {
@@ -426,4 +435,5 @@ async function run() {
     await finish(report, output, 'transcript-layout-results.json');
   }
 }
+module.exports.events = events;
 if (require.main === module) run().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1022,6 +1022,10 @@ export function Composer({
           requestAnimationFrame(() => taRef.current?.focus());
         },
       );
+    } catch (error) {
+      // Preparation can reject before submitComposerDraft handles the send.
+      const detail = error instanceof Error ? error.message : String(error);
+      setComposerPrompt(`${t("msg.sendFailed")}${detail ? `: ${detail}` : ""}`);
     } finally {
       submittingRef.current = false;
       setSubmitting(false);

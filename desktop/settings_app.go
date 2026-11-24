@@ -641,6 +641,9 @@ func (a *App) activeWorkspaceRoot() string {
 }
 
 func projectConfigPathForRoot(root string) string {
+	if config.IsolatedProfileEnabled() {
+		return config.ProjectConfigPath(root)
+	}
 	var canonical string
 	if strings.TrimSpace(root) == "" || root == "." {
 		canonical = product.ProjectConfigName

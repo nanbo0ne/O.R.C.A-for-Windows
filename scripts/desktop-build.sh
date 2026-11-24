@@ -284,13 +284,29 @@ fi
 
 cd "$ROOT/desktop"
 
-# Stamp the version resource (Windows file properties, macOS CFBundleVersion) from
-# the tag. Wails feeds info.productVersion into goversioninfo and NSIS's
-# VIFileVersion, both of which demand a strictly numeric X.X.X, so strip the
-# leading "v" AND any prerelease suffix (a `-rc1` tag would otherwise abort the
-# installer build). The full tag still rides in ldflags for the in-app version.
+# Wails and NSIS use the numeric version; the full tag goes into the app's ldflags.
+# Windows also reads build/windows/info.json when compiling the PE version resource.
 numver="${VERSION#v}"; numver="${numver%%-*}"
-node -e 'const fs=require("fs"),f="wails.json",j=JSON.parse(fs.readFileSync(f,"utf8"));j.info.productVersion=process.argv[1];fs.writeFileSync(f,JSON.stringify(j,null,2)+"\n")' "$numver"
+node - "$numver" "$os" <<'NODE'
+const fs = require('node:fs');
+const [, , version, platform] = process.argv;
+if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Invalid numeric desktop version');
+function update(path, edit) {
+  const config = JSON.parse(fs.readFileSync(path, 'utf8'));
+  edit(config);
+  fs.writeFileSync(path, JSON.stringify(config, null, 2) + '\n');
+}
+update('wails.json', config => { config.info.productVersion = version; });
+if (platform === 'windows') {
+  update('build/windows/info.json', config => {
+    const resourceVersion = `${version}.0`;
+    config.fixed.file_version = config.fixed.product_version = resourceVersion;
+    for (const language of Object.values(config.info)) {
+      language.FileVersion = language.ProductVersion = resourceVersion;
+    }
+  });
+}
+NODE
 
 prepare_windows_installer_resources
 

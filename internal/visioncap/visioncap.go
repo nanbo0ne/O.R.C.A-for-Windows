@@ -18,6 +18,7 @@ import (
 
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/billing"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/fileutil"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/product"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
 )
@@ -59,9 +60,9 @@ type Store struct {
 var storeFileMu sync.Mutex
 
 func DefaultPath() string {
-	dir, err := os.UserConfigDir()
+	dir, err := config.ProfileConfigDir()
 	if err != nil {
-		home, _ := os.UserHomeDir()
+		home, _ := config.ProfileHomeDir()
 		dir = filepath.Join(home, "."+product.ConfigDirName)
 	} else {
 		dir = filepath.Join(dir, product.ConfigDirName)
@@ -74,6 +75,9 @@ func Load(path string) *Store {
 		path = DefaultPath()
 	}
 	s := &Store{path: path, Items: map[string]Capability{}}
+	if config.ValidateProfileDataPath(path) != nil {
+		return s
+	}
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, s)
 		s.path = path
@@ -201,6 +205,12 @@ func (s *Store) Put(c Capability) error {
 	defer storeFileMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := config.ValidateProfileDataPath(s.path); err != nil {
+		return err
+	}
+	if err := config.ValidateProfileDataPath(s.path + ".tmp"); err != nil {
+		return err
+	}
 	if s.Items == nil {
 		s.Items = map[string]Capability{}
 	}
@@ -228,7 +238,7 @@ func (s *Store) Put(c Capability) error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	return fileutil.RenameReplace(tmp, s.path)
 }
 
 func (s *Store) List(cfg *config.Config) []Capability {

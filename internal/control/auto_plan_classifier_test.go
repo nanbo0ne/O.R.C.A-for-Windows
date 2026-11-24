@@ -48,6 +48,9 @@ func TestProviderAutoPlanClassifierEmitsAttributedUsageReceipt(t *testing.T) {
 	if _, _, err := c.NeedsPlanWithParentTurn(context.Background(), "implement feature", 1, "turn-parent"); err != nil {
 		t.Fatal(err)
 	}
+	if p.req.ParentTaskID != "turn-parent" {
+		t.Error("auto-plan request lost its parent task")
+	}
 	if got.Kind != event.Usage || got.RequestID == "" || got.ParentTurnID != "turn-parent" || got.ProviderEndpoint != "https://api.deepseek.com" || got.Usage == nil || got.Usage.TotalTokens != 16 {
 		t.Fatalf("auto-plan usage receipt = %+v", got)
 	}

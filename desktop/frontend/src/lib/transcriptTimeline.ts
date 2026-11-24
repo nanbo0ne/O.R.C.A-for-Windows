@@ -162,7 +162,9 @@ export function buildTimelineSegments(items: readonly Item[], running: boolean):
   const out: TimelineSegment[] = [];
   groups.forEach((group) => {
     if (group.some((item) => item.kind === "user")) {
-      const explicitlyCompleted = group.some((item) => item.kind === "turn_stats" && (item.outcome ?? (item.success ? "success" : "failed")) === "success");
+      // A terminal failure is settled too; successful folding is decided
+      // separately by completedTurnSegment, without hiding failed activity.
+      const explicitlyCompleted = group.some((item) => item.kind === "turn_stats");
       out.push(...buildTurn(group, explicitlyCompleted));
       return;
     }

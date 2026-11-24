@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 )
 
 // Trust gates project hooks. A project's .orca/settings.json can run
@@ -56,6 +58,9 @@ func absRoot(root string) string {
 
 func readTrust(homeDir string) trustFile {
 	var tf trustFile
+	if config.ValidateProfileDataPath(TrustPath(homeDir)) != nil {
+		return tf
+	}
 	b, err := os.ReadFile(TrustPath(homeDir))
 	if err != nil {
 		return tf
@@ -66,6 +71,9 @@ func readTrust(homeDir string) trustFile {
 
 func writeTrust(homeDir string, tf trustFile) error {
 	path := TrustPath(homeDir)
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

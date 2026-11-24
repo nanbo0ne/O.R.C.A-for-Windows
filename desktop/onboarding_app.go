@@ -82,21 +82,16 @@ func (a *App) ConnectProviderPreset(presetID, apiKey string) ([]string, error) {
 	defer cancel()
 	models, fetchErr := preset.Entry.FetchModels(ctx)
 	models = chatProviderModels(models)
-	if fetchErr != nil || len(models) == 0 {
-		if err := probeProviderCredential(ctx, preset.Entry, apiKey); err != nil {
-			if fetchErr != nil {
-				return nil, fmt.Errorf("validate provider: %w", fetchErr)
-			}
-			return nil, fmt.Errorf("validate provider: %w", err)
-		}
-		models = append([]string(nil), preset.Entry.ChatModelList()...)
+	models, err := validateProviderPresetModels(ctx, preset.Entry, apiKey, models, fetchErr)
+	if err != nil {
+		return nil, err
 	}
 	models = uniqueStrings(append(preset.Entry.ChatModelList(), models...))
 
 	if err := upsertDotEnv(preset.Entry.APIKeyEnv, apiKey); err != nil {
 		return nil, fmt.Errorf("save credential: %w", err)
 	}
-	err := a.applyConfigChange(func(c *config.Config) error {
+	err = a.applyConfigChange(func(c *config.Config) error {
 		entry := preset.Entry
 		entry.Model = ""
 		entry.Models = append([]string(nil), models...)
@@ -121,7 +116,29 @@ func (a *App) ConnectProviderPreset(presetID, apiKey string) ([]string, error) {
 	return nonNil(models), nil
 }
 
+func validateProviderPresetModels(ctx context.Context, entry config.ProviderEntry, apiKey string, models []string, fetchErr error) ([]string, error) {
+	if fetchErr == nil && len(models) != 0 {
+		return models, nil
+	}
+	if betaEnabled() {
+		if fetchErr != nil {
+			return nil, fmt.Errorf("provider model catalog unavailable; no inference probe was sent: %w", fetchErr)
+		}
+		return nil, fmt.Errorf("provider model catalog is empty; no inference probe was sent")
+	}
+	if err := probeProviderCredential(ctx, entry, apiKey); err != nil {
+		if fetchErr != nil {
+			return nil, fmt.Errorf("validate provider: %w", fetchErr)
+		}
+		return nil, fmt.Errorf("validate provider: %w", err)
+	}
+	return append([]string(nil), entry.ChatModelList()...), nil
+}
+
 func probeProviderCredential(ctx context.Context, entry config.ProviderEntry, apiKey string) error {
+	if err := automaticAuxiliaryAllowed(&entry); err != nil {
+		return err
+	}
 	p, err := provider.New(entry.Kind, provider.Config{
 		Name: entry.Name, BaseURL: entry.BaseURL, Model: entry.DefaultModel(), APIKey: apiKey,
 		Extra: map[string]any{"api_key_env": entry.APIKeyEnv, "reasoning_protocol": entry.ReasoningProtocol},
@@ -129,19 +146,15 @@ func probeProviderCredential(ctx context.Context, entry config.ProviderEntry, ap
 	if err != nil {
 		return err
 	}
-	stream, err := p.Stream(ctx, provider.Request{
+	stream, err := p.Stream(ctx, bindAuxiliaryRequest(ctx, auxiliaryProbe, provider.Request{
 		Messages:  []provider.Message{{Role: provider.RoleUser, Content: "Reply with OK."}},
 		MaxTokens: 8,
-	})
+	}))
 	if err != nil {
 		return err
 	}
-	for chunk := range stream {
-		if chunk.Err != nil {
-			return chunk.Err
-		}
-	}
-	return nil
+	_, err = collectAuxiliaryText(ctx, stream)
+	return err
 }
 
 // ConnectKey remains as a V2 binding compatibility shim.

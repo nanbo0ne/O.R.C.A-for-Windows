@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/fileutil"
 )
 
@@ -68,6 +69,9 @@ func BranchMetaPath(sessionPath string) string {
 }
 
 func LoadBranchMeta(sessionPath string) (BranchMeta, bool, error) {
+	if err := config.ValidateProfileDataPath(BranchMetaPath(sessionPath)); err != nil {
+		return BranchMeta{}, false, err
+	}
 	metaPath := BranchMetaPath(sessionPath)
 	if metaPath == "" {
 		return BranchMeta{}, false, nil
@@ -98,6 +102,9 @@ func SaveBranchMetaPreserveUpdated(sessionPath string, m BranchMeta) error {
 }
 
 func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
+	if err := config.ValidateProfileDataPath(BranchMetaPath(sessionPath)); err != nil {
+		return err
+	}
 	metaPath := BranchMetaPath(sessionPath)
 	if metaPath == "" {
 		return fmt.Errorf("empty session path")

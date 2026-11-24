@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/frontmatter"
 )
 
@@ -63,14 +64,12 @@ var builtins = []OutputStyle{
 // mirroring command/skill discovery: home convention dirs, then project ones.
 func Dirs() []string {
 	var dirs []string
-	if home, err := os.UserHomeDir(); err == nil {
+	if home, err := config.ProfileHomeDir(); err == nil {
 		for i := len(conventionDirs) - 1; i >= 0; i-- {
 			dirs = append(dirs, filepath.Join(home, conventionDirs[i], "output-styles"))
 		}
 	}
-	for i := len(conventionDirs) - 1; i >= 0; i-- {
-		dirs = append(dirs, filepath.Join(".", conventionDirs[i], "output-styles"))
-	}
+	dirs = append(dirs, config.ProjectConventionPaths(".", "output-styles")...)
 	return dirs
 }
 
@@ -87,6 +86,9 @@ func List(dirs []string) []OutputStyle {
 		byName[strings.ToLower(b.Name)] = b
 	}
 	for _, dir := range dirs {
+		if !config.ProfileDiscoveryAllowed(dir) {
+			continue
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
@@ -145,6 +147,9 @@ func Apply(base string, st OutputStyle) string {
 // stem; frontmatter supplies description and keep-coding-instructions; the body
 // is the prompt text.
 func parseFile(path string) (OutputStyle, bool) {
+	if !config.ProfileDiscoveryAllowed(path) {
+		return OutputStyle{}, false
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return OutputStyle{}, false

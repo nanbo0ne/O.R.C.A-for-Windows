@@ -163,7 +163,7 @@ func ensureWorkspace() {
 	if cwdWritable() {
 		return
 	}
-	if home, err := os.UserHomeDir(); err == nil {
+	if home, err := config.ProfileHomeDir(); err == nil {
 		_ = os.Chdir(home)
 	}
 }

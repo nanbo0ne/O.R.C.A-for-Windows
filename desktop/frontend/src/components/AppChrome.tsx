@@ -1,16 +1,26 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
-import { Bot, CalendarClock, Download, FolderOpen, GitBranch, Library, Minus, PanelLeft, PanelRight, Search, Settings, Square, SquarePen, Sparkles, X } from "lucide-react";
-import { useT } from "../lib/i18n";
+import { Bot, CalendarClock, Download, FolderOpen, GitBranch, Globe, Library, Minus, PanelLeft, PanelRight, Search, Settings, Square, SquarePen, Sparkles, SquareStop, UserRound, X } from "lucide-react";
+import { useT, type DictKey } from "../lib/i18n";
+import { UNKNOWN_ACCOUNT_SUMMARY, type BetaAccountSummary } from "../lib/betaBridge";
 import type { SettingsTab } from "../lib/types";
 import { Tooltip } from "./Tooltip";
 import { Quit, WindowMinimise, WindowToggleMaximise } from "../../wailsjs/runtime/runtime";
 
 type DesktopPlatform = "darwin" | "windows" | "linux";
 
+// What the header capsule needs: which connections exist and how each stands.
+interface BetaAccountView { account: boolean; web: boolean; summary: BetaAccountSummary }
+
 interface AppChromeProps {
   uiStyle?: "modern" | "classic";
   platform: DesktopPlatform;
   browserPreviewChrome: boolean;
+  browserAvailable: boolean;
+  betaConnectionsAvailable?: boolean;
+  betaAccount?: BetaAccountView;
+  onOpenBetaConnections?: () => void;
+  browserTaskState?: string;
+  onStopBrowserTask?: () => void;
   sidebarTogglePressed: boolean;
   sidebarExpandBlocked: boolean;
   sidebarCollapsed: boolean;
@@ -37,11 +47,18 @@ interface AppChromeProps {
   onCloseSession?: () => void;
   onOpenSettings?: (tab: SettingsTab) => void;
   onViewChanges?: () => void;
+  onOpenBrowser?: () => void;
 }
 
 function ClassicAppChrome({
   platform,
   browserPreviewChrome,
+  browserAvailable,
+  betaConnectionsAvailable,
+  betaAccount,
+  onOpenBetaConnections,
+  browserTaskState,
+  onStopBrowserTask,
   sidebarTogglePressed,
   sidebarExpandBlocked,
   sidebarCollapsed,
@@ -65,6 +82,7 @@ function ClassicAppChrome({
   onCloseSession: _onCloseSession,
   onOpenSettings: _onOpenSettings,
 	onViewChanges: _onViewChanges,
+  onOpenBrowser: _onOpenBrowser,
 }: AppChromeProps) {
   const t = useT();
   const darwinChrome = platform === "darwin";
@@ -146,7 +164,9 @@ function ClassicAppChrome({
         </Tooltip>
       </nav>
 
-      <div className="app-chrome__drag-surface app-chrome__drag-surface--center" aria-hidden="true" />
+      <div className={`app-chrome__drag-surface app-chrome__drag-surface--center${betaConnectionsAvailable ? " beta-entry-slot" : ""}`} aria-hidden={!betaConnectionsAvailable || undefined}>
+        {betaConnectionsAvailable && <BetaConnectionsEntry onClick={onOpenBetaConnections} account={betaAccount} />}
+      </div>
 
       <div className="app-chrome__status app-chrome__status--primary" aria-label={t("topbar.statusLights")}>
         {statusLights.map((light) => (
@@ -175,6 +195,10 @@ function ClassicAppChrome({
         </button>
       </div>
 
+      {!workspacePanelMaximized && browserAvailable && (
+        <button className="app-chrome__panel-toggle app-chrome__browser-toggle" type="button" onClick={_onOpenBrowser} aria-label={t("rightDock.browser")} title={t("rightDock.browser")}><Globe size={15} /></button>
+      )}
+      {browserTaskState && <div className="browser-task-status" role="status"><span>{t("browser.aiRunning", { state: browserTaskState })}</span><button type="button" title={t("browser.stopTask")} aria-label={t("browser.stopTask")} onClick={onStopBrowserTask}><SquareStop size={14} /></button></div>}
       {!workspacePanelMaximized && (
         <button
           className={[
@@ -267,13 +291,14 @@ function ModernMenuItem({ children, onClick, onClose, icon }: { children: ReactN
 
 function ModernAppChrome(props: AppChromeProps) {
   const {
-    platform, browserPreviewChrome, sidebarTogglePressed: _sidebarTogglePressed, sidebarExpandBlocked,
+    platform, browserPreviewChrome, browserAvailable, browserTaskState, onStopBrowserTask, sidebarTogglePressed: _sidebarTogglePressed, sidebarExpandBlocked,
     sidebarCollapsed, sidebarToggleTitle, workspacePanelMaximized,
     workspacePanelRenderable, workspaceTogglePressed, workspacePanelLabel,
     workspaceLabel, sessionLabel, modelLabel, onOpenProject, onOpenView,
     onOpenSkills, onOpenBots, onOpenAutomations, onOpenToolLibrary,
     onToggleSidebar, onToggleWorkspacePanel, onOpenPalette, onNewSession,
     onExportSession, onCloseSession, onOpenSettings, onViewChanges,
+    onOpenBrowser, betaConnectionsAvailable, onOpenBetaConnections,
   } = props;
   const t = useT();
   const showWindowsControls = platform === "windows";
@@ -326,6 +351,7 @@ function ModernAppChrome(props: AppChromeProps) {
             <ModernMenuItem onClose={() => setOpenMenu(null)} onClick={() => onOpenSettings?.("appearance")}>{t("modernMenu.appearance")}</ModernMenuItem>
           </ModernMenu>
         </nav>
+        {betaConnectionsAvailable && <div className="modern-chrome__beta-entry"><BetaConnectionsEntry onClick={onOpenBetaConnections} /></div>}
         <div className="modern-chrome__drag" aria-hidden="true" />
         {showWindowsControls && <WindowControls browserPreviewChrome={browserPreviewChrome} />}
       </div>
@@ -337,6 +363,8 @@ function ModernAppChrome(props: AppChromeProps) {
           <span className="modern-chrome__model" title={modelLabel}>{modelLabel}</span>
 		  <button className="modern-chrome__icon-button" type="button" onClick={onExportSession} aria-label={t("modernMenu.exportSession")}><Download size={15} /></button>
 		  <button className="modern-chrome__icon-button" type="button" onClick={onOpenView} aria-label={t("modernMenu.openWorkspace")}><FolderOpen size={15} /></button>
+          {browserAvailable && <button className="modern-chrome__icon-button" type="button" onClick={onOpenBrowser} aria-label={t("rightDock.browser")} title={t("rightDock.browser")}><Globe size={15} /></button>}
+          {browserTaskState && <div className="browser-task-status" role="status"><span>{t("browser.aiRunning", { state: browserTaskState })}</span><button type="button" title={t("browser.stopTask")} aria-label={t("browser.stopTask")} onClick={onStopBrowserTask}><SquareStop size={14} /></button></div>}
           <button className="modern-chrome__icon-button" type="button" onClick={onOpenPalette} aria-label={t("tabBar.commandSearch")}><Search size={15} /></button>
           {!workspacePanelMaximized && <button className={`modern-chrome__icon-button${workspaceTogglePressed ? " is-active" : ""}`} type="button" onClick={onToggleWorkspacePanel} aria-label={workspacePanelLabel} aria-pressed={workspacePanelRenderable}><PanelRight size={15} /></button>}
         </div>
@@ -352,6 +380,42 @@ function WindowControls({ browserPreviewChrome }: { browserPreviewChrome: boolea
     <button type="button" className="app-chrome__window-control app-chrome__window-control--maximize" aria-label={t("topbar.windowMaximize")} onClick={() => { if (!browserPreviewChrome) WindowToggleMaximise(); }}><Square size={10} strokeWidth={1.8} /></button>
     <button type="button" className="app-chrome__window-control app-chrome__window-control--close" aria-label={t("topbar.windowClose")} onClick={() => { if (!browserPreviewChrome) Quit(); }}><X size={12} strokeWidth={1.9} /></button>
   </div>;
+}
+
+function BetaConnectionsEntry({ onClick, account }: { onClick?: () => void; account?: BetaAccountView }) {
+  const t = useT();
+  const summary = account?.summary ?? UNKNOWN_ACCOUNT_SUMMARY;
+  const orcaKey: DictKey = summary.orca === "signed_in" ? "beta.signedIn"
+    : summary.orca === "signing_in" ? "beta.authorizing"
+    : summary.orca === "restoring" || summary.orca === "unknown" ? "beta.checking"
+    : summary.orca === "logging_out" ? "beta.loggingOut"
+    : summary.orca === "error" ? "beta.attention"
+    : "beta.login";
+  const webKey: DictKey | null = !account?.web ? null
+    : summary.web === "connected" ? "beta.connected"
+    : summary.web === "retained" ? "beta.signedIn"
+    : summary.web === "attention" ? "beta.attention"
+    : summary.web === "idle" ? "beta.notConnected"
+    : "beta.checking";
+  // A signed-in account is identified by name, not by the word "signed in": the
+  // capsule has room for one and the name answers "who am I here" at a glance.
+  const orcaText = summary.orca === "signed_in" && summary.orcaName ? summary.orcaName : t(orcaKey);
+  const signedIn = summary.orca === "signed_in";
+  const attention = summary.orca === "error" || summary.web === "attention";
+  const description = [t("beta.account") + "：" + t(orcaKey), account?.web ? t("beta.web") + "：" + t(webKey ?? "beta.loading") : ""].filter(Boolean).join(" · ");
+  return <button
+    type="button"
+    className={["beta-connections-entry", signedIn ? "beta-connections-entry--signed-in" : "beta-connections-entry--signed-out", attention ? "beta-connections-entry--attention" : ""].filter(Boolean).join(" ")}
+    data-beta-entry
+    data-beta-orca={summary.orca}
+    data-beta-web={account?.web ? summary.web : "off"}
+    aria-label={description}
+    title={description}
+    onClick={onClick}
+  >
+    <span className="beta-connections-entry__orca"><UserRound size={13} /><span className="beta-connections-entry__text">{orcaText}</span></span>
+    {webKey && <span className="beta-connections-entry__web" aria-hidden="true"><Globe size={12} /><span className="beta-connections-entry__text">{t(webKey)}</span></span>}
+  </button>;
 }
 
 export function AppChrome(props: AppChromeProps) {

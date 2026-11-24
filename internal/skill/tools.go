@@ -264,6 +264,19 @@ func (t *subagentSkillTool) ResolveProfile(json.RawMessage) *event.Profile {
 // prompt rules). Each is skipped when its underlying skill isn't present (e.g. a
 // user disabled it), so the tool set never advertises a phantom skill.
 func BuiltinSubagentTools(store *Store, runner SubagentRunner, profileResolver ...ProfileResolver) []tool.Tool {
+	return BuiltinSubagentToolsFromCatalog(store, store.List(), runner, profileResolver...)
+}
+
+// BuiltinSubagentToolsFromCatalog uses this store's per-build catalog only for
+// registration. Execution and profile resolution still re-read the store, so
+// changed overrides, disabled skills and filesystem safety checks stay live.
+func BuiltinSubagentToolsFromCatalog(store *Store, catalog []Skill, runner SubagentRunner, profileResolver ...ProfileResolver) []tool.Tool {
+	present := make(map[string]bool, len(catalog))
+	for _, sk := range catalog {
+		if IsValidName(sk.Name) && !store.disabledName(sk.Name) {
+			present[sk.Name] = true
+		}
+	}
 	var pr ProfileResolver
 	if len(profileResolver) > 0 {
 		pr = profileResolver[0]
@@ -286,7 +299,7 @@ func BuiltinSubagentTools(store *Store, runner SubagentRunner, profileResolver .
 	}
 	var out []tool.Tool
 	for _, s := range specs {
-		if _, ok := store.Read(s.skillName); !ok {
+		if !present[s.skillName] {
 			continue
 		}
 		out = append(out, &subagentSkillTool{

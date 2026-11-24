@@ -114,6 +114,9 @@ type Options struct {
 	// never persisted. The desktop uses this for its authenticated llama.cpp
 	// sidecar, whose loopback port and token change on every launch.
 	RuntimeProviders []config.ProviderEntry
+	// PrepareRuntimeProviders uses this build's resolved config once, before
+	// provider resolution. The callback must not retain the config past return.
+	PrepareRuntimeProviders func(context.Context, *config.Config, string) ([]config.ProviderEntry, error)
 }
 
 const (
@@ -173,14 +176,25 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, entry := range opts.RuntimeProviders {
-		if err := cfg.UpsertProvider(entry); err != nil {
-			return nil, fmt.Errorf("runtime provider %q: %w", entry.Name, err)
-		}
-	}
 	modelName := opts.Model
 	if modelName == "" {
 		modelName = cfg.DefaultModel
+	}
+	runtimeProviders := opts.RuntimeProviders
+	if opts.PrepareRuntimeProviders != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		prepared, err := opts.PrepareRuntimeProviders(ctx, cfg, modelName)
+		if err != nil {
+			return nil, err
+		}
+		runtimeProviders = append(append([]config.ProviderEntry(nil), runtimeProviders...), prepared...)
+	}
+	for _, entry := range runtimeProviders {
+		if err := cfg.UpsertProvider(entry); err != nil {
+			return nil, fmt.Errorf("runtime provider %q: %w", entry.Name, err)
+		}
 	}
 	entry, ok := cfg.ResolveModel(modelName)
 	if !ok {
@@ -337,9 +351,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		MaxDepth:      cfg.SkillMaxDepth(),
 		Stderr:        opts.Stderr,
 	})
-	skills := skillStore.List()
+	allSkills := skillStore.ListAll()
+	skills := skillStore.Enabled(allSkills)
+	// Keep the unfiltered store for later settings refreshes, without a second
+	// filesystem scan during controller construction.
 	allSkillStore := skill.New(skill.Options{ProjectRoot: root, CustomPaths: cfg.SkillCustomPaths(), ExcludedPaths: cfg.SkillExcludedPaths(), MaxDepth: cfg.SkillMaxDepth(), Stderr: io.Discard})
-	allSkills := allSkillStore.List()
 	sysPrompt = skill.ApplyIndex(sysPrompt, skills)
 
 	reg := tool.NewRegistry()
@@ -829,7 +845,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return false
 		},
 	}))
-	for _, t := range skill.BuiltinSubagentTools(skillStore, skillRunner, skillProfile) {
+	for _, t := range skill.BuiltinSubagentToolsFromCatalog(skillStore, skills, skillRunner, skillProfile) {
 		if codingMode || t.Name() == "research" {
 			reg.Add(t)
 		}
@@ -968,6 +984,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		BalanceKey:             entry.APIKey(),
 		BalanceClient:          balanceClient,
 		ModelRef:               mainMetadata.ModelRef,
+		ProviderKind:           entry.Kind,
 		ContextWindowConfirmed: mainMetadata.ContextConfirmed,
 		ContextWindowSource:    mainMetadata.ContextSource,
 		Jobs:                   jm,
@@ -998,6 +1015,9 @@ func isOrcaOnlyTool(name string) bool {
 }
 
 func migrateLegacySessionSources(sink event.Sink) {
+	if config.IsolatedProfileEnabled() {
+		return
+	}
 	dest := config.SessionDir()
 	if strings.TrimSpace(dest) == "" {
 		return
@@ -1064,6 +1084,9 @@ func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 }
 
 func rememberPermissionConfigPath(workspaceRoot string) string {
+	if config.IsolatedProfileEnabled() {
+		return config.ProjectConfigPath(workspaceRoot)
+	}
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	if workspaceRoot != "" {
 		return filepath.Join(workspaceRoot, product.ProjectConfigName)
@@ -1268,6 +1291,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"api_key_env":        e.APIKeyEnv,
 			"thinking":           e.Thinking,
 			"effort":             config.EffectiveEffort(e),
+			"effort_selection":   e.Effort,
 			"supported_efforts":  e.SupportedEfforts,
 			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
 			"proxy_spec":         proxy,

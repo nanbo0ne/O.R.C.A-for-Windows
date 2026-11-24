@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 )
 
 const assistantProfileMigrationMarker = ".legacy-assistant-memory-imported-v1"
@@ -21,6 +23,12 @@ func CanonicalAssistantStore(userDir string) Store {
 // once. Legacy files remain untouched so older product shells stay compatible.
 func EnsureCanonicalAssistantStore(userDir string) (Store, error) {
 	dest := CanonicalAssistantStore(userDir)
+	if err := config.ValidateProfileDataPath(dest.Dir); err != nil {
+		return Store{}, err
+	}
+	if config.IsolatedProfileEnabled() {
+		return dest, nil
+	}
 	if dest.Dir == "" {
 		return dest, nil
 	}

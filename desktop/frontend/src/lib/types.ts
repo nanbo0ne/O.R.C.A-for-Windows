@@ -272,6 +272,8 @@ export interface HistoryMessage {
   reasoning?: string;
   level?: "info" | "warn" | "legacy";
   toolCalls?: HistoryToolCall[];
+  toolStatus?: "done" | "error" | "stopped";
+  toolError?: string;
   toolCallId?: string;
   toolName?: string;
   pending?: boolean;

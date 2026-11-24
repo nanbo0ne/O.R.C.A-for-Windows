@@ -129,6 +129,8 @@ type App struct {
 	localAI                      *localai.Manager
 	localServer                  *localai.RuntimeServer
 	computerUse                  *computeruse.Service
+	browser                      *browserService
+	account                      *accountDesktop
 }
 
 type balanceCacheEntry struct {
@@ -322,6 +324,7 @@ func NewApp() *App {
 	a.conversationBroker = NewConversationBroker(a)
 	a.localServer = localai.NewRuntimeServer(a.emitLocalRuntimeStatus)
 	a.computerUse = computeruse.NewService(computeruse.NewPlatformBackend(), a.onComputerUseEvent)
+	a.initBrowser()
 	return a
 }
 
@@ -343,6 +346,7 @@ func (a *App) Platform() string {
 // off the initialization in a background goroutine so the webview loads immediately.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.startOrcaAccount()
 	hosttools.SetAutomationWorkAdmission(a.beginAppWork)
 	installSystemQuitHook()
 	a.startTray()
@@ -733,6 +737,10 @@ func (a *App) snapshotAllTabs() {
 // shutdown closes application resources after beforeClose has handled the final
 // window-state capture.
 func (a *App) shutdown(context.Context) {
+	a.stopOrcaAccount()
+	if a.browser != nil {
+		a.browser.shutdown()
+	}
 	a.stopInstallerShutdownListener()
 	// OnShutdown runs after Wails has begun tearing down the native window. Close
 	// late frontend saves without querying that invalid window again.
@@ -836,6 +844,11 @@ func (a *App) SubmitToTab(tabID, input string) error {
 		return err
 	}
 	defer done()
+	releaseIdentity, err := a.beginIdentityAdmission(tabID)
+	if err != nil {
+		return err
+	}
+	defer releaseIdentity()
 	if tab := a.tabByID(tabID); tab != nil && tab.ReadOnly {
 		return fmt.Errorf("此自动化历史为只读，请在 Orca 主对话中继续。")
 	}
@@ -868,6 +881,12 @@ func (a *App) RunShellForTab(tabID, command string) {
 		return
 	}
 	defer done()
+	releaseIdentity, err := a.beginIdentityAdmission(tabID)
+	if err != nil {
+		a.noticeForTab(tabID, err.Error())
+		return
+	}
+	defer releaseIdentity()
 	if tab := a.tabByID(tabID); tab != nil && tab.ReadOnly {
 		a.noticeForTab(tab.ID, "此自动化历史为只读，请在 Orca 主对话中继续。")
 		return
@@ -889,6 +908,11 @@ func (a *App) SubmitDisplayToTab(tabID, display, input string) error {
 		return err
 	}
 	defer done()
+	releaseIdentity, err := a.beginIdentityAdmission(tabID)
+	if err != nil {
+		return err
+	}
+	defer releaseIdentity()
 	if tab := a.tabByID(tabID); tab != nil && tab.ReadOnly {
 		return fmt.Errorf("此自动化历史为只读，请在 Orca 主对话中继续。")
 	}
@@ -1034,6 +1058,12 @@ func (a *App) SteerForTab(tabID, text string) {
 		return
 	}
 	defer done()
+	releaseIdentity, err := a.beginIdentityAdmission(tabID)
+	if err != nil {
+		a.noticeForTab(tabID, err.Error())
+		return
+	}
+	defer releaseIdentity()
 	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
 		if !ctrl.SteerRunning(text) {
 			a.submitAdmittedController(ctrl, text, text)
@@ -1048,6 +1078,11 @@ func (a *App) SteerDisplayForTab(tabID, display, input, expectedTurn, id string)
 		return err
 	}
 	defer done()
+	releaseIdentity, err := a.beginIdentityAdmission(tabID)
+	if err != nil {
+		return err
+	}
+	defer releaseIdentity()
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return fmt.Errorf("conversation is not ready; your draft is preserved")
@@ -2111,6 +2146,8 @@ type HistoryMessage struct {
 	ToolCalls         []HistoryToolCall  `json:"toolCalls,omitempty"`
 	ToolCallID        string             `json:"toolCallId,omitempty"`
 	ToolName          string             `json:"toolName,omitempty"`
+	ToolStatus        string             `json:"toolStatus,omitempty"`
+	ToolError         string             `json:"toolError,omitempty"`
 	Pending           bool               `json:"pending,omitempty"`
 	Trigger           string             `json:"trigger,omitempty"`
 	Messages          int                `json:"messages,omitempty"`
@@ -2277,6 +2314,7 @@ func historyMessagesWithTurnsAndSwitches(msgs []provider.Message, resolveUserCon
 		if len(display) > 0 && messageIndex < len(display[0]) {
 			e := display[0][messageIndex]
 			hm.MessageID = e.ID
+			hm.ToolStatus, hm.ToolError = e.ToolStatus, e.ToolError
 			if e.DisplayText != "" {
 				hm.Content = e.DisplayText
 			}
@@ -2823,9 +2861,7 @@ func (a *App) MetaForTab(tabID string) Meta {
 }
 
 func (a *App) PauseTab(tabID string) {
-	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
-		ctrl.SetPaused(true)
-	}
+	a.setTabBrowserAwarePause(tabID, true)
 }
 
 func (a *App) ResumeTab(tabID string) {
@@ -2835,9 +2871,7 @@ func (a *App) ResumeTab(tabID string) {
 		return
 	}
 	defer releaseWork()
-	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
-		ctrl.SetPaused(false)
-	}
+	a.setTabBrowserAwarePause(tabID, false)
 }
 
 func (a *App) SetGoal(goal string) {
@@ -4469,6 +4503,14 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 	metadataStore := modelmeta.Load("")
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
+		if p.Kind == accountProviderKind {
+			if a.account != nil {
+				if info, ok := a.account.modelInfo(p.Name, curModel); ok {
+					out = append(out, info)
+				}
+			}
+			continue
+		}
 		if cfg.HiddenDeepSeekCompatibilityEntry(p) {
 			continue
 		}

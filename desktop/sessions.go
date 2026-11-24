@@ -53,6 +53,9 @@ func desktopSessionDir(root string) string {
 // loadSessionTitles reads the basename→title map (missing/corrupt → empty).
 func loadSessionTitles(dir string) map[string]string {
 	m := map[string]string{}
+	if config.ValidateProfileDataPath(sessionTitlesPath(dir)) != nil {
+		return m
+	}
 	b, err := os.ReadFile(sessionTitlesPath(dir))
 	if err != nil {
 		return m
@@ -63,6 +66,9 @@ func loadSessionTitles(dir string) map[string]string {
 
 // saveSessionTitles writes the map atomically (temp file + rename).
 func saveSessionTitles(dir string, m map[string]string) error {
+	if err := config.ValidateProfileDataPath(sessionTitlesPath(dir)); err != nil {
+		return err
+	}
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
@@ -159,6 +165,9 @@ func trashSessionArtifacts(dir, sessionPath, key string) error {
 }
 
 func listTrashedSessionFiles(dir string) ([]string, error) {
+	if err := config.ValidateProfileDataPath(sessionTrashPath(dir)); err != nil {
+		return nil, err
+	}
 	root := sessionTrashPath(dir)
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -345,6 +354,9 @@ func validateSessionPath(dir, sessionPath string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
+	if err := config.ValidateProfileDataPath(absPath); err != nil {
+		return "", "", err
+	}
 	if filepath.Ext(absPath) != ".jsonl" {
 		return "", "", fmt.Errorf("not a session file: %s", sessionPath)
 	}
@@ -382,6 +394,9 @@ func validateSessionPath(dir, sessionPath string) (string, string, error) {
 }
 
 func validateTrashedSessionPath(dir, sessionPath string) (string, string, string, error) {
+	if err := config.ValidateProfileDataPath(sessionTrashPath(dir)); err != nil {
+		return "", "", "", err
+	}
 	if strings.TrimSpace(sessionPath) == "" {
 		return "", "", "", fmt.Errorf("empty session path")
 	}
@@ -399,6 +414,9 @@ func validateTrashedSessionPath(dir, sessionPath string) (string, string, string
 	}
 	if filepath.Ext(absPath) != ".jsonl" {
 		return "", "", "", fmt.Errorf("not a session file: %s", sessionPath)
+	}
+	if err := config.ValidateProfileDataPath(absPath); err != nil {
+		return "", "", "", err
 	}
 	rel, err := filepath.Rel(root, absPath)
 	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
@@ -442,6 +460,9 @@ func messageDisplayKey(content string) string {
 }
 
 func loadSessionDisplays(dir string) sessionDisplayMap {
+	if config.ValidateProfileDataPath(sessionDisplayPath(dir)) != nil {
+		return sessionDisplayMap{}
+	}
 	m := sessionDisplayMap{}
 	b, err := os.ReadFile(sessionDisplayPath(dir))
 	if err != nil {
@@ -452,6 +473,9 @@ func loadSessionDisplays(dir string) sessionDisplayMap {
 }
 
 func saveSessionDisplays(dir string, m sessionDisplayMap) error {
+	if err := config.ValidateProfileDataPath(sessionDisplayPath(dir)); err != nil {
+		return err
+	}
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err

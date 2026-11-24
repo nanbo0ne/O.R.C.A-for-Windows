@@ -1,18 +1,27 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/boot"
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/control"
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/event"
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/fileutil"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/tool/hosttools"
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/webbeta"
 )
 
 type AutomationView = hosttools.AutomationView
@@ -66,6 +75,15 @@ type sideChatCancel struct {
 
 type sideChatFile struct {
 	Sessions map[string][]SideChatMessage `json:"sessions"`
+	Bindings map[string]sideChatBinding   `json:"bindings,omitempty"`
+}
+
+type sideChatBinding struct {
+	ConversationID string `json:"conversation_id"`
+	Source         string `json:"source"`
+	Context        string `json:"context"`
+	Generation     string `json:"generation,omitempty"`
+	Pending        bool   `json:"pending,omitempty"`
 }
 
 func sideChatStorePath() string {
@@ -73,28 +91,61 @@ func sideChatStorePath() string {
 }
 
 func loadSideChatFile() sideChatFile {
-	out := sideChatFile{Sessions: map[string][]SideChatMessage{}}
+	out, _ := readSideChatFile()
+	return out
+}
+
+func readSideChatFile() (sideChatFile, error) {
+	out := sideChatFile{Sessions: map[string][]SideChatMessage{}, Bindings: map[string]sideChatBinding{}}
 	b, err := os.ReadFile(sideChatStorePath())
-	if err != nil {
-		return out
+	if errors.Is(err, os.ErrNotExist) {
+		return out, nil
 	}
-	_ = json.Unmarshal(b, &out)
+	if err != nil {
+		return out, errors.New("side chat storage is unavailable; no request was sent")
+	}
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.DisallowUnknownFields()
+	if d.Decode(&out) != nil || d.Decode(new(any)) != io.EOF {
+		return sideChatFile{}, errors.New("side chat storage is invalid; no new conversation was created")
+	}
 	if out.Sessions == nil {
 		out.Sessions = map[string][]SideChatMessage{}
 	}
-	return out
+	if out.Bindings == nil {
+		out.Bindings = map[string]sideChatBinding{}
+	}
+	return out, nil
 }
 
 func saveSideChatFile(f sideChatFile) error {
 	path := sideChatStorePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".side-chat-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	if err = tmp.Chmod(0600); err != nil {
+		return err
+	}
+	if _, err = tmp.Write(b); err != nil {
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return fileutil.RenameReplace(tmp.Name(), path)
 }
 
 func (a *App) sideChatKey(tabID string) string {
@@ -118,6 +169,8 @@ func (a *App) ListSideChat(tabID string) []SideChatMessage {
 	if key == "" {
 		return []SideChatMessage{}
 	}
+	a.sideChatMu.Lock()
+	defer a.sideChatMu.Unlock()
 	f := loadSideChatFile()
 	history := f.Sessions[key]
 	if len(history) == 0 {
@@ -131,8 +184,17 @@ func (a *App) ClearSideChat(tabID string) error {
 	if key == "" {
 		return nil
 	}
-	f := loadSideChatFile()
+	a.sideChatMu.Lock()
+	defer a.sideChatMu.Unlock()
+	if a.sideChatCancels[key].cancel != nil {
+		return errors.New("side chat is still running; cancel it and wait before clearing")
+	}
+	f, err := readSideChatFile()
+	if err != nil {
+		return err
+	}
 	delete(f.Sessions, key)
+	delete(f.Bindings, key)
 	return saveSideChatFile(f)
 }
 
@@ -140,7 +202,6 @@ func (a *App) CancelSideChat(tabID string) error {
 	key := a.sideChatKey(tabID)
 	a.sideChatMu.Lock()
 	cancel := a.sideChatCancels[key].cancel
-	delete(a.sideChatCancels, key)
 	a.sideChatMu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -158,13 +219,28 @@ func (a *App) SendSideChat(tabID, input string) error {
 	if input == "" {
 		return nil
 	}
-	key := a.sideChatKey(tabID)
-	if key == "" {
-		return fmt.Errorf("side chat session is not ready")
-	}
-	entry, err := a.currentProviderEntryForTab(tabID)
+	source, err := a.sideChatSource(tabID)
 	if err != nil {
 		return err
+	}
+	key, entry := source.key, source.entry
+	web := entry.Kind == "deepseekweb-beta"
+	generation := ""
+	releaseAdmission := func() {}
+	if web {
+		webBetaAdmission.Lock()
+		var once sync.Once
+		releaseAdmission = func() { once.Do(webBetaAdmission.Unlock) }
+		defer releaseAdmission()
+		engine := webbeta.CurrentEngine()
+		if webBetaAdmission.blocked || engine == nil {
+			return errors.New("web side chat requires an already open, explicitly enabled web session")
+		}
+		status := engine.Status()
+		if !status.Settings.Enabled || !status.Browser.Ready || status.Blocked != "" {
+			return errors.New("web side chat is unavailable; sign in and enable web sending explicitly")
+		}
+		generation = status.Generation
 	}
 	p, err := boot.NewProvider(entry)
 	if err != nil {
@@ -173,8 +249,13 @@ func (a *App) SendSideChat(tabID, input string) error {
 	ctx, cancel := context.WithCancel(a.bootContext())
 	token := newSideChatID("run")
 	a.sideChatMu.Lock()
-	if prev := a.sideChatCancels[key]; prev.cancel != nil {
-		prev.cancel()
+	if a.sideChatCancels[key].cancel != nil {
+		a.sideChatMu.Unlock()
+		cancel()
+		return errors.New("side chat is already running")
+	}
+	if a.sideChatCancels == nil {
+		a.sideChatCancels = map[string]sideChatCancel{}
 	}
 	a.sideChatCancels[key] = sideChatCancel{token: token, cancel: cancel}
 	a.sideChatMu.Unlock()
@@ -187,51 +268,160 @@ func (a *App) SendSideChat(tabID, input string) error {
 		a.sideChatMu.Unlock()
 	}()
 
-	f := loadSideChatFile()
-	history := append([]SideChatMessage(nil), f.Sessions[key]...)
-	userMsg := SideChatMessage{ID: newSideChatID("user"), Role: "user", Content: input, CreatedAt: time.Now().UnixMilli()}
-	history = append(history, userMsg)
-	req := provider.Request{
-		Messages:    a.sideChatRequestMessages(tabID, history),
-		Temperature: 0.2,
-		MaxTokens:   1200,
+	if !source.current() {
+		return errors.New("main conversation or model changed; side chat was not sent")
 	}
-	ch, err := p.Stream(ctx, req)
+	sourceID := fmt.Sprintf("%x", sha256.Sum256([]byte(entry.Name+"\x00"+entry.Kind+"\x00"+entry.BaseURL+"\x00"+entry.Model)))
+	a.sideChatMu.Lock()
+	f, err := readSideChatFile()
+	if err != nil {
+		a.sideChatMu.Unlock()
+		return err
+	}
+	history := append([]SideChatMessage(nil), f.Sessions[key]...)
+	binding, bound := f.Bindings[key]
+	if (!bound && len(history) != 0) || (bound && (binding.Source != sourceID || binding.Generation != generation ||
+		binding.Pending || web && binding.Context != source.context)) || web && len(history) >= 80 {
+		a.sideChatMu.Unlock()
+		return errors.New("side chat context, source or completion state changed; clear side chat explicitly before sending again")
+	}
+	if !bound {
+		binding = sideChatBinding{ConversationID: "sidechat:" + event.NewRequestID(), Source: sourceID, Context: source.context, Generation: generation}
+	}
+	if !web {
+		binding.Context = source.context
+	}
+	binding.Pending = true
+	f.Bindings[key] = binding
+	err = saveSideChatFile(f)
+	a.sideChatMu.Unlock()
 	if err != nil {
 		return err
 	}
-	var answer strings.Builder
-	for chunk := range ch {
-		switch chunk.Type {
-		case provider.ChunkText:
-			answer.WriteString(chunk.Text)
-		case provider.ChunkError:
-			if chunk.Err != nil {
-				return chunk.Err
-			}
-		case provider.ChunkDone, provider.ChunkUsage:
+	userMsg := SideChatMessage{ID: newSideChatID("user"), Role: "user", Content: input, CreatedAt: time.Now().UnixMilli()}
+	history = append(history, userMsg)
+	req := bindAuxiliaryRequest(ctx, provider.RequestPurposeTurn, provider.Request{
+		ConversationID: binding.ConversationID,
+		ContextEpoch:   1,
+		Messages:       sideChatMessages(binding.Context, history, web),
+		Temperature:    0.2,
+		MaxTokens:      1200,
+	})
+	if scoped, ok := p.(provider.TaskProvider); ok {
+		taskCtx, finish, err := scoped.BeginTask(ctx, binding.ConversationID, req.ParentTaskID)
+		if err != nil {
+			return err
 		}
+		// Identity teardown must drain the host-side save as well as the stream.
+		defer finish()
+		ctx = taskCtx
 	}
-	if err := ctx.Err(); err != nil && !errors.Is(err, context.Canceled) {
+	if !source.current() {
+		return errors.New("main conversation or model changed; side chat was not sent")
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	text := strings.TrimSpace(answer.String())
+	ch, err := p.Stream(ctx, req)
+	releaseAdmission()
+	if err != nil {
+		return err
+	}
+	answer, err := collectAuxiliaryText(ctx, ch)
+	if err != nil {
+		return err
+	}
+	text := strings.TrimSpace(answer)
 	if text == "" {
-		text = "我没有拿到有效回复。"
+		return errors.New("side chat returned no answer; request was not replayed")
+	}
+	if !source.current() {
+		return errors.New("main conversation or model changed before side chat completed")
 	}
 	history = append(history, SideChatMessage{ID: newSideChatID("assistant"), Role: "assistant", Content: text, CreatedAt: time.Now().UnixMilli()})
+	a.sideChatMu.Lock()
+	defer a.sideChatMu.Unlock()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if a.sideChatCancels[key].token != token {
+		return errors.New("side chat identity changed before completion")
+	}
+	f, err = readSideChatFile()
+	if err != nil {
+		return err
+	}
+	if f.Bindings[key].ConversationID != binding.ConversationID {
+		return errors.New("side chat was cleared before completion")
+	}
+	if !source.current() {
+		return errors.New("main conversation or model changed before side chat completed")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	binding.Pending = false
+	f.Bindings[key] = binding
 	f.Sessions[key] = trimSideChatHistory(history)
 	return saveSideChatFile(f)
 }
 
+type sideChatSourceSnapshot struct {
+	key     string
+	entry   *config.ProviderEntry
+	context string
+	current func() bool
+}
+
+func (a *App) sideChatSource(tabID string) (sideChatSourceSnapshot, error) {
+	a.mu.RLock()
+	tab := a.tabByIDLocked(tabID)
+	if tab == nil {
+		a.mu.RUnlock()
+		return sideChatSourceSnapshot{}, errors.New("side chat session is not ready")
+	}
+	ref, root, ctrl := tab.model, tab.WorkspaceRoot, tab.Ctrl
+	effort := cloneStringPtr(tab.effort)
+	path := tab.currentSessionPath()
+	key := tab.ID
+	if path != "" {
+		key = canonicalTabSessionPath(path)
+	}
+	a.mu.RUnlock()
+	cfg, err := config.LoadForRoot(root)
+	if err != nil {
+		return sideChatSourceSnapshot{}, err
+	}
+	selected := ref
+	if strings.TrimSpace(selected) == "" {
+		selected = cfg.DefaultModel
+	}
+	entry, err := exactAuxiliaryProvider(cfg, selected)
+	if err != nil {
+		return sideChatSourceSnapshot{}, err
+	}
+	if normalized := compatibleTabEffort(entry, effort); normalized != nil {
+		entry.Effort = *normalized
+	}
+	return sideChatSourceSnapshot{key: key, entry: entry, context: sideChatControllerContext(ctrl), current: func() bool {
+		a.mu.RLock()
+		defer a.mu.RUnlock()
+		return a.tabByIDLocked(tabID) == tab && tab.Ctrl == ctrl && tab.model == ref &&
+			tab.WorkspaceRoot == root && tab.currentSessionPath() == path
+	}}, nil
+}
+
 func (a *App) sideChatRequestMessages(tabID string, side []SideChatMessage) []provider.Message {
-	contextText := a.sideChatMainContext(tabID)
+	return sideChatMessages(a.sideChatMainContext(tabID), side, false)
+}
+
+func sideChatMessages(contextText string, side []SideChatMessage, preservePrefix bool) []provider.Message {
 	msgs := []provider.Message{
 		{Role: provider.RoleSystem, Content: "你是 Orca 的侧边聊天助手。你只能根据主对话和用户问题进行只读解答，不要修改文件、运行命令、创建自动化或调用任何工具。回答要简洁、具体、中文优先。主对话最近 1-2 轮最重要，但必要时可以参考更早上下文。"},
 		{Role: provider.RoleUser, Content: "主对话上下文如下：\n\n" + contextText},
 	}
 	start := 0
-	if len(side) > 12 {
+	if !preservePrefix && len(side) > 12 {
 		start = len(side) - 12
 	}
 	for _, m := range side[start:] {
@@ -245,7 +435,10 @@ func (a *App) sideChatRequestMessages(tabID string, side []SideChatMessage) []pr
 }
 
 func (a *App) sideChatMainContext(tabID string) string {
-	ctrl := a.ctrlByTabID(tabID)
+	return sideChatControllerContext(a.ctrlByTabID(tabID))
+}
+
+func sideChatControllerContext(ctrl *control.Controller) string {
 	if ctrl == nil {
 		return "（主对话尚未就绪）"
 	}

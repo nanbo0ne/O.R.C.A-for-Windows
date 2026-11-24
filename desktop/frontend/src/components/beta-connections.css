@@ -1,0 +1,142 @@
+/* The account capsule is the only blue control in the chrome: it sits beside
+   four text menus, so outline colour is what makes it findable without making
+   it heavier than the menus it sits next to. */
+:root {
+  --beta-pill-border: #3b82f6;
+  --beta-pill-fg: #93c5fd;
+  --beta-pill-bg: transparent;
+  --beta-pill-bg-hover: rgb(59 130 246 / 14%);
+  --beta-pill-divider: rgb(59 130 246 / 34%);
+  --beta-pill-signed-bg: rgb(37 99 235 / 12%);
+  --beta-pill-signed-border: rgb(59 130 246 / 46%);
+  --beta-pill-signed-fg: #93c5fd;
+  --beta-pill-attention-border: #d97706;
+  --beta-pill-attention-fg: #fbbf24;
+  --beta-pill-attention-bg: rgb(217 119 6 / 12%);
+}
+:root[data-theme="light"] {
+  --beta-pill-border: #2563eb;
+  --beta-pill-fg: #2563eb;
+  --beta-pill-bg: transparent;
+  --beta-pill-bg-hover: rgb(37 99 235 / 8%);
+  --beta-pill-divider: rgb(37 99 235 / 26%);
+  --beta-pill-signed-bg: rgb(37 99 235 / 7%);
+  --beta-pill-signed-border: rgb(37 99 235 / 34%);
+  --beta-pill-signed-fg: #2563eb;
+  --beta-pill-attention-border: #b45309;
+  --beta-pill-attention-fg: #b45309;
+  --beta-pill-attention-bg: rgb(180 83 9 / 8%);
+}
+.beta-connections-entry {
+  display: inline-flex; align-items: center; gap: 0;
+  height: 22px; padding: 0 1px; margin: 0;
+  border: 1px solid var(--beta-pill-border); border-radius: 999px;
+  background: var(--beta-pill-bg); color: var(--beta-pill-fg);
+  font: inherit; font-size: 10.5px; font-weight: 600; letter-spacing: .01em;
+  line-height: 1; white-space: nowrap; cursor: pointer;
+  --wails-draggable: no-drag;
+}
+.beta-connections-entry:hover { background: var(--beta-pill-bg-hover); }
+.beta-connections-entry__orca,
+.beta-connections-entry__web { display: inline-flex; align-items: center; gap: 4px; height: 100%; padding: 0 7px; }
+.beta-connections-entry__web { border-left: 1px solid var(--beta-pill-divider); }
+.beta-connections-entry__orca svg,
+.beta-connections-entry__web svg { flex: 0 0 auto; }
+.beta-connections-entry--signed-in {
+  background: var(--beta-pill-signed-bg); color: var(--beta-pill-signed-fg);
+  border-color: var(--beta-pill-signed-border);
+}
+.beta-connections-entry--signed-in:hover { background: var(--beta-pill-bg-hover); }
+.beta-connections-entry--signed-in .beta-connections-entry__web { border-left-color: var(--beta-pill-signed-border); }
+.beta-connections-entry--attention {
+  border-color: var(--beta-pill-attention-border); color: var(--beta-pill-attention-fg);
+  background: var(--beta-pill-attention-bg);
+}
+.beta-connections-entry--attention:hover { background: var(--beta-pill-attention-bg); }
+.beta-connections-entry--attention .beta-connections-entry__web { border-left-color: var(--beta-pill-attention-border); }
+.beta-entry-slot { position: relative; }
+/* Classic puts the entry in the drag surface and Modern in the menu row; both
+   stay below the 26px control height so no other chrome geometry moves. */
+.beta-entry-slot .beta-connections-entry { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); }
+.modern-chrome__beta-entry { display: flex; align-items: center; flex: 0 0 auto; height: 100%; margin: 0 6px 0 0; --wails-draggable: no-drag; }
+.modern-chrome__beta-entry .beta-connections-entry { flex: 0 0 auto; }
+/* Narrow windows keep both states legible as icons + tooltip rather than
+   clipping text. */
+@media (max-width: 1500px) {
+  .beta-connections-entry__web .beta-connections-entry__text { display: none; }
+  .beta-connections-entry__web { padding: 0 6px; }
+}
+@media (max-width: 1340px) {
+  .beta-entry-slot .beta-connections-entry__web .beta-connections-entry__text { display: none; }
+}
+.beta-connections-backdrop {
+  position: fixed; inset: 0; z-index: var(--z-overlay-backdrop);
+  display: grid; place-items: center; padding: 20px;
+  background: rgb(0 0 0 / 35%); --wails-draggable: no-drag;
+}
+.beta-connections-dialog {
+  width: min(520px, 100%); max-height: calc(100dvh - 40px); overflow: auto;
+  display: flex; flex-direction: column; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 40px rgb(0 0 0 / 20%);
+  font-size: var(--font-control); letter-spacing: 0;
+}
+.beta-connections-dialog--web { width: min(1120px, 100%); height: min(780px, calc(100dvh - 40px)); overflow: hidden; }
+.beta-connections-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.beta-connections-header h2 { margin: 0; flex: 1; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.beta-connections-dialog button {
+  display: inline-flex; justify-content: center; align-items: center; gap: 6px;
+  min-height: 32px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-soft); color: var(--fg); font: inherit; cursor: pointer; overflow-wrap: anywhere;
+}
+.beta-connections-dialog button:hover:not(:disabled) { background: var(--bg-elev); }
+.beta-connections-dialog button:disabled { opacity: .5; cursor: default; }
+.beta-connections-dialog button:focus-visible, .beta-connections-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.beta-connections-dialog .beta-connections-icon { width: 32px; height: 32px; padding: 0; flex: 0 0 32px; }
+.beta-connections-list { padding: 0 16px; }
+.beta-connections-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 18px 0; }
+.beta-connections-row + .beta-connections-row { border-top: 1px solid var(--border); }
+.beta-connections-row > svg { flex: 0 0 19px; }
+.beta-connections-details { flex: 1; min-width: 100px; overflow-wrap: anywhere; }
+.beta-connections-details h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.beta-connections-details p { display: flex; align-items: center; gap: 5px; margin: 3px 0 0; color: var(--fg-muted); font-size: 12px; }
+.beta-connections-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.beta-connections-error { flex-basis: 100%; margin: 0; color: var(--fg); }
+.beta-connections-webview { flex: 1; min-height: 120px; margin: 12px 16px; background: var(--bg-soft); border: 1px solid var(--border); overflow: hidden; }
+.beta-connections-webview > div { padding: 20px; display: flex; align-items: center; gap: 12px; }
+.beta-connections-footer { flex: 0 0 auto; padding: 10px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--fg-muted); overflow-wrap: anywhere; }
+.beta-connections-settings { display: flex; flex-direction: column; gap: 14px; padding: 16px; overflow: auto; }
+.beta-connections-settings label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.beta-connections-settings input[type="checkbox"] { flex: 0 0 16px; width: 16px; height: 16px; accent-color: var(--accent); }
+.beta-connections-slider output { margin-left: auto; }
+.beta-connections-slider input { width: 100%; accent-color: var(--accent); }
+.beta-connections-settings fieldset { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--border); }
+.beta-connections-settings textarea { width: 100%; min-height: 64px; resize: vertical; }
+.beta-connections-settings textarea, .beta-connections-settings select { border: 1px solid var(--border); border-radius: 4px; background: var(--bg-soft); color: var(--fg); padding: 6px; font: inherit; }
+.beta-connections-settings .beta-connections-consent { display: grid; grid-template-columns: 16px 1fr; align-items: start; line-height: 1.5; }
+.beta-account-details { padding: 16px; display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; }
+.beta-account-details h3 { font-size: 14px; margin: 0; }
+.beta-account-details p { margin: 0; font-size: 12px; color: var(--fg-muted); }
+.beta-account-section-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.beta-account-balances { display: grid; gap: 8px; margin: 0; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.beta-account-balances > div, .beta-account-gifts li { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr); gap: 12px; }
+.beta-account-balances dt { color: var(--fg-muted); }
+.beta-account-balances dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.beta-account-gifts { display: grid; gap: 8px; margin: 0; padding: 0 0 12px; list-style: none; border-bottom: 1px solid var(--border); }
+.beta-account-gifts li > * { overflow-wrap: anywhere; }
+.beta-account-gifts strong { font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 500; }
+.beta-account-receipts { max-height: 260px; overflow: auto; min-height: 70px; }
+.beta-account-receipts table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.beta-account-receipts th, .beta-account-receipts td { text-align: left; vertical-align: top; padding: 8px 6px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.beta-account-receipts th:first-child { width: 42%; }
+.beta-account-receipts th:nth-child(2) { width: 20%; }
+.beta-account-receipts td:last-child { font-variant-numeric: tabular-nums; }
+.beta-account-receipts td span, .beta-account-receipts td strong { display: block; font-weight: 400; }
+.beta-account-receipts td span { margin-top: 4px; color: var(--fg-muted); font-size: 11px; }
+.beta-account-turns { border-top: 1px solid var(--border); padding-top: 12px; }
+.beta-account-turns summary { cursor: pointer; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.beta-account-turns > p, .beta-account-turns > div { margin-top: 12px; }
+.beta-account-turn-table th:first-child { width: 28%; }
+.beta-account-turn-table th:nth-child(2) { width: 18%; }
+.beta-account-turn-table td:nth-child(3) { font-variant-numeric: tabular-nums; }
+@media (max-width: 1199px) { .app-chrome__drag-surface.beta-entry-slot .beta-connections-entry { display: none; } }
+@media (max-width: 480px) { .modern-chrome__beta-entry { display: none; } }

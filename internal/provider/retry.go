@@ -35,6 +35,38 @@ type RetryNotify func(RetryInfo)
 
 type retryNotifyKey struct{}
 
+type noRequestReplayKey struct{}
+
+// WithoutRequestReplay is for a host whose gateway can accept and bill a request
+// before headers arrive. Recovery must query that request, not resubmit it.
+func WithoutRequestReplay(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noRequestReplayKey{}, true)
+}
+
+func RequestReplayDisabled(ctx context.Context) bool {
+	disabled, _ := ctx.Value(noRequestReplayKey{}).(bool)
+	return disabled
+}
+
+// NonReplayableError carries a host's no-resubmission policy beyond its request
+// context, including agent continuation and compaction compatibility fallbacks.
+type NonReplayableError struct{ Err error }
+
+func (e *NonReplayableError) Error() string { return e.Err.Error() }
+func (e *NonReplayableError) Unwrap() error { return e.Err }
+
+func NoRequestReplay(err error) error {
+	if err == nil || ReplayForbidden(err) {
+		return err
+	}
+	return &NonReplayableError{Err: err}
+}
+
+func ReplayForbidden(err error) bool {
+	var noReplay *NonReplayableError
+	return errors.As(err, &noReplay)
+}
+
 // WithRetryNotify attaches a callback that SendWithRetry invokes before each
 // backoff sleep, so the agent can surface a transient "retrying (n/m)" status.
 func WithRetryNotify(ctx context.Context, fn RetryNotify) context.Context {
@@ -139,12 +171,16 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, provName, keyEn
 	notify := retryNotifyFromContext(ctx)
 	var lastErr error
 	var retryAfter time.Duration
+	limit := MaxRetries
+	if RequestReplayDisabled(ctx) {
+		limit = 0
+	}
 
-	for attempt := 0; attempt <= MaxRetries; attempt++ {
+	for attempt := 0; attempt <= limit; attempt++ {
 		if attempt > 0 {
 			delay := backoffDelay(attempt, retryAfter)
 			if notify != nil {
-				notify(RetryInfo{Attempt: attempt, Max: MaxRetries, Delay: delay, Err: lastErr})
+				notify(RetryInfo{Attempt: attempt, Max: limit, Delay: delay, Err: lastErr})
 			}
 			select {
 			case <-ctx.Done():

@@ -36,6 +36,9 @@ type mcpServerSpec struct {
 // file is not an error (returns nil, nil). A present-but-malformed file is an
 // error so a typo surfaces loudly instead of silently dropping every server.
 func loadMCPJSON(path string) ([]PluginEntry, error) {
+	if err := ValidateProfileDataPath(path); err != nil {
+		return nil, err
+	}
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -72,6 +75,9 @@ func specsToEntries(specs map[string]mcpServerSpec, skip map[string]bool) []Plug
 
 // legacyConfigPath is the v0.x (TypeScript line) config file, ~/.orca/config.json.
 func legacyConfigPath() string {
+	if IsolatedProfileEnabled() {
+		return ""
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -201,6 +207,9 @@ func (c *Config) mergeMCPJSON(entries []PluginEntry) {
 }
 
 func clearMCPJSONAuthentication(path, name string) (PluginEntry, bool, error) {
+	if err := ValidateProfileDataPath(path); err != nil {
+		return PluginEntry{}, false, err
+	}
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return PluginEntry{}, false, fmt.Errorf("clear plugin authentication: no plugin %q", name)

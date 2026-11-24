@@ -770,7 +770,11 @@ func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, 
 }
 
 func pluginTOMLSourcePath(name string) string {
-	for _, path := range []string{product.ProjectConfigName, product.LegacyProjectConfigName, userConfigPath(), legacyUserConfigPath()} {
+	paths := []string{product.ProjectConfigName, product.LegacyProjectConfigName, userConfigPath(), legacyUserConfigPath()}
+	if IsolatedProfileEnabled() {
+		paths = []string{ProjectConfigPath("."), userConfigPath()}
+	}
+	for _, path := range paths {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
@@ -843,6 +847,9 @@ auto_plan = %q
 }
 
 func writeConfigFile(path, body string) error {
+	if err := ValidateProfileDataPath(path); err != nil {
+		return err
+	}
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")
 	}
@@ -894,7 +901,7 @@ func isUserConfigPath(path string) bool {
 func (c *Config) Save() error {
 	path := SourcePath()
 	if path == "" {
-		path = product.ProjectConfigName
+		path = ProjectConfigPath(".")
 	}
 	return c.SaveTo(path)
 }
@@ -903,14 +910,17 @@ func (c *Config) Save() error {
 // user's global config when root has no existing orca.toml.
 func (c *Config) SaveForRoot(root string) error {
 	root = resolveRoot(root)
-	projectTOML := product.ProjectConfigName
-	if root != "." {
-		projectTOML = filepath.Join(root, product.ProjectConfigName)
+	projectTOML := ProjectConfigPath(root)
+	if err := ValidateProfileDataPath(projectTOML); err != nil {
+		return err
 	}
 	if _, err := os.Stat(projectTOML); err == nil {
 		return c.SaveTo(projectTOML)
 	}
 	if uc := userConfigPath(); uc != "" {
+		if err := ValidateProfileDataPath(uc); err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(uc), 0o755); err != nil {
 			return err
 		}

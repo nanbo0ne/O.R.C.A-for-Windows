@@ -474,7 +474,7 @@ func (t *installSourceTool) configPath(scope string) string {
 			return p
 		}
 	}
-	return filepath.Join(t.root, product.ProjectConfigName)
+	return config.ProjectConfigPath(t.root)
 }
 
 func (t *installSourceTool) normalizeScope(scope string) string {
@@ -604,5 +604,5 @@ var (
 )
 
 func defaultCurrentDir() (string, error)            { return os.Getwd() }
-func defaultUserHomeDir() (string, error)           { return os.UserHomeDir() }
+func defaultUserHomeDir() (string, error)           { return config.ProfileHomeDir() }
 func defaultLstat(path string) (os.FileInfo, error) { return os.Lstat(path) }

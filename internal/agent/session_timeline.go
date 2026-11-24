@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -19,6 +20,8 @@ type DisplayEntry struct {
 	Kind        string           `json:"kind"`
 	Message     provider.Message `json:"message,omitempty"`
 	DisplayText string           `json:"displayText,omitempty"`
+	ToolStatus  string           `json:"toolStatus,omitempty"`
+	ToolError   string           `json:"toolError,omitempty"`
 	Summary     string           `json:"summary,omitempty"`
 	Trigger     string           `json:"trigger,omitempty"`
 	Messages    int              `json:"messages,omitempty"`
@@ -80,11 +83,23 @@ func (s *Session) ContextEpoch() uint64 {
 	return s.display.ContextEpoch
 }
 
+// ConversationID survives reload and context rewrite; forks get a new identity.
+func (s *Session) ConversationID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureDisplayLocked()
+	return s.display.Namespace
+}
+
 func (s *Session) DisplaySnapshot() []DisplayEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ensureDisplayLocked()
-	return append([]DisplayEntry(nil), s.display.Entries...)
+	entries := append([]DisplayEntry(nil), s.display.Entries...)
+	for i := range entries {
+		entries[i].Message.Files = cloneFileSnapshots(entries[i].Message.Files)
+	}
+	return entries
 }
 
 // RewriteContext retains the complete visible transcript. A marker is appended
@@ -92,6 +107,26 @@ func (s *Session) DisplaySnapshot() []DisplayEntry {
 func (s *Session) RewriteContext(msgs []provider.Message, marker *DisplayEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.rewriteContextLocked(msgs, marker)
+}
+
+// Cancellation and source-history checks share the actual commit lock. A
+// summary waiting behind another session operation must not overwrite it.
+func (s *Session) commitCompaction(ctx context.Context, before, msgs []provider.Message, marker *DisplayEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(s.Messages, before) {
+		return fmt.Errorf("conversation changed before summary commit; original history was kept")
+	}
+	s.rewriteContextLocked(msgs, marker)
+	s.rewriteVersion++
+	return nil
+}
+
+func (s *Session) rewriteContextLocked(msgs []provider.Message, marker *DisplayEntry) {
 	s.ensureDisplayLocked()
 	ids := make([]string, len(msgs))
 	if marker != nil || len(msgs) != len(s.Messages) {
@@ -120,7 +155,7 @@ func (s *Session) RewriteContext(msgs []provider.Message, marker *DisplayEntry) 
 			ids[i] = s.display.ContextIDs[i]
 		}
 	}
-	s.Messages = append([]provider.Message(nil), msgs...)
+	s.Messages = cloneMessageFileSnapshots(msgs)
 	s.display.ContextIDs = ids
 }
 
@@ -143,14 +178,19 @@ func (s *Session) ClonePrefix(boundary int) *Session {
 	d := *s.display
 	d.Namespace = timelineNamespace()
 	d.Entries = append([]DisplayEntry(nil), s.display.Entries[:end]...)
+	for i := range d.Entries {
+		d.Entries[i].Message.Files = cloneFileSnapshots(d.Entries[i].Message.Files)
+	}
 	d.ContextIDs = append([]string(nil), s.display.ContextIDs[:boundary]...)
-	return &Session{Messages: append([]provider.Message(nil), s.Messages[:boundary]...), display: &d, rewriteVersion: s.rewriteVersion}
+	return &Session{Messages: cloneMessageFileSnapshots(s.Messages[:boundary]), display: &d, rewriteVersion: s.rewriteVersion}
 }
 
 // WithContext carries display history across a controller rebuild. Only the
 // runtime context changes (usually its system prompt); old transcript is kept.
 func (s *Session) WithContext(msgs []provider.Message) *Session {
+	identity := s.ConversationID()
 	next := s.ClonePrefix(len(s.Snapshot()))
+	next.display.Namespace = identity
 	next.RewriteContext(msgs, nil)
 	return next
 }

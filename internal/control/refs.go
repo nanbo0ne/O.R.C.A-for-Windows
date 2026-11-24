@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/documentextract"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/proc"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
@@ -630,7 +631,7 @@ func walkRootDir(root *os.Root, dir string, b *strings.Builder, n *int, depth in
 // (where there is no controller-scoped workspace) keeps working.
 func resolveAbsRef(path, baseDir string) (absPath, absBase string, ok bool) {
 	if baseDir == "" {
-		return path, "", true
+		return path, "", config.ProfileDiscoveryAllowed(path)
 	}
 	absBase = baseDir
 	if !filepath.IsAbs(absBase) {
@@ -648,7 +649,7 @@ func resolveAbsRef(path, baseDir string) (absPath, absBase string, ok bool) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", "", false
 	}
-	return cleaned, absBase, true
+	return cleaned, absBase, config.ProfileDiscoveryAllowed(cleaned)
 }
 
 func readPDFRef(path string, size int64) string {

@@ -84,6 +84,7 @@ type Manager struct {
 	jobs      map[string]*Job
 	order     []string
 	completed []string // finished-job summaries awaiting drain into the next turn
+	stopped   bool
 }
 
 // NewManager returns a Manager whose jobs run under a fresh session-scoped
@@ -120,11 +121,19 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 	j := &Job{ID: id, Kind: kind, Label: label, status: Running, startedAt: nowMs(), cancel: cancel, done: make(chan struct{})}
 	m.jobs[id] = j
 	m.order = append(m.order, id)
+	if m.stopped {
+		j.status = Killed
+		cancel()
+		close(j.done)
+		m.mu.Unlock()
+		return j
+	}
+	// Register under the same lock as Stop so Close never races a late Add.
+	m.wg.Add(1)
 	m.mu.Unlock()
 
 	m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
 
-	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
 		result, err := run(ctx, jobWriter{j})
@@ -333,13 +342,49 @@ func (m *Manager) DrainCompletedNote() string {
 }
 
 // Close cancels the session context and waits for every background job goroutine
-// to return before unblocking. Jobs observe the cancel through their run context
-// (exec.CommandContext kills a bash job's process), so the wait is bounded. This
-// matters for callers tearing down a t.TempDir: without the wait, RemoveAll can
+// to return before unblocking. Non-cooperative jobs can keep this blocked; use
+// Stop and WaitStopped for a bounded caller. This matters for callers tearing
+// down a t.TempDir: without the wait, RemoveAll can
 // race a job goroutine that still holds a file under that dir.
 func (m *Manager) Close() {
-	m.cancel()
+	m.Stop()
 	m.wg.Wait()
+}
+
+// Stop closes job admission and requests cancellation without claiming exit.
+func (m *Manager) Stop() {
+	m.mu.Lock()
+	m.stopped = true
+	m.mu.Unlock()
+	m.cancel()
+}
+
+// WaitStopped observes execution completion, including jobs whose public
+// status was already changed to Killed. Call Stop before waiting.
+func (m *Manager) WaitStopped(ctx context.Context) error {
+	m.mu.Lock()
+	if !m.stopped {
+		m.mu.Unlock()
+		return fmt.Errorf("job admission is still open")
+	}
+	targets := make([]*Job, 0, len(m.jobs))
+	for _, j := range m.jobs {
+		targets = append(targets, j)
+	}
+	m.mu.Unlock()
+	for _, j := range targets {
+		select {
+		case <-j.done:
+			continue
+		default:
+		}
+		select {
+		case <-j.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func nowMs() int64 { return time.Now().UnixMilli() }

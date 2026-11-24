@@ -239,21 +239,42 @@ func TestEffortPersistenceV310DiskFailureRollsBackAndRetries(t *testing.T) {
 	oldLabel, oldStartupErr, oldReady := a.Label, a.StartupErr, a.Ready
 	oldPrefs := app.recentPrefs
 
-	// Keep the committed file intact while making the temporary write fail on
-	// every platform, without relying on permissions or touching user data.
-	tmp := path + ".tmp"
-	if err := os.Mkdir(tmp, 0o755); err != nil {
+	// Obstruct the actual destination independently of temporary-file naming.
+	// Preserve committed bytes beside it; a directory fails on every platform.
+	committed := path + ".committed"
+	if err := os.Rename(path, committed); err != nil {
 		t.Fatal(err)
 	}
+	blocked, restored := false, false
+	restore := func() error {
+		if restored {
+			return nil
+		}
+		if blocked {
+			if err := os.Remove(path); err != nil {
+				return err
+			}
+			blocked = false
+		}
+		if err := os.Rename(committed, path); err != nil {
+			return err
+		}
+		restored = true
+		return nil
+	}
 	t.Cleanup(func() {
-		if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
-			t.Errorf("remove disk failure fixture: %v", err)
+		if err := restore(); err != nil {
+			t.Errorf("restore disk failure fixture: %v", err)
 		}
 	})
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blocked = true
 	err = app.SetEffortForTab(a.ID, "high")
 	var pathErr *os.PathError
-	if !errors.As(err, &pathErr) || pathErr.Path != tmp {
-		t.Fatalf("expected temporary-file write failure, got %v", err)
+	if !errors.As(err, &pathErr) || pathErr.Path != path {
+		t.Fatalf("expected destination filesystem failure, got %v", err)
 	}
 	if a.Ctrl != oldCtrl || a.effort != oldEffort || a.effort == nil || *a.effort != "xhigh" || app.EffortForTab(a.ID).Current != "xhigh" {
 		t.Fatal("disk failure changed the working controller or xhigh override")
@@ -261,14 +282,20 @@ func TestEffortPersistenceV310DiskFailureRollsBackAndRetries(t *testing.T) {
 	if a.Label != oldLabel || a.StartupErr != oldStartupErr || a.Ready != oldReady || !reflect.DeepEqual(app.recentPrefs, oldPrefs) {
 		t.Fatal("disk failure did not restore tab metadata and recent preferences")
 	}
-	after, err := os.ReadFile(path)
+	after, err := os.ReadFile(committed)
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatalf("disk failure changed committed tabs bytes: %v", err)
 	}
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		t.Fatalf("failed save replaced the obstructed destination: %v", err)
+	}
 	effortPersistenceV310Turn(t, app, a, requests, "after disk failure", "xhigh")
 
-	if err := os.Remove(tmp); err != nil {
+	if err := restore(); err != nil {
 		t.Fatal(err)
+	}
+	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("restored committed tabs bytes changed: %v", err)
 	}
 	if err := app.SetEffortForTab(a.ID, "high"); err != nil {
 		t.Fatalf("retry after removing disk failure fixture: %v", err)

@@ -397,6 +397,7 @@ func (a *Agent) TrySteerRich(input RichInput, display string, available []provid
 	}
 	ack := make(chan error, 1)
 	input.Images = append([]provider.ImageContent(nil), input.Images...)
+	input.Files = cloneFileSnapshots(input.Files)
 	a.steerQueue = append(a.steerQueue, steerInput{Input: input, Display: display, ID: id, AvailableImages: append([]provider.ImageContent(nil), available...), ack: ack})
 	a.steerConsumed = false
 	return ack, true
@@ -573,6 +574,12 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 func (a *Agent) RunRich(ctx context.Context, input RichInput) (runErr error) {
 	ctx, endTurn := WithParentTurn(ctx)
 	defer endTurn()
+	var releaseTask func()
+	defer func() {
+		if releaseTask != nil {
+			releaseTask()
+		}
+	}()
 	defer func() { a.closeSteerQueue(runErr) }()
 	a.steerMu.Lock()
 	a.steerClosed = false
@@ -584,7 +591,26 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) (runErr error) {
 	a.repeatSuccessCounts = nil
 	turnID, _ := ParentTurn(ctx)
 	a.sink.Emit(event.Event{Kind: event.TurnStarted, TurnID: turnID})
-	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input.Text, Images: append([]provider.ImageContent(nil), input.Images...)})
+	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input.Text, Images: append([]provider.ImageContent(nil), input.Images...), Files: cloneFileSnapshots(input.Files)})
+
+	// Admission can wait or fail; preserve accepted input and initialize guidance
+	// first, while keeping every model/tool iteration inside the acquired scope.
+	// A child using a different source must not inherit its parent's policy.
+	ctx = provider.WithSerialTaskTools(ctx, false)
+	if scoped, ok := a.prov.(provider.TaskProvider); ok {
+		parentTaskID, _ := ParentTurn(ctx)
+		taskCtx, release, err := scoped.BeginTask(ctx, a.session.ConversationID(), parentTaskID)
+		if err != nil {
+			return err
+		}
+		releaseTask = release
+		ctx = taskCtx
+	}
+	defer func() {
+		if runErr != nil && ctx.Err() != nil {
+			runErr = completionFailure(ctx, runErr)
+		}
+	}()
 
 	finalReadinessBlocks := 0
 	readinessFailureCount := 0
@@ -610,7 +636,7 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) (runErr error) {
 		// guidance (with a prefix), not a new task. One cache miss per
 		// steer is unavoidable — the model must see the new instruction.
 		if guidance, ok := a.consumeSteer(); ok {
-			messageID := a.session.AddWithDisplay(provider.Message{Role: provider.RoleUser, Content: midTurnSteerMessage(guidance.Input.Text), Images: guidance.Input.Images}, guidance.Display)
+			messageID := a.session.AddWithDisplay(provider.Message{Role: provider.RoleUser, Content: midTurnSteerMessage(guidance.Input.Text), Images: guidance.Input.Images, Files: cloneFileSnapshots(guidance.Input.Files)}, guidance.Display)
 			ctx = WithTurnImages(ctx, append(TurnImages(ctx), guidance.AvailableImages...))
 			guidance.ack <- nil
 			close(guidance.ack)
@@ -627,11 +653,11 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) (runErr error) {
 		requestID := event.NewRequestID()
 		text, reasoning, signature, calls, usage, interrupted, partialToolStarted, err := a.stream(ctx, step+1, requestID)
 		if err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || provider.ReplayForbidden(err) {
 				if text != "" || reasoning.content != "" || reasoning.protocol != nil {
 					a.session.Add(provider.Message{Role: provider.RoleAssistant, Content: text, ReasoningContent: reasoning.content, ProtocolReasoningContent: reasoning.protocol, ReasoningSignature: signature})
 				}
-				return ctx.Err()
+				return completionFailure(ctx, err)
 			}
 			if interrupted && streamRecoveries < maxStreamRecoveries {
 				streamRecoveries++
@@ -665,6 +691,17 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) (runErr error) {
 		}
 		if msg, ok := finishReasonMessage(usage); ok {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
+		}
+		// Presentation/usage callbacks may cancel after the stream has completed.
+		// Keep the received answer and real usage, but never dispatch its calls.
+		if ctx.Err() != nil {
+			a.session.Add(provider.Message{Role: provider.RoleAssistant, Content: text, ReasoningContent: reasoning.content, ProtocolReasoningContent: reasoning.protocol, ReasoningSignature: signature, ToolCalls: calls})
+			for _, call := range calls {
+				result := "error: context canceled (not executed)"
+				a.session.AddToolResult(provider.Message{Role: provider.RoleTool, ToolCallID: call.ID, Name: call.Name, Content: result}, "stopped", context.Canceled.Error())
+				a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: call.ID, Name: call.Name, Args: call.Arguments, Output: result, Err: context.Canceled.Error(), ReadOnly: a.toolReadOnly(call.Name)}})
+			}
+			return provider.CancellationError(ctx)
 		}
 
 		// Keep the display text and the original protocol block separately so
@@ -727,6 +764,9 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) (runErr error) {
 			if readiness.applies {
 				event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, finalReadinessBlocks > 0))
 			}
+			if ctx.Err() != nil {
+				return provider.CancellationError(ctx)
+			}
 			if !a.sealSteerIfEmpty() {
 				continue
 			}
@@ -736,14 +776,21 @@ func (a *Agent) RunRich(ctx context.Context, input RichInput) (runErr error) {
 		emptyFinalBlocks = 0
 		usedAnyTool = true
 
-		results := a.executeBatch(ctx, calls)
+		results, outcomes := a.executeBatchOutcomes(ctx, calls)
 		for i, call := range calls {
-			a.session.Add(provider.Message{
+			status := "done"
+			if outcomes[i].errMsg != "" {
+				status = "error"
+				if ctx.Err() != nil {
+					status = "stopped"
+				}
+			}
+			a.session.AddToolResult(provider.Message{
 				Role:       provider.RoleTool,
 				Content:    results[i],
 				ToolCallID: call.ID,
 				Name:       call.Name,
-			})
+			}, status, outcomes[i].errMsg)
 		}
 		if err := ctx.Err(); err != nil {
 			return err
@@ -911,6 +958,20 @@ type turnReasoning struct {
 	protocol *string
 }
 
+func completionFailure(ctx context.Context, err error) error {
+	if ctx.Err() == nil {
+		return err
+	}
+	cancelled := provider.CancellationError(ctx)
+	if errors.Is(err, ctx.Err()) && cancelled == ctx.Err() {
+		return err
+	}
+	if provider.ReplayForbidden(err) {
+		return errors.Join(err, cancelled)
+	}
+	return cancelled
+}
+
 // stream runs one completion, emitting reasoning and text deltas as typed
 // events and collecting complete tool calls. A Message event closes the text
 // stream so a sink can re-render the streamed raw text as styled markdown. The
@@ -920,17 +981,21 @@ func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string,
 	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
 		a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max})
 	})
-	requestCtx, cancelRequest := context.WithCancel(ctx)
+	requestCtx, cancelRequest := context.WithCancel(provider.WithCancellationDiagnostic(ctx))
 	defer cancelRequest()
+	parentTaskID, _ := ParentTurn(ctx)
 	ch, err := a.prov.Stream(requestCtx, provider.Request{
-		RequestID:   requestID,
-		Purpose:     provider.RequestPurposeTurn,
-		Messages:    a.hydrateImageMessages(ctx, a.session.Messages),
-		Tools:       a.tools.Schemas(),
-		Temperature: a.temperature,
+		ParentTaskID:   parentTaskID,
+		ConversationID: a.session.ConversationID(),
+		ContextEpoch:   a.session.ContextEpoch(),
+		RequestID:      requestID,
+		Purpose:        provider.RequestPurposeTurn,
+		Messages:       a.hydrateImageMessages(ctx, a.session.Messages),
+		Tools:          a.tools.Schemas(),
+		Temperature:    a.temperature,
 	})
 	if err != nil {
-		return "", turnReasoning{}, "", nil, nil, false, false, err
+		return "", turnReasoning{}, "", nil, nil, false, false, completionFailure(requestCtx, err)
 	}
 
 	// A PostLLMCall hook rewrites the whole reasoning block, so when one is wired
@@ -965,7 +1030,7 @@ func (a *Agent) stream(ctx context.Context, turn int, requestID string) (string,
 	}
 	cancelled := func() (string, turnReasoning, string, []provider.ToolCall, *provider.Usage, bool, bool, error) {
 		stored, _ := finishReasoning()
-		return text.String(), stored, signature, nil, usage, false, partialToolStarted, ctx.Err()
+		return text.String(), stored, signature, nil, usage, false, partialToolStarted, provider.CancellationError(requestCtx)
 	}
 streamLoop:
 	for {
@@ -1020,6 +1085,13 @@ streamLoop:
 			a.sessCacheHit.Add(int64(chunk.Usage.CacheHitTokens))
 			a.sessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
 		case provider.ChunkError:
+			if provider.ReplayForbidden(chunk.Err) {
+				// Preserve received progress without offering tools or recovery from
+				// an uncertain request, even when it also wraps an interruption.
+				cancelRequest()
+				stored, _ := finishReasoning()
+				return text.String(), stored, signature, nil, usage, false, partialToolStarted, chunk.Err
+			}
 			if provider.IsStreamInterrupted(chunk.Err) {
 				stored, _ := finishReasoning()
 				return text.String(), stored, signature, calls, usage, true, partialToolStarted, chunk.Err
@@ -1051,6 +1123,7 @@ func usageHasTokens(u *provider.Usage) bool {
 }
 
 func (a *Agent) hydrateImageMessages(ctx context.Context, messages []provider.Message) []provider.Message {
+	messages = cloneMessageFileSnapshots(messages)
 	if a.imageLoader == nil {
 		return messages
 	}
@@ -1133,6 +1206,11 @@ func (a *Agent) systemPrompt() string {
 // after the batch in call order, so emission stays serial even when execution
 // parallelised.
 func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []string {
+	results, _ := a.executeBatchOutcomes(ctx, calls)
+	return results
+}
+
+func (a *Agent) executeBatchOutcomes(ctx context.Context, calls []provider.ToolCall) ([]string, []toolOutcome) {
 	for _, c := range calls {
 		if ctx.Err() != nil {
 			break
@@ -1174,7 +1252,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 	}
 
 	for _, batch := range partitionToolCalls(a.tools, calls) {
-		if batch.parallel && batch.end-batch.start > 1 {
+		if batch.parallel && batch.end-batch.start > 1 && !provider.SerialTaskTools(ctx) {
 			runParallel(batch.start, batch.end, run)
 			continue
 		}
@@ -1201,7 +1279,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 		}
 	}
 	a.applyStormBreaker(calls, outcomes, results)
-	return results
+	return results, outcomes
 }
 
 type toolCallBatch struct {
@@ -1393,6 +1471,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	// PreToolUse hooks run after permission is granted but before the call: a
 	// gating hook (exit 2) refuses it, surfaced to the model like a gate denial.
+	if err := ctx.Err(); err != nil {
+		return toolOutcome{output: "error: " + err.Error(), errMsg: err.Error(), blocked: true}
+	}
 	if a.hooks != nil {
 		if block, msg := a.hooks.PreToolUse(ctx, call.Name, json.RawMessage(call.Arguments)); block {
 			if msg == "" {
@@ -1404,6 +1485,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 				errMsg:  "blocked by PreToolUse hook",
 			}
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return toolOutcome{output: "error: " + err.Error(), errMsg: err.Error(), blocked: true}
 	}
 	// Checkpoint the file this writer is about to change, so the turn can be
 	// rewound. Fires after all gating (the edit is cleared to run) and only for
@@ -1434,6 +1518,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	cctx = tool.WithProgress(cctx, func(chunk string) {
 		a.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: chunk}})
 	})
+	if err := cctx.Err(); err != nil {
+		return toolOutcome{output: "error: " + err.Error(), errMsg: err.Error(), blocked: true}
+	}
 	result, err := t.Execute(cctx, json.RawMessage(call.Arguments))
 	if a.evidence != nil {
 		if call.Name == "complete_step" {

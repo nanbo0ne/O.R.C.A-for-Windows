@@ -42,6 +42,29 @@ func TestRetryableStatus(t *testing.T) {
 	}
 }
 
+func TestWithoutRequestReplayPreservesSingleAdmission(t *testing.T) {
+	for _, status := range []int{0, 408, 429, 500, 502, 503, 504} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			calls, notices := 0, 0
+			cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if status == 0 {
+					return nil, io.ErrUnexpectedEOF
+				}
+				return statusResp(status, nil), nil
+			})}
+			ctx := WithRetryNotify(WithoutRequestReplay(context.Background()), func(RetryInfo) { notices++ })
+			_, err := SendWithRetry(ctx, cl, "account", "", newDummyReq)
+			if err == nil || calls != 1 || notices != 0 {
+				t.Fatalf("err=%v calls=%d notices=%d", err, calls, notices)
+			}
+		})
+	}
+	if RequestReplayDisabled(context.Background()) {
+		t.Fatal("ordinary API requests unexpectedly lost retries")
+	}
+}
+
 func TestTransientErr(t *testing.T) {
 	if transientErr(nil) {
 		t.Error("nil should not be transient")

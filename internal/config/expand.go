@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"regexp"
 	"strings"
 )
@@ -15,7 +14,7 @@ var varRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}`)
 // MCP / Claude Code convention), so a missing secret yields an empty header
 // rather than a literal "${TOKEN}" leaking onto the wire.
 func ExpandVars(s string) string {
-	return expandVars(s, os.LookupEnv)
+	return expandVars(s, ProfileLookupEnv)
 }
 
 // ExpandVars expands references using this config's host-priority, workspace-

@@ -114,6 +114,9 @@ func TestCoordinatorPlannerUsageReceiptCarriesRequestAndEndpoint(t *testing.T) {
 	if planner.lastReq.RequestID != usage.RequestID {
 		t.Fatalf("planner request id = %q, usage id = %q", planner.lastReq.RequestID, usage.RequestID)
 	}
+	if planner.lastReq.ParentTaskID == "" || planner.lastReq.ParentTaskID != usage.TurnID || exec.lastReq.ParentTaskID != planner.lastReq.ParentTaskID {
+		t.Fatal("planner and executor do not share the stable parent task")
+	}
 }
 
 // TestHandoffTaskRecoversOriginalInput guards the dual-model auto-title path

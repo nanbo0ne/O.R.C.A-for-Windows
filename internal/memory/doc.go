@@ -19,6 +19,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 )
 
 // Scope labels where a doc source was discovered, so the assembled block can
@@ -88,6 +90,10 @@ func discoverDocs(cwd, userDir string) []Source {
 
 	// 3. Project-local overrides (highest precedence).
 	out = append(out, loadFrom(cwd, localNames, ScopeLocal, &seen)...)
+	if config.IsolatedProfileEnabled() {
+		out = append(out, loadFrom(config.ProjectStatePath(cwd), docNames, ScopeProject, &seen)...)
+		out = append(out, loadFrom(config.ProjectStatePath(cwd), localNames, ScopeLocal, &seen)...)
+	}
 
 	return out
 }
@@ -115,6 +121,9 @@ func loadFrom(dir string, names []string, scope Scope, seen *docSeen) []Source {
 // The shared file handle keeps the content and identity tied to the same target,
 // which matters when a discovered memory path is a symlink.
 func readDoc(path string) (string, os.FileInfo, bool) {
+	if !config.ProfileDiscoveryAllowed(path) {
+		return "", nil, false
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return "", nil, false
@@ -210,6 +219,9 @@ func resolveImports(body, baseDir string, seen map[string]bool, depth int) strin
 			continue
 		}
 		path := resolvePath(target, baseDir)
+		if !config.ProfileDiscoveryAllowed(path) {
+			continue
+		}
 		abs := absOf(path)
 		if seen[abs] {
 			lines[i] = line + "  <!-- skipped: import cycle -->"

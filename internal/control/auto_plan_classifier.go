@@ -55,18 +55,27 @@ func (c *ProviderAutoPlanClassifier) NeedsPlanWithParentTurn(ctx context.Context
 	if c == nil || nilutil.IsNil(c.prov) {
 		return false, "", fmt.Errorf("auto plan classifier is not initialized")
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	requestID := event.NewRequestID()
+	ctx, release, parentTurnID, err := beginClassifierTask(ctx, c.prov, parentTurnID, requestID)
+	if err != nil {
+		return false, "", err
+	}
+	defer release()
 	requestPricing := c.pricing.SnapshotAt(time.Now())
 	var usage *provider.Usage
 	ch, err := c.prov.Stream(ctx, provider.Request{
-		RequestID: requestID,
-		Purpose:   provider.RequestPurposeClassifier,
+		ParentTaskID: strings.TrimSpace(parentTurnID),
+		RequestID:    requestID,
+		Purpose:      provider.RequestPurposeClassifier,
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: autoPlanClassifierPrompt},
 			{Role: provider.RoleUser, Content: fmt.Sprintf("heuristic_score=%d\n\nUSER_REQUEST:\n%s", score, input)},
 		},
-		Temperature: 0,
-		MaxTokens:   80,
+		Temperature:     0,
+		MaxTokens:       80,
+		DisableThinking: true,
 	})
 	if err != nil {
 		return false, "", err
@@ -78,15 +87,42 @@ func (c *ProviderAutoPlanClassifier) NeedsPlanWithParentTurn(ctx context.Context
 	}()
 
 	var text strings.Builder
-	for chunk := range ch {
+	completed := false
+read:
+	for {
+		var chunk provider.Chunk
+		select {
+		case <-ctx.Done():
+			return false, "", provider.CancellationError(ctx)
+		case next, ok := <-ch:
+			if !ok {
+				break read
+			}
+			chunk = next
+		}
 		switch chunk.Type {
 		case provider.ChunkText:
+			if text.Len()+len(chunk.Text) > 2048 {
+				return false, "", fmt.Errorf("decode classifier response: output exceeds limit")
+			}
 			text.WriteString(chunk.Text)
 		case provider.ChunkUsage:
 			usage = chunk.Usage
 		case provider.ChunkError:
+			if chunk.Err == nil {
+				return false, "", fmt.Errorf("classifier stream failed")
+			}
 			return false, "", chunk.Err
+		case provider.ChunkDone:
+			completed = true
+			break read
 		}
+	}
+	if ctx.Err() != nil {
+		return false, "", provider.CancellationError(ctx)
+	}
+	if !completed {
+		return false, "", fmt.Errorf("decode classifier response: incomplete stream")
 	}
 
 	var out struct {

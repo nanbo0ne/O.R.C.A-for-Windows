@@ -345,10 +345,11 @@ func TestNewUnknownKind(t *testing.T) {
 
 func TestNewWithRegisteredKind(t *testing.T) {
 	// Register a mock factory.
-	Register("test-mock-__"+t.Name(), func(cfg Config) (Provider, error) {
+	kind := "test-mock-__" + t.Name()
+	Register(kind, func(cfg Config) (Provider, error) {
 		return nil, nil
 	})
-	// We can't easily unregister, but we can test it doesn't panic.
+	t.Cleanup(func() { delete(registry, kind) })
 }
 
 func TestNewRejectsTypedNilProvider(t *testing.T) {
@@ -357,6 +358,7 @@ func TestNewRejectsTypedNilProvider(t *testing.T) {
 		var p *mockProvider
 		return p, nil
 	})
+	t.Cleanup(func() { delete(registry, kind) })
 
 	_, err := New(kind, Config{})
 	if err == nil {

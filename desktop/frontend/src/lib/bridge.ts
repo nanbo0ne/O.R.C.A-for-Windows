@@ -72,6 +72,13 @@ import type {
   WorkspaceView,
 } from "./types";
 
+export interface BrowserTab { id: string; title: string; url: string; loading: boolean; canGoBack: boolean; canGoForward: boolean; zoom: number; error?: string }
+export interface BrowserDownload { id: string; tabId: string; url: string; filename: string; path: string; status: string; phase?: string; error?: string; bytesReceived: number; totalBytes: number; requiresApproval: boolean }
+export interface BrowserUpload { id: string; tabId: string; url: string; origin: string; documentId: string; generation: number; frameId: string; backendNodeId: number; multiple: boolean; accept: string; status: string; error?: string; requiresApproval: boolean }
+export interface BrowserState { supported: boolean; tabs: BrowserTab[]; activeTabId: string; busy: boolean; downloads: BrowserDownload[]; uploads: BrowserUpload[]; error?: string; approval?: { id: string; origin: string; reason: string }; taskState?: string }
+export interface BrowserCommand { op: string; tabId?: string; value?: string; approvalId?: string; allow?: boolean }
+export interface BrowserViewport { x: number; y: number; width: number; height: number; scale: number; visible: boolean }
+
 const GLOBAL_PROJECT_ORDER_KEY = "__global__";
 
 // AppBindings is derived from the Wails-generated Go → TS method signatures, so
@@ -105,6 +112,10 @@ interface DesktopWindowState {
 // but missing from AppBindings causes a type error here. Fix: add the new method
 // to AppBindings, then run `pnpm typecheck` to verify.
 export interface AppBindings {
+  BrowserAvailable(): Promise<boolean>;
+  GetBrowserState(ownerTabID: string): Promise<BrowserState>;
+  BrowserCommand(ownerTabID: string, command: BrowserCommand): Promise<BrowserState>;
+  SetBrowserViewport(ownerTabID: string, viewport: BrowserViewport): Promise<void>;
   Platform(): Promise<string>;
   GetProductCapabilities(): Promise<ProductCapabilities>;
   Submit(input: string): Promise<void>;
@@ -365,7 +376,7 @@ export interface AppBindings {
 // mismatch would produce false positives. Method-arity and parameter-order drift
 // are caught at the call sites by tsc when components invoke app.<method>(...).
 type AssertNever<T extends never> = T;
-export type _CheckGenToApp = AssertNever<Exclude<keyof typeof GeneratedApp, keyof AppBindings>>;
+export type _CheckGenToApp = AssertNever<Exclude<keyof typeof GeneratedApp, keyof AppBindings | keyof import("./betaBridge").BetaBridge>>;
 
 interface WailsRuntime {
   EventsOn(name: string, cb: (...data: unknown[]) => void): () => void;
@@ -497,6 +508,21 @@ export function onProjectTreeChanged(cb: () => void): () => void {
   return () => {};
 }
 
+export function onBrowserChanged(cb: () => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) return window.runtime.EventsOn("browser:changed", () => cb());
+  return () => {};
+}
+
+export function onBrowserStateChanged(cb: (event: { ownerTabId: string; state: BrowserState }) => void): () => void {
+  if (!realApp() || typeof window === "undefined" || !window.runtime) return () => {};
+  return window.runtime.EventsOn("browser:state", (payload) => {
+    if (!payload || typeof payload !== "object") return;
+    const value = payload as { ownerTabId?: unknown; state?: unknown };
+    if (typeof value.ownerTabId !== "string" || !value.state || typeof value.state !== "object") return;
+    cb({ ownerTabId: value.ownerTabId, state: value.state as BrowserState });
+  });
+}
+
 export function onWelcomeSuggestions(cb: (prompts: string[]) => void): () => void {
   if (realApp() && typeof window !== "undefined" && window.runtime) {
     return window.runtime.EventsOn("welcome:suggestions", (payload) => cb(Array.isArray(payload) ? payload as string[] : []));
@@ -513,6 +539,15 @@ export const app: AppBindings = new Proxy({} as AppBindings, {
     return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
   },
 });
+
+// One native surface: preserve issue order across effect cleanup, remounts and
+// owner changes. Concurrent Wails bindings need not acquire the Go lock in order.
+let browserViewportTail: Promise<void> = Promise.resolve();
+export function setBrowserViewport(ownerTabID: string, viewport: BrowserViewport): Promise<void> {
+  const snapshot = { ...viewport };
+  browserViewportTail = browserViewportTail.catch(() => {}).then(() => app.SetBrowserViewport(ownerTabID, snapshot));
+  return browserViewportTail;
+}
 
 // openExternal opens a URL in the system browser (so links in rendered markdown
 // don't navigate the webview away from the app). Falls back to window.open in the
@@ -1160,6 +1195,10 @@ function makeMockApp(): AppBindings {
     }
   };
   return {
+    async BrowserAvailable() { return false; },
+    async GetBrowserState(_ownerTabID: string) { return { supported: false, tabs: [], activeTabId: "", busy: false, downloads: [], uploads: [], error: t("browser.unsupported") }; },
+    async BrowserCommand(_ownerTabID: string, _command: BrowserCommand) { return { supported: false, tabs: [], activeTabId: "", busy: false, downloads: [], uploads: [], error: t("browser.unsupported") }; },
+    async SetBrowserViewport(_ownerTabID: string, _viewport: BrowserViewport) {},
     async Platform() {
       const override = browserPlatformOverride();
       if (override) return override;

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/fileutil"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
 )
 
@@ -24,6 +26,9 @@ type savedMessage struct {
 
 // Save atomically persists model context and visible conversation together.
 func (s *Session) Save(path string) error {
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return err
+	}
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 	if path == "" {
@@ -69,7 +74,7 @@ func (s *Session) Save(path string) error {
 	}
 	// A failed rename must not fall back to truncating the only good copy.
 	// Both files are siblings; report filter-driver/permission failures intact.
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := fileutil.RenameReplace(tmpPath, path); err != nil {
 		return fmt.Errorf("save session: original preserved; complete recovery copy at %s: %w", tmpPath, err)
 	}
 	return nil
@@ -79,6 +84,9 @@ func (s *Session) Save(path string) error {
 // Missing files surface as os.IsNotExist so callers can fall through to a
 // new session.
 func LoadSession(path string) (*Session, error) {
+	if err := config.ValidateProfileDataPath(path); err != nil {
+		return nil, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -135,6 +143,9 @@ type SessionInfo struct {
 // recognises. A missing directory is not an error — it just means there's
 // nothing to resume yet.
 func ListSessions(dir string) ([]SessionInfo, error) {
+	if err := config.ValidateProfileDataPath(dir); err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -206,6 +217,9 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 // user-role messages so the picker can show "5 turns · 'help me debug the…'".
 // Errors are swallowed — a malformed file just shows up with an empty preview.
 func previewSession(path string) (string, int) {
+	if config.ValidateProfileDataPath(path) != nil {
+		return "", 0
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return "", 0

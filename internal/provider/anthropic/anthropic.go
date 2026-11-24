@@ -28,8 +28,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/netclient"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/monitor"
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/netclient"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/provider"
 )
 
@@ -108,6 +108,9 @@ func New(cfg provider.Config) (provider.Provider, error) {
 }
 
 func newHTTPClient(cfg provider.Config) (*http.Client, error) {
+	if cfg.HTTPClient != nil {
+		return cfg.HTTPClient, nil
+	}
 	spec, _ := cfg.Extra["proxy_spec"].(netclient.ProxySpec)
 	return netclient.NewHTTPClient(spec, netclient.TransportOptions{})
 }

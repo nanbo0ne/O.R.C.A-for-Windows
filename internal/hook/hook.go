@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/config"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/proc"
 	"github.com/nanbo0ne/O.R.C.A-for-Windows/internal/product"
 )
@@ -134,7 +135,7 @@ func GlobalSettingsPath(homeDir string) string {
 
 // ProjectSettingsPath is <root>/.orca/settings.json.
 func ProjectSettingsPath(projectRoot string) string {
-	return filepath.Join(projectRoot, SettingsDirname, SettingsFilename)
+	return config.ProjectStatePath(projectRoot, SettingsFilename)
 }
 
 // LoadOptions configure Load. Project hooks load only when Trusted; global hooks
@@ -182,6 +183,9 @@ func ProjectDefinesHooks(projectRoot string) bool {
 }
 
 func readSettings(path string) *Settings {
+	if config.ValidateProfileDataPath(path) != nil {
+		return nil
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -448,7 +452,7 @@ func home(override string) string {
 	if override != "" {
 		return override
 	}
-	if h, err := os.UserHomeDir(); err == nil {
+	if h, err := config.ProfileHomeDir(); err == nil {
 		return h
 	}
 	return ""

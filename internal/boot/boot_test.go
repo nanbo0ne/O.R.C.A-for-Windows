@@ -69,7 +69,7 @@ api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `)
 	writeFile(t, dir, "DEEPSEEK_ORCA.md", "Project rule: always run go vet before committing.")
 
-	ctrl, err := Build(context.Background(), Options{}) // RequireKey false: no network/key needed
+	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: dir}) // RequireKey false: no network/key needed
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -122,7 +122,7 @@ model = "x"
 api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `)
 
-			ctrl, err := Build(context.Background(), Options{EnhancedMode: tc.enhanced})
+			ctrl, err := Build(context.Background(), Options{EnhancedMode: tc.enhanced, WorkspaceRoot: dir})
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}
@@ -174,7 +174,7 @@ model = "x"
 api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `)
 
-	ctrl, err := Build(context.Background(), Options{PromptMode: PromptModeAssistant})
+	ctrl, err := Build(context.Background(), Options{PromptMode: PromptModeAssistant, WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -207,7 +207,7 @@ base_url = "https://example.invalid"
 model = "x"
 api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `)
-	ctrl, err := Build(context.Background(), Options{RuntimeProfile: RuntimeProfileOrca})
+	ctrl, err := Build(context.Background(), Options{RuntimeProfile: RuntimeProfileOrca, WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -237,6 +237,7 @@ api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 	build := func(profile string) *control.Controller {
 		t.Helper()
 		ctrl, err := Build(context.Background(), Options{
+			WorkspaceRoot:  dir,
 			RuntimeProfile: profile,
 			ExtraTools:     []tool.Tool{profileTestTool{name: "conversation_dispatch"}},
 		})
@@ -293,7 +294,7 @@ api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 		t.Fatal(err)
 	}
 
-	assistantCtrl, err := Build(context.Background(), Options{PromptMode: PromptModeAssistant})
+	assistantCtrl, err := Build(context.Background(), Options{PromptMode: PromptModeAssistant, WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build assistant: %v", err)
 	}
@@ -303,7 +304,7 @@ api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 		t.Fatalf("assistant memory profile = %q index=%q, want assistant only", assistantMem.Profile, assistantMem.Index)
 	}
 
-	normalCtrl, err := Build(context.Background(), Options{PromptMode: PromptModeNormal})
+	normalCtrl, err := Build(context.Background(), Options{PromptMode: PromptModeNormal, WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build normal: %v", err)
 	}
@@ -316,7 +317,7 @@ api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 		t.Fatalf("normal writable store = %q, want shared %q", normalMem.Store.Dir, normalMem.SharedStore.Dir)
 	}
 
-	engineeringCtrl, err := Build(context.Background(), Options{PromptMode: PromptModeNormal, MemoryProfile: memory.ProfileSharedAgent})
+	engineeringCtrl, err := Build(context.Background(), Options{PromptMode: PromptModeNormal, MemoryProfile: memory.ProfileSharedAgent, WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build engineering memory profile: %v", err)
 	}
@@ -350,7 +351,7 @@ model = "x"
 api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `)
 
-	ctrl, err := Build(context.Background(), Options{})
+	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -389,7 +390,7 @@ kind = "boot-subagent-test"
 model = "x"
 `)
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -556,7 +557,7 @@ kind = "boot-headless-test"
 model = "x"
 `)
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -753,7 +754,7 @@ api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `)
 
 	sessionDir := filepath.Join(t.TempDir(), "desktop-workspace-sessions")
-	ctrl, err := Build(context.Background(), Options{SessionDir: sessionDir})
+	ctrl, err := Build(context.Background(), Options{SessionDir: sessionDir, WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -794,7 +795,7 @@ api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `)
 	writeFile(t, dir, ".orca/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
 
-	ctrl, err := Build(context.Background(), Options{})
+	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -844,6 +845,8 @@ func TestBuildOmitsDisabledSkillsFromPromptAndRuntimeList(t *testing.T) {
 	dir := robustTempDir(t)
 	home := robustTempDir(t)
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Chdir(dir)
 	writeFile(t, dir, "deepseek-orca.toml", `
@@ -867,7 +870,7 @@ api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `)
 	writeFile(t, dir, ".orca/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
 
-	ctrl, err := Build(context.Background(), Options{})
+	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -897,6 +900,8 @@ func TestBuildOmitsExcludedSkillRootsFromPromptAndRuntimeList(t *testing.T) {
 	dir := robustTempDir(t)
 	home := robustTempDir(t)
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Chdir(dir)
 	excluded := filepath.Join(home, ".agents", "skills")
@@ -922,7 +927,7 @@ model = "x"
 api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `, excluded))
 
-	ctrl, err := Build(context.Background(), Options{})
+	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -964,7 +969,7 @@ model = "x"
 api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `)
 
-	ctrl, err := Build(context.Background(), Options{})
+	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -999,7 +1004,7 @@ model = "x"
 api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 `)
 
-	ctrl, err := Build(context.Background(), Options{})
+	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -1219,7 +1224,7 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 		}
 	})
 
-	ctrl, err := Build(context.Background(), Options{Sink: sink})
+	ctrl, err := Build(context.Background(), Options{Sink: sink, WorkspaceRoot: proj})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -1397,7 +1402,7 @@ tier = "eager"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	ctrl, err := Build(ctx, Options{})
+	ctrl, err := Build(ctx, Options{WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -1445,7 +1450,7 @@ tier = "lazy"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	ctrl, err := Build(ctx, Options{})
+	ctrl, err := Build(ctx, Options{WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -1494,6 +1499,7 @@ api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	ctrl, err := Build(ctx, Options{
+		WorkspaceRoot: dir,
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.Notice {
 				notices = append(notices, e)
@@ -1567,7 +1573,7 @@ api_key_env = "DEEPSEEK_ORCA_TEST_KEY_UNSET"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	ctrl, err := Build(ctx, Options{})
+	ctrl, err := Build(ctx, Options{WorkspaceRoot: dir})
 	if err != nil {
 		t.Fatalf("Build should not block on warm codegraph with legacy eager tier: %v", err)
 	}
@@ -1649,6 +1655,7 @@ tier = "eager"
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	ctrl, err := Build(ctx, Options{
+		WorkspaceRoot: dir,
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.Notice {
 				notices = append(notices, e)

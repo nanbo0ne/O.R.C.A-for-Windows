@@ -60,14 +60,20 @@ func (c *ProviderRiskClassifier) AssessWithParentTurn(ctx context.Context, input
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	requestID := event.NewRequestID()
+	ctx, release, parentTurnID, err := beginClassifierTask(ctx, c.prov, parentTurnID, requestID)
+	if err != nil {
+		return permission.RiskAssessment{}, err
+	}
+	defer release()
 	requestPricing := c.pricing.SnapshotAt(time.Now())
 	payload, err := json.Marshal(input)
 	if err != nil {
 		return permission.RiskAssessment{}, fmt.Errorf("encode risk input: %w", err)
 	}
 	ch, err := c.prov.Stream(ctx, provider.Request{
-		RequestID: requestID,
-		Purpose:   provider.RequestPurposeClassifier,
+		ParentTaskID: strings.TrimSpace(parentTurnID),
+		RequestID:    requestID,
+		Purpose:      provider.RequestPurposeClassifier,
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: riskClassifierPrompt},
 			{Role: provider.RoleUser, Content: string(payload)},
@@ -110,6 +116,7 @@ read:
 			return permission.RiskAssessment{}, chunk.Err
 		case provider.ChunkDone:
 			completed = true
+			break read
 		}
 	}
 	if usage != nil && c.usageSink != nil {
@@ -117,6 +124,9 @@ read:
 	}
 	if !completed {
 		return permission.RiskAssessment{}, fmt.Errorf("decode risk classifier response: incomplete stream")
+	}
+	if ctx.Err() != nil {
+		return permission.RiskAssessment{}, provider.CancellationError(ctx)
 	}
 
 	var out struct {
