@@ -99,7 +99,7 @@ jobs:
         include:
           # One universal macOS build (Intel + Apple Silicon) on a single arm64
           # runner — avoids the scarce/slow macos-13 Intel runner.
-          - { runner: macos-14, platform: darwin/universal, name: darwin-universal }
+          - { runner: macos-15, platform: darwin/universal, name: darwin-universal }
           - { runner: windows-latest, platform: windows/amd64, name: windows-amd64 }
           - { runner: ubuntu-22.04, platform: linux/amd64, name: linux-amd64 }
     runs-on: ${{ matrix.runner }}
