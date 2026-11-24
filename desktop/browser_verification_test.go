@@ -479,6 +479,7 @@ func TestBrowserCanvasWaitsForApprovedPanelRestoration(t *testing.T) {
 }
 
 func TestBrowserShutdownUnconfirmedRetainsSnapshot(t *testing.T) {
+	skipOnMacOS(t, "the browser host is Windows-only and macOS /var is a system symlink to /private/var")
 	for _, legacy := range []bool{false, true} {
 		t.Run(fmt.Sprint(legacy), func(t *testing.T) {
 			s, b, id := browserFixture(t)

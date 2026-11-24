@@ -2,11 +2,33 @@
 [CmdletBinding()]
 param(
     [string]$FixtureRoot,
-    [string]$NodeExecutable = (Join-Path ([Environment]::GetFolderPath('UserProfile')) '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe'),
-    [string]$NpmCli = (Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'nodejs/node_modules/npm/bin/npm-cli.js')
+    [string]$NodeExecutable = '',
+    [string]$NpmCli = ''
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Prefer the local Codex runtime when present; otherwise fall back to the
+# installed Node/npm so the fixture also runs on a plain CI runner.
+if (-not $NodeExecutable) {
+    $NodeExecutable = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe'
+    if (-not [IO.File]::Exists($NodeExecutable)) {
+        $command = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command) { $NodeExecutable = $command.Source }
+    }
+}
+if (-not $NpmCli) {
+    $NpmCli = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'nodejs/node_modules/npm/bin/npm-cli.js'
+    if (-not [IO.File]::Exists($NpmCli)) {
+        $scriptDir = Split-Path -Parent $NodeExecutable
+        foreach ($candidate in @(
+            (Join-Path $scriptDir 'node_modules/npm/bin/npm-cli.js'),
+            (Join-Path $scriptDir '../node_modules/npm/bin/npm-cli.js'),
+            (Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'nodejs/node_modules/npm/bin/npm-cli.js')
+        )) {
+            if ([IO.File]::Exists($candidate)) { $NpmCli = [IO.Path]::GetFullPath($candidate); break }
+        }
+    }
+}
 . (Join-Path $PSScriptRoot 'orca-source-snapshot.ps1')
 . (Join-Path $PSScriptRoot 'orca-frontend-snapshot.ps1')
 if (-not $FixtureRoot) { $FixtureRoot = Join-Path (Join-Path $PSScriptRoot '../.tmp') ('frontend-snapshot-tests-' + [guid]::NewGuid().ToString('N')) }

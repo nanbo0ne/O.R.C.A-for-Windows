@@ -43,6 +43,7 @@ func withBetaProfile(t *testing.T) (string, string) {
 }
 
 func TestBetaIsolationPrecedesConfigAndPreservesRealHome(t *testing.T) {
+	skipOnMacOS(t, "beta profile isolation is not implemented on macOS")
 	base, root := withBetaProfile(t)
 	home, _ := os.UserHomeDir()
 	beforeHome, beforeProfile := os.Getenv("HOME"), os.Getenv("USERPROFILE")
@@ -158,6 +159,7 @@ func TestBetaIdentityAndUpdateIsolation(t *testing.T) {
 }
 
 func TestBetaRejectsRelativeConfigRoot(t *testing.T) {
+	skipOnMacOS(t, "os.UserConfigDir ignores APPDATA and XDG_CONFIG_HOME on macOS, so the relative root cannot be injected")
 	withBetaProfile(t)
 	t.Setenv("APPDATA", "relative")
 	t.Setenv("XDG_CONFIG_HOME", "relative")

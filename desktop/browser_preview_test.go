@@ -7,6 +7,7 @@ import (
 )
 
 func TestBrowserPreviewIsolation(t *testing.T) {
+	skipOnMacOS(t, "the browser host is Windows-only and macOS /var is a system symlink to /private/var")
 	oldChannel := channel
 	channel = browserPreviewChannel
 	t.Cleanup(func() { channel = oldChannel })

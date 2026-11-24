@@ -23,6 +23,7 @@ func syntheticUploadFile(t *testing.T) string {
 	return path
 }
 func TestBrowserUploadSnapshotIsImmutableAndPrivate(t *testing.T) {
+	skipOnMacOS(t, "the browser host is Windows-only and macOS /var is a system symlink to /private/var")
 	source := syntheticUploadFile(t)
 	snap, err := newBrowserUploadSnapshot(source, t.TempDir())
 	if err != nil {
@@ -86,6 +87,7 @@ func TestBrowserUploadSourceHandleRejectsReplacementAndMutation(t *testing.T) {
 }
 
 func TestBrowserUploadSnapshotRetainedOnUncertainClose(t *testing.T) {
+	skipOnMacOS(t, "the browser host is Windows-only and macOS /var is a system symlink to /private/var")
 	s, b, id := browserFixture(t)
 	u := browserhost.Upload{ID: "u", TabID: id, URL: "https://example.test", Origin: "https://example.test", DocumentID: "d", Generation: 2, Status: "pending"}
 	s.onEvent(browserhost.Event{Kind: "upload", TabID: id, Upload: &u})
@@ -117,6 +119,7 @@ func TestBrowserUploadSnapshotRetainedOnUncertainClose(t *testing.T) {
 }
 
 func TestBrowserDownloadDestinationValidation(t *testing.T) {
+	skipOnMacOS(t, "the browser host is Windows-only and macOS /var is a system symlink to /private/var")
 	root := t.TempDir()
 	if err := browserDownloadPath(filepath.Join(root, "new.txt")); err != nil {
 		t.Fatal("regular local destination rejected", err)
@@ -128,6 +131,7 @@ func TestBrowserDownloadDestinationValidation(t *testing.T) {
 	}
 }
 func TestBrowserUploadExactUserApprovalAndOwnership(t *testing.T) {
+	skipOnMacOS(t, "the browser host is Windows-only and macOS /var is a system symlink to /private/var")
 	s, b, id := browserFixture(t)
 	_ = s.register("other", "other-profile")
 	u := browserhost.Upload{ID: "upload-1", TabID: id, URL: "https://example.test/form", Origin: "https://example.test", DocumentID: "document", Generation: 3, Status: "pending", RequiresApproval: true}
@@ -186,6 +190,7 @@ func TestBrowserUploadExactUserApprovalAndOwnership(t *testing.T) {
 	}
 }
 func TestBrowserUploadChangedDocumentAndSnapshotRejected(t *testing.T) {
+	skipOnMacOS(t, "the browser host is Windows-only and macOS /var is a system symlink to /private/var")
 	for _, mode := range []string{"document", "snapshot", "deny"} {
 		t.Run(mode, func(t *testing.T) {
 			s, b, id := browserFixture(t)
@@ -252,6 +257,7 @@ func TestBrowserUploadWaitDoesNotInvalidateNativeRequest(t *testing.T) {
 	}
 }
 func TestBrowserManualAndApprovedAgentPopup(t *testing.T) {
+	skipOnMacOS(t, "the browser host is Windows-only and macOS /var is a system symlink to /private/var")
 	for _, agentPopup := range []bool{false, true} {
 		t.Run(map[bool]string{false: "manual", true: "agent"}[agentPopup], func(t *testing.T) {
 			s, _, id := browserFixture(t)

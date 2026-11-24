@@ -7,6 +7,7 @@ import (
 )
 
 func TestOwnedProfileClearPreservesSiblingStores(t *testing.T) {
+	skipOnMacOS(t, "the DeepSeek web beta is Windows-only and macOS /var is a system symlink to /private/var")
 	root := t.TempDir()
 	p, err := OpenProfile(root)
 	if err != nil {
@@ -44,6 +45,7 @@ func TestOwnedProfileClearPreservesSiblingStores(t *testing.T) {
 }
 
 func TestProfileRefusesUnownedPathsAndCorruptMarker(t *testing.T) {
+	skipOnMacOS(t, "the DeepSeek web beta is Windows-only and macOS /var is a system symlink to /private/var")
 	root := t.TempDir()
 	if _, err := OpenProfile("relative"); err == nil {
 		t.Fatal("relative root accepted")
@@ -75,6 +77,7 @@ func TestProfileRefusesUnownedPathsAndCorruptMarker(t *testing.T) {
 }
 
 func TestProfileRefusesSymlinkEscape(t *testing.T) {
+	skipOnMacOS(t, "the DeepSeek web beta is Windows-only and macOS /var is a system symlink to /private/var")
 	p, err := OpenProfile(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

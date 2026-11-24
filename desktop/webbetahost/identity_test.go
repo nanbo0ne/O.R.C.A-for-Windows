@@ -23,6 +23,7 @@ func TestIdleLogoutCannotResumeOldIdentity(t *testing.T) {
 }
 
 func TestLostIdentitySurvivesRestartWithoutReadingLoginData(t *testing.T) {
+	skipOnMacOS(t, "the DeepSeek web beta is Windows-only and macOS /var is a system symlink to /private/var")
 	profile := t.TempDir()
 	l, err := loadIdentityLatch(profile)
 	if err != nil {
@@ -44,6 +45,7 @@ func TestLostIdentitySurvivesRestartWithoutReadingLoginData(t *testing.T) {
 }
 
 func TestLoginAdoptionOnlyRemovesOwnedIdentityMarker(t *testing.T) {
+	skipOnMacOS(t, "the DeepSeek web beta is Windows-only and macOS /var is a system symlink to /private/var")
 	p, err := OpenProfile(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

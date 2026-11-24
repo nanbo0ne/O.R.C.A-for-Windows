@@ -12,6 +12,7 @@ import (
 )
 
 func TestBetaPortableArchiveSyntheticFixtures(t *testing.T) {
+	skipOnMacOS(t, "the beta build-script fixture relies on Windows PowerShell and reparse-point checks")
 	pwsh, err := exec.LookPath("pwsh")
 	if err != nil {
 		t.Skip("PowerShell 7 is required for the beta build-script fixture")

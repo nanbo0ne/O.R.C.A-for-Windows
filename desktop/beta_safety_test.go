@@ -29,6 +29,7 @@ func writeBetaFixture(t *testing.T, path, body string) {
 }
 
 func TestBetaInitializationReportsFilesystemStage(t *testing.T) {
+	skipOnMacOS(t, "beta profile isolation is not implemented on macOS")
 	_, root := withBetaProfile(t)
 	t.Logf("fixture TEMP=%q TMP=%q beta=%q", os.Getenv("TEMP"), os.Getenv("TMP"), root)
 	writeBetaFixture(t, filepath.Join(root, "Local"), "not a directory")
@@ -42,6 +43,7 @@ func TestBetaInitializationReportsFilesystemStage(t *testing.T) {
 }
 
 func TestBetaRejectsLinkedParentBeforeCreatingProfile(t *testing.T) {
+	skipOnMacOS(t, "beta profile isolation is not implemented on macOS")
 	base, _ := withBetaProfile(t)
 	target := filepath.Join(base, "official-profile")
 	if err := os.MkdirAll(target, 0700); err != nil {
@@ -63,6 +65,7 @@ func TestBetaRejectsLinkedParentBeforeCreatingProfile(t *testing.T) {
 }
 
 func TestBetaOpenedProjectDoesNotImportCredentialsOrState(t *testing.T) {
+	skipOnMacOS(t, "beta profile isolation is not implemented on macOS")
 	base, root := withBetaProfile(t)
 	workspace := filepath.Join(base, "opened-project")
 	home, err := os.UserHomeDir()
@@ -186,6 +189,7 @@ func TestBetaOpenedProjectDoesNotImportCredentialsOrState(t *testing.T) {
 }
 
 func TestBetaSessionAndInstallerBoundaries(t *testing.T) {
+	skipOnMacOS(t, "beta profile isolation is not implemented on macOS")
 	base, root := withBetaProfile(t)
 	if err := initializeBeta(); err != nil {
 		t.Fatal(err)
