@@ -5,7 +5,7 @@ import community from '../data/community.json';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const repo = 'https://github.com/nanbo0ne/O.R.C.A-for-Windows';
 
-const desktopVer = '3.0.15';
+const desktopVer = '3.0.16';
 const R2 = `https://orca.aichat.diy/releases/desktop-v${desktopVer}`;
 
 const fmtN = (n) => Number(n).toLocaleString('en-US');
@@ -14,7 +14,7 @@ const half = Math.ceil(community.list.length / 2);
 const rowA = community.list.slice(0, half);
 const rowB = community.list.slice(half);
 
-const desc = "O.R.C.A. 3.0.15 is an open-source AI workspace for coding, research, image attachments, files, and office artifacts, with cloud providers and configured external local services. It brings Assistant, Coding, ORCA Agent, memory, and automation together in Modern and Classic layouts.";
+const desc = "O.R.C.A. 3.0.16 is an open-source AI workspace for coding, research, image attachments, files, and office artifacts, with cloud providers and configured external local services. It brings Assistant, Coding, ORCA Agent, memory, and automation together in Modern and Classic layouts.";
 const ld = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -68,7 +68,7 @@ const ld = {
         <span class="l-en">Choose cloud providers, then use O.R.C.A to code, research, analyze images you attach, and create work artifacts. External compatible local services remain available when configured.</span>
         <span class="l-zh">自由选择云端供应商，使用 O.R.C.A 编程、调研、分析你附上的图片和制作办公产物；已配置的外部兼容本地服务仍可使用。</span>
       </p>
-      <p class="reveal"><span class="l-en">3.0.13 keeps the readable conversation after context is condensed, improves context-usage reporting, and adds a live work overview. Guidance is clearer, with better image and file handling, pasting, and permission dialogs on smaller windows. The overview shows only activity the app actually observes. <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.15.md`}>Release notes</a></span><span class="l-zh">3.0.13 在上下文整理后仍保留可读的完整对话，改进上下文用量显示，并新增实时工作进度概览。引导更清楚，图片、文件、粘贴体验和小屏权限窗口也得到改进。概览只显示应用实际观察到的活动。<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.15.md`}>发布说明</a></span></p>
+      <p class="reveal"><span class="l-en">3.0.13 keeps the readable conversation after context is condensed, improves context-usage reporting, and adds a live work overview. Guidance is clearer, with better image and file handling, pasting, and permission dialogs on smaller windows. The overview shows only activity the app actually observes. <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.16.md`}>Release notes</a></span><span class="l-zh">3.0.13 在上下文整理后仍保留可读的完整对话，改进上下文用量显示，并新增实时工作进度概览。引导更清楚，图片、文件、粘贴体验和小屏权限窗口也得到改进。概览只显示应用实际观察到的活动。<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.16.md`}>发布说明</a></span></p>
       <div class="hero-cta reveal" style="--d:0.18s">
         <a class="btn btn-dark" data-os-dl data-goto="desktop" href="#start"><span class="l-en">Download for <span class="os-name">macOS</span></span><span class="l-zh">下载 <span class="os-name">macOS</span> 版</span></a>
         <span class="install"><span class="ps1">$</span>npm i -g orca-agent<button data-copy="npm i -g orca-agent">Copy</button></span>
@@ -241,7 +241,7 @@ const ld = {
 
     <div class="dl reveal" style="--d:0.14s">
       <p class="dl-note"><span class="l-en">Choose your desktop package and check signatures and checksums on the <a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>Release page</a>. Flash retains <code>deepseek/deepseek-flash</code>: native vision, 1M context, up to 384K output, tools, and JSON. Old Flash/Vision names are aliases; Pro remains text-only.</span><span class="l-zh">按平台选择桌面安装包，并核对签名和校验表，详见 <a href={`${repo}/releases/tag/desktop-v${desktopVer}`}>Release 页面</a>。Flash 沿用 <code>deepseek/deepseek-flash</code>，支持原生视觉、1M 上下文、最大 384K 输出、工具及 JSON；旧 Flash/Vision 名称为别名，Pro 保持文本模型。</span></p>
-      <p class="dl-note"><span class="l-en">3.0.13 does not repeat completed 3.0.5 Flash migration; custom providers and deliberate Pro choices are preserved. Effort remains low/high/max, auto = high. <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.15.md`}>Bilingual notes</a>, <a href={`${base}/docs/`}>model and RMB pricing reference</a>, and <a href={`${repo}/blob/main/docs/audits/desktop-v3.0.15-verification.md`}>verification</a>.</span><span class="l-zh">3.0.13 不重复 3.0.5 已完成的 Flash 迁移，自定义供应商及主动选择的 Pro 保留。思考强度仍为 low/high/max，auto = high。详见<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.15.md`}>双语说明</a>、<a href={`${base}/docs/`}>模型与人民币价格参考</a>及<a href={`${repo}/blob/main/docs/audits/desktop-v3.0.15-verification.md`}>验收记录</a>。</span></p>
+      <p class="dl-note"><span class="l-en">3.0.13 does not repeat completed 3.0.5 Flash migration; custom providers and deliberate Pro choices are preserved. Effort remains low/high/max, auto = high. <a href={`${repo}/blob/main/docs/releases/desktop-v3.0.16.md`}>Bilingual notes</a>, <a href={`${base}/docs/`}>model and RMB pricing reference</a>, and <a href={`${repo}/blob/main/docs/audits/desktop-v3.0.16-verification.md`}>verification</a>.</span><span class="l-zh">3.0.13 不重复 3.0.5 已完成的 Flash 迁移，自定义供应商及主动选择的 Pro 保留。思考强度仍为 low/high/max，auto = high。详见<a href={`${repo}/blob/main/docs/releases/desktop-v3.0.16.md`}>双语说明</a>、<a href={`${base}/docs/`}>模型与人民币价格参考</a>及<a href={`${repo}/blob/main/docs/audits/desktop-v3.0.16-verification.md`}>验收记录</a>。</span></p>
       <div class="dl-tabs" role="tablist">
         <button class="dl-tab active" type="button" data-pane="npm" role="tab">npm</button>
         <button class="dl-tab" type="button" data-pane="brew" role="tab">Homebrew</button>
