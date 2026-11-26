@@ -219,8 +219,8 @@ func TestReleaseDesktopVersionMetadataAgrees(t *testing.T) {
 		} `json:"info"`
 	}
 	readJSON("wails.json", &wails)
-	if wails.Info.ProductVersion != "3.0.18" {
-		t.Fatalf("Wails version = %q, want 3.0.18", wails.Info.ProductVersion)
+	if wails.Info.ProductVersion != "3.0.19" {
+		t.Fatalf("Wails version = %q, want 3.0.19", wails.Info.ProductVersion)
 	}
 	var windows struct {
 		Fixed map[string]string            `json:"fixed"`

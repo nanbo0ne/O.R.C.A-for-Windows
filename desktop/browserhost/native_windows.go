@@ -567,6 +567,33 @@ func (h *Host) configure(t *nativeTab) error {
 	}); err != nil {
 		return err
 	}
+	// JavaScript dialogs must never block the page. The agent cannot see or
+	// answer a native modal, so accept it and record it as an event the task
+	// log can show. Default dialogs are already disabled, which without a
+	// handler leaves the renderer waiting.
+	if err := register(t.view.Vtbl.AddScriptDialogOpening, func(sender, arg uintptr) uintptr {
+		a := (*wv.ICoreWebView2ScriptDialogOpeningEventArgs)(unsafe.Pointer(arg))
+		// get_Kind returns a COREWEBVIEW2_SCRIPT_DIALOG_KIND enum, not a string.
+		var code int32
+		_ = raw(unsafe.Pointer(a), a.Vtbl.GetKind, uintptr(unsafe.Pointer(&code)))
+		kind := map[int32]string{0: "alert", 1: "confirm", 2: "prompt"}[code]
+		if kind == "" {
+			kind = "dialog"
+		}
+		message := readString(unsafe.Pointer(a), a.Vtbl.GetMessage)
+		// prompt(): the answer the page receives is its own default text, so an
+		// empty wide string is what a person dismissing the box would leave.
+		if kind == "prompt" {
+			empty := windows.StringToUTF16Ptr("")
+			_ = raw(unsafe.Pointer(a), a.Vtbl.PutDefaultText, uintptr(unsafe.Pointer(empty)))
+			runtime.KeepAlive(empty)
+		}
+		_ = raw(unsafe.Pointer(a), a.Vtbl.Accept)
+		h.event(Event{TabID: t.id, Kind: "dialog", URL: readString(unsafe.Pointer(t.view), t.view.Vtbl.GetSource), Error: kind + ": " + message})
+		return 0
+	}); err != nil {
+		return err
+	}
 	if err := register(t.view.Vtbl.AddProcessFailed, func(sender, arg uintptr) uintptr {
 		t.generation++
 		h.event(Event{TabID: t.id, Kind: "error", Error: "Browser renderer stopped. Close this tab and open it again."})
@@ -749,12 +776,16 @@ func (h *Host) Observe(ctx context.Context, id string) (Observation, error) {
 		ViewportWidth     float64   `json:"viewportWidth"`
 		ViewportHeight    float64   `json:"viewportHeight"`
 		ScreenshotBlocked string    `json:"screenshotBlocked"`
+		Frames            int       `json:"frames"`
+		ShadowRoots       int       `json:"shadowRoots"`
 	}
 	if err = json.Unmarshal(data, &snapshot); err != nil {
 		return o, err
 	}
 	o.Text = snapshot.Text
 	o.Elements = snapshot.Elements
+	o.Frames = snapshot.Frames
+	o.ShadowRoots = snapshot.ShadowRoots
 	o.ScreenshotBlocked = snapshot.ScreenshotBlocked
 	o.ViewportWidth, o.ViewportHeight = snapshot.ViewportWidth, snapshot.ViewportHeight
 	if visible && o.ScreenshotBlocked == "" {
@@ -775,10 +806,9 @@ func (h *Host) Observe(ctx context.Context, id string) (Observation, error) {
 			}
 		}
 	}
-	unchanged, checkErr := h.evaluate(ctx, id, "window.__orcaObservationRevision===0")
-	if checkErr != nil || string(unchanged) != "true" {
-		return Observation{}, ErrStaleObservation
-	}
+	// A live page mutates constantly (timers, ads, animations). Revision drift is
+	// not staleness: only a new document invalidates the observation, and each
+	// action re-checks that its own target is still attached.
 	err = h.call(ctx, func() error {
 		t, e := h.tab(id)
 		if e != nil {
@@ -825,15 +855,16 @@ func (h *Host) Execute(ctx context.Context, id string, a Action) error {
 		}
 	}
 	x, y := a.X, a.Y
-	check, err := h.evaluate(ctx, id, "window.__orcaObservationRevision===0")
-	if err != nil || string(check) != "true" {
-		return ErrStaleObservation
-	}
 	if a.ElementID != "" {
 		key, _ := json.Marshal(a.ElementID)
-		data, e := h.evaluate(ctx, id, "(()=>{const e=window.__orcaObserved?.get("+string(key)+");if(!e||!e.isConnected)throw Error('stale element');const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
+		// Null means the approved target is gone or no longer matches what was
+		// observed; the caller re-observes instead of acting on a guess.
+		data, e := h.evaluate(ctx, id, "(()=>{const e=window.__orcaObserved?.get("+string(key)+");if(!e||!e.isConnected||!window.__orcaSig?.has(e)||window.__orcaSig.get(e)!==window.__orcaSigOf(e))return null;const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
 		if e != nil {
 			return e
+		}
+		if string(data) == "null" {
+			return ErrStaleObservation
 		}
 		var p struct{ X, Y float64 }
 		if e = json.Unmarshal(data, &p); e != nil {
@@ -863,11 +894,33 @@ func (h *Host) Execute(ctx context.Context, id string, a Action) error {
 		}
 	}
 	switch a.Kind {
-	case "click", "type", "select":
-		if a.Kind == "click" {
-			if err = h.inputPair(ctx, id, "Input.dispatchMouseEvent", map[string]any{"x": x, "y": y, "button": "left", "clickCount": 1}, "mousePressed", "mouseReleased"); err != nil {
+	case "waitfor":
+		return h.waitFor(ctx, id, a.Text, a.DeltaY)
+	case "upload":
+		return h.uploadFiles(ctx, id, a.ElementID, a.Text)
+	case "click", "dblclick", "hover", "type", "clear", "select":
+		if a.Kind == "click" || a.Kind == "dblclick" || a.Kind == "hover" {
+			count := 1
+			if a.Kind == "dblclick" {
+				count = 2
+			}
+			// Move first so hover-driven menus open the way a person triggers them.
+			src := "mouseMoved"
+			if a.Kind == "hover" {
+				src = "mouseMoved"
+			}
+			if _, err = h.cdp(ctx, id, "Input.dispatchMouseEvent", map[string]any{"type": src, "x": x, "y": y, "button": "none"}); err != nil {
 				return err
 			}
+			if a.Kind != "hover" {
+				if err = h.inputPair(ctx, id, "Input.dispatchMouseEvent", map[string]any{"x": x, "y": y, "button": "left", "clickCount": count}, "mousePressed", "mouseReleased"); err != nil {
+					return err
+				}
+			}
+		}
+		if a.Kind == "clear" {
+			key, _ := json.Marshal(a.ElementID)
+			_, err = h.evaluate(ctx, id, `(()=>{const e=window.__orcaObserved?.get(`+string(key)+`);if(!e?.isConnected||e.type==='password'||e.type==='file')throw Error('protected or stale input');if(e instanceof HTMLInputElement||e instanceof HTMLTextAreaElement)Object.getOwnPropertyDescriptor(e.constructor.prototype,'value').set.call(e,'');else if(e.isContentEditable)e.textContent='';else throw Error('not editable');e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));})()`)
 		}
 		if a.Kind == "type" {
 			key, _ := json.Marshal(a.ElementID)
@@ -879,21 +932,190 @@ func (h *Host) Execute(ctx context.Context, id string, a Action) error {
 		if a.Kind == "select" {
 			key, _ := json.Marshal(a.ElementID)
 			value, _ := json.Marshal(a.Text)
-			_, err = h.evaluate(ctx, id, "(()=>{const e=window.__orcaObserved?.get("+string(key)+");const v="+string(value)+";if(!(e instanceof HTMLSelectElement)||!e.isConnected||e.disabled||![...e.options].some(o=>o.value===v&&!o.disabled))throw Error('select option unavailable');e.value=v;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));})()")
+			_, err = h.evaluate(ctx, id, "(()=>{const e=window.__orcaObserved?.get("+string(key)+");const v="+string(value)+";if(!(e instanceof HTMLSelectElement)||!e.isConnected||e.disabled)throw Error('select option unavailable');const o=[...e.options].find(o=>(o.value===v||o.label.trim()===v||o.text.trim()===v)&&!o.disabled);if(!o)throw Error('select option unavailable');e.value=o.value;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));})()")
 		}
 	case "scroll":
 		_, err = h.cdp(ctx, id, "Input.dispatchMouseEvent", map[string]any{"type": "mouseWheel", "x": x, "y": y, "deltaX": 0, "deltaY": a.DeltaY})
 	case "key":
-		keys := map[string]int{"Enter": 13, "Tab": 9, "Escape": 27, "Backspace": 8, "ArrowDown": 40, "ArrowUp": 38, "ArrowLeft": 37, "ArrowRight": 39}
-		code, ok := keys[a.Key]
+		code, ok := browserKeyCode(a.Key)
 		if !ok {
 			return errors.New("unsupported browser key")
 		}
-		err = h.inputPair(ctx, id, "Input.dispatchKeyEvent", map[string]any{"key": a.Key, "windowsVirtualKeyCode": code}, "keyDown", "keyUp")
+		params := map[string]any{"key": a.Key, "code": browserKeyDomCode(a.Key), "windowsVirtualKeyCode": code}
+		if mods := browserKeyModifiers(a.Text); mods != 0 {
+			params["modifiers"] = mods
+		}
+		err = h.inputPair(ctx, id, "Input.dispatchKeyEvent", params, "keyDown", "keyUp")
 	default:
 		return errors.New("unsupported browser action")
 	}
 	return err
+}
+
+// browserKeyCode maps the keys an agent is allowed to press onto Windows
+// virtual-key codes. Anything outside this set is refused rather than guessed.
+func browserKeyCode(key string) (int, bool) {
+	named := map[string]int{
+		"Enter": 13, "Tab": 9, "Escape": 27, "Backspace": 8, "Space": 32, " ": 32,
+		"ArrowDown": 40, "ArrowUp": 38, "ArrowLeft": 37, "ArrowRight": 39,
+		"Home": 36, "End": 35, "PageUp": 33, "PageDown": 34, "Delete": 46, "Insert": 45,
+	}
+	if code, ok := named[key]; ok {
+		return code, true
+	}
+	if len(key) == 1 {
+		ch := key[0]
+		if ch >= 'a' && ch <= 'z' {
+			return int(ch - 'a' + 'a'), true
+		}
+		if ch >= 'A' && ch <= 'Z' {
+			return int(ch), true
+		}
+		if ch >= '0' && ch <= '9' {
+			return int(ch), true
+		}
+	}
+	return 0, false
+}
+
+func browserKeyDomCode(key string) string {
+	switch key {
+	case "Enter", "Tab", "Escape", "Backspace", "Space", " ", "Delete", "Insert", "Home", "End", "PageUp", "PageDown",
+		"ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight":
+		switch key {
+		case " ":
+			return "Space"
+		case "Space":
+			return "Space"
+		}
+		return key
+	}
+	if len(key) == 1 {
+		if (key[0] >= 'a' && key[0] <= 'z') || (key[0] >= 'A' && key[0] <= 'Z') {
+			return "Key" + strings.ToUpper(key)
+		}
+		if key[0] >= '0' && key[0] <= '9' {
+			return "Digit" + key
+		}
+	}
+	return ""
+}
+
+// browserKeyModifiers reads a "+"-joined modifier list such as "ctrl+shift".
+func browserKeyModifiers(text string) int {
+	mods := 0
+	for _, part := range strings.Split(strings.ToLower(strings.TrimSpace(text)), "+") {
+		switch part {
+		case "alt":
+			mods |= 1
+		case "ctrl", "control":
+			mods |= 2
+		case "meta", "cmd":
+			mods |= 4
+		case "shift":
+			mods |= 8
+		}
+	}
+	return mods
+}
+
+// waitFor polls the page for a selector or a visible text needle. Pages that
+// render after a network round trip (dynamic loading, slow resources, infinite
+// scroll) need this instead of a fixed sleep.
+func (h *Host) waitFor(ctx context.Context, id, needle string, timeoutMs float64) error {
+	needle = strings.TrimSpace(needle)
+	if needle == "" {
+		return errors.New("wait needs a selector or text to wait for")
+	}
+	if timeoutMs <= 0 || timeoutMs > 60000 {
+		timeoutMs = 15000
+	}
+	script := `(async()=>{const sel=__SEL__,text=__TEXT__;const end=Date.now()+__MS__;const hit=()=>{if(sel){try{if(document.querySelector(sel))return true}catch(_){}}const root=document.body;if(!root)return false;if(text&&(root.innerText||'').includes(text))return true;for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument&&((sel&&f.contentDocument.querySelector(sel))||(text&&(f.contentDocument.body?.innerText||'').includes(text))))return true}catch(_){}}return false};if(hit())return true;while(Date.now()<end){await new Promise(r=>setTimeout(r,150));if(hit())return true}return false})()`
+	sel, text := "", needle
+	if looksLikeSelector(needle) {
+		sel = needle
+		text = ""
+	}
+	sj, _ := json.Marshal(sel)
+	tj, _ := json.Marshal(text)
+	script = strings.NewReplacer("__SEL__", string(sj), "__TEXT__", string(tj), "__MS__", strconv.FormatFloat(timeoutMs, 'f', -1, 64)).Replace(script)
+	data, err := h.evaluate(ctx, id, script)
+	if err != nil {
+		return err
+	}
+	if string(data) != "true" {
+		return fmt.Errorf("waited %dms but %q never appeared", int(timeoutMs), needle)
+	}
+	return nil
+}
+
+func looksLikeSelector(value string) bool {
+	if strings.ContainsAny(value, " ") {
+		return false
+	}
+	for _, prefix := range []string{"#", ".", "[", "a[", "div", "input", "button", "select", "textarea", "*"} {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// uploadFiles answers the file chooser an input[type=file] opens. The chooser
+// is intercepted by the host, so the path list is supplied here after the
+// click rather than through a native dialog.
+func (h *Host) uploadFiles(ctx context.Context, id, elementID, paths string) error {
+	var list []string
+	if err := json.Unmarshal([]byte(paths), &list); err != nil || len(list) == 0 {
+		list = nil
+		for _, part := range strings.Split(paths, "\n") {
+			if p := strings.TrimSpace(part); p != "" {
+				list = append(list, p)
+			}
+		}
+	}
+	if len(list) == 0 {
+		return errors.New("upload needs at least one absolute file path")
+	}
+	a := Action{Kind: "click", ElementID: elementID, Generation: h.generationOf(ctx, id)}
+	_ = a
+	if err := h.Execute(ctx, id, Action{Kind: "click", ElementID: elementID}); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, err := h.uploadCommand(ctx, id, "upload-list", "")
+		if err != nil {
+			return err
+		}
+		var pending []Upload
+		_ = json.Unmarshal([]byte(raw), &pending)
+		for _, u := range pending {
+			if u.Status == "pending" || u.Status == "" {
+				body, _ := json.Marshal(map[string]any{"id": u.ID, "paths": list})
+				_, err := h.uploadCommand(ctx, id, "upload-approve", string(body))
+				return err
+			}
+		}
+		select {
+		case <-time.After(100 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return errors.New("no file chooser appeared after clicking the upload control")
+}
+
+func (h *Host) generationOf(ctx context.Context, id string) uint64 {
+	var gen uint64
+	_ = h.call(ctx, func() error {
+		t, err := h.tab(id)
+		if err == nil {
+			gen = t.generation
+		}
+		return nil
+	})
+	return gen
 }
 
 func (h *Host) inputPair(ctx context.Context, id, method string, params map[string]any, down, up string) error {
@@ -970,19 +1192,41 @@ func (h *Host) ShutdownConfirmed(ctx context.Context) error {
 }
 
 const observeScript = `(()=>{
-  const elements=[], refs=new Map(); let i=0;
+  const elements=[], refs=new Map(); let i=0, frames=0, shadowRoots=0;
+  // Staleness is a property of the approved target, not of the document: a page
+  // that runs timers, ads or animations is not stale. A button whose own label
+  // or state changed since the observation, however, is no longer what was
+  // approved, so its signature is recorded here and re-checked per action.
+  window.__orcaSig=new WeakMap();
+  window.__orcaSigOf=e=>{const editable=(e instanceof HTMLInputElement)||(e instanceof HTMLTextAreaElement)||e.isContentEditable;return [e.tagName,e.type||'',e.disabled?'1':'0',e.type==='checkbox'||e.type==='radio'?(e.checked?'1':'0'):'',editable?'':(e.innerText||e.textContent||'').trim().slice(0,160)].join('\u0001')};
   const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&r.bottom>0&&r.right>0&&r.top<innerHeight&&r.left<innerWidth&&s.visibility!=='hidden'&&s.display!=='none'};
   let screenshotBlocked='';
+  // Walk the document and every open shadow root. Closed roots stay opaque.
+  const collect=(root,x0,y0)=>{
+    if(!root) return;
+    for(const e of root.querySelectorAll('*')){
+      if(e.shadowRoot){shadowRoots++;collect(e.shadowRoot,x0,y0)}
+      if(e.localName==='iframe'||e.localName==='frame'){frames++;try{const d=e.contentDocument;if(d&&d.body)collect(d,x0+e.getBoundingClientRect().x,y0+e.getBoundingClientRect().y)}catch(_){}}
+    }
+  };
+  try{collect(document,0,0)}catch(_){}
   const all=document.querySelectorAll('*');
   if(all.length>30000)screenshotBlocked='Document is too large to inspect safely for screenshots';
-  else for(const e of all){if(!visible(e))continue;if(e.matches('iframe,frame,object,embed')||e.shadowRoot||e.localName.includes('-')){screenshotBlocked='Embedded or shadow content requires manual inspection';break}if(e.type==='password'||/cc-|one-time-code/i.test(e.autocomplete||'')){screenshotBlocked='Protected input is visible; screenshot sharing is disabled';break}}
-  for(const e of document.querySelectorAll('a,button,input,textarea,select,[role="button"],[role="checkbox"],[contenteditable="true"],canvas')){
-    const r=e.getBoundingClientRect(), style=getComputedStyle(e);
-    if(r.width<1||r.height<1||r.bottom<0||r.right<0||r.top>innerHeight||r.left>innerWidth||style.visibility==='hidden'||style.display==='none')continue;
-    const id='e'+(++i), sensitive=e.type==='password'||e.type==='file'||/cc-|one-time-code/i.test(e.autocomplete||''); refs.set(id,e);
-    elements.push({id,role:e.getAttribute('role')||e.tagName.toLowerCase(),name:(e.getAttribute('aria-label')||e.labels?.[0]?.innerText||e.innerText||e.getAttribute('placeholder')||'').slice(0,180),type:e.type||'',value:sensitive?'[redacted]':String(e.value||'').slice(0,500),href:e.tagName==='A'?e.href:'',sensitive,disabled:!!e.disabled,options:e instanceof HTMLSelectElement?[...e.options].slice(0,100).map(o=>({value:o.value,label:o.label,disabled:o.disabled})):undefined,x:r.x,y:r.y,w:r.width,h:r.height});
-    if(i>=200)break;
-  }
+  else for(const e of all){if(!visible(e))continue;if(e.type==='password'||/cc-|one-time-code/i.test(e.autocomplete||'')){screenshotBlocked='Protected input is visible; screenshot sharing is disabled';break}}
+  const harvest=(root,x0,y0)=>{
+    if(!root) return;
+    const candidates=root.querySelectorAll('a,button,input,textarea,select,[role="button"],[role="checkbox"],[role="tab"],[role="menuitem"],[contenteditable="true"],canvas,img,iframe,frame,[onclick],summary');
+    for(const e of candidates){
+      if(i>=200) return;
+      const r=e.getBoundingClientRect(), style=getComputedStyle(e);
+      if(r.width<1||r.height<1||r.bottom<0||r.right<0||r.top>innerHeight||r.left>innerWidth||style.visibility==='hidden'||style.display==='none')continue;
+      const id='e'+(++i), sensitive=e.type==='password'||e.type==='file'||/cc-|one-time-code/i.test(e.autocomplete||''); refs.set(id,e);
+      window.__orcaSig.set(e, window.__orcaSigOf(e));
+      elements.push({id,role:e.getAttribute('role')||e.tagName.toLowerCase(),name:(e.getAttribute('aria-label')||e.labels?.[0]?.innerText||e.innerText||e.getAttribute('placeholder')||e.getAttribute('title')||'').slice(0,180),type:e.type||'',value:sensitive?'[redacted]':String(e.value||'').slice(0,500),href:e.tagName==='A'?e.href:'',src:(e.localName==='iframe'||e.localName==='frame')?(e.src||''):'',sensitive,disabled:!!e.disabled,checked:e.type==='checkbox'||e.type==='radio'?!!e.checked:undefined,options:e instanceof HTMLSelectElement?[...e.options].slice(0,100).map(o=>({value:o.value,label:o.label,disabled:o.disabled})):undefined,x:x0+r.x,y:y0+r.y,w:r.width,h:r.height});
+    }
+    for(const e of root.querySelectorAll('*')) if(e.shadowRoot) harvest(e.shadowRoot,x0,y0);
+  };
+  harvest(document,0,0);
   window.__orcaObserved=refs;
   window.__orcaMutationObserver?.disconnect();
   window.__orcaObservationRevision=0;
@@ -992,5 +1236,5 @@ const observeScript = `(()=>{
     for(const event of ['pointerdown','keydown','input','wheel'])document.addEventListener(event,e=>{if(e.isTrusted)window.__orcaObservationRevision++},true);
     window.__orcaInputWatched=true;
   }
-  return {text:(document.body?.innerText||'').slice(0,16000),elements,viewportWidth:innerWidth,viewportHeight:innerHeight,screenshotBlocked};
+  return {text:(document.body?.innerText||'').slice(0,16000),elements,viewportWidth:innerWidth,viewportHeight:innerHeight,screenshotBlocked,frames,shadowRoots};
 })()`

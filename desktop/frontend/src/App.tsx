@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   Activity,
@@ -18,7 +18,9 @@ import {
   MoreHorizontal,
   Settings as SettingsIcon,
   Pencil,
+  Plus,
   Trash2,
+  X,
 } from "lucide-react";
 import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
@@ -27,6 +29,7 @@ import { BackgroundJobsPanel, OverviewDock } from "./components/OverviewDock";
 import { modelDisplayLabel } from "./lib/modelCatalog";
 import type { ModelInfo } from "./lib/types";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT } from "./lib/i18n";
+import type { Translator } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onBrowserStateChanged, onProjectTreeChanged, openExternal } from "./lib/bridge";
 import { useInstallerShutdown } from "./lib/useInstallerShutdown";
@@ -43,6 +46,7 @@ const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((m) =
 import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
+import { FloatingMenu, FloatingMenuItems } from "./components/FloatingMenu";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { AppChrome } from "./components/AppChrome";
@@ -127,6 +131,21 @@ const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
 type RightDockMode = "context" | "files" | "changed" | "sideChat" | "browser" | "background";
+
+// The side dock holds several independently closable tabs. Kind decides what a
+// tab shows; the id lets the same kind be opened more than once (two file
+// browsers, two browser panels) without the panel losing its state.
+type DockKind = "context" | "files" | "changed" | "sideChat" | "browser";
+interface DockTab { id: string; kind: DockKind }
+let dockTabSeq = 0;
+const DOCK_TAB_META: Record<DockKind, { icon: ReactNode; label: (t: Translator) => string }> = {
+  context: { icon: <Activity size={12} />, label: (t) => t("rightDock.overview") },
+  sideChat: { icon: <MessageSquareText size={12} />, label: (t) => t("rightDock.sideChat") },
+  browser: { icon: <Globe size={12} />, label: (t) => t("rightDock.browser") },
+  files: { icon: <FileText size={12} />, label: (t) => t("rightDock.files") },
+  changed: { icon: <GitBranch size={12} />, label: (t) => t("workspace.changedTab") },
+};
+const newDockTab = (kind: DockKind): DockTab => ({ id: `dock-${++dockTabSeq}`, kind });
 type WorkspaceRevealRequest = { id: number; path: string };
 type WorkspaceFileListRequest = { id: number; paths: string[] };
 type WorkspaceChangeListEntry = { key: string; path: string; meta: string; time: string; detail: string };
@@ -579,6 +598,10 @@ export default function App() {
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
   const [rightDockMode, setRightDockMode] = useState<RightDockMode>("context");
+  const [dockTabs, setDockTabs] = useState<DockTab[]>(() => [newDockTab("context")]);
+  const [activeDockId, setActiveDockId] = useState<string>(() => dockTabs[0]?.id ?? "");
+  const [dockAddMenu, setDockAddMenu] = useState<{ x: number; y: number } | null>(null);
+  const activeDockTab = dockTabs.find((tab) => tab.id === activeDockId) ?? dockTabs[0];
   const [browserAvailable, setBrowserAvailable] = useState(false);
   const [betaCapabilities, setBetaCapabilities] = useState<BetaCapabilities>(NO_BETA);
   const [betaConnectionsOpen, setBetaConnectionsOpen] = useState(false);
@@ -2098,9 +2121,42 @@ export default function App() {
       setWorkspaceChangeRevealRequest(null);
       setWorkspaceFileListRequest(null);
       setWorkspaceChangeListRequest(null);
+      // Focusing a kind reuses its tab; opening another kind appends one.
+      if (mode === "context" || mode === "files" || mode === "changed" || mode === "sideChat" || mode === "browser") {
+        const kind = mode as DockKind;
+        setDockTabs((tabs) => {
+          const existing = tabs.find((tab) => tab.kind === kind);
+          if (existing) {
+            setActiveDockId(existing.id);
+            return tabs;
+          }
+          const created = newDockTab(kind);
+          setActiveDockId(created.id);
+          return [...tabs, created];
+        });
+      }
       openWorkspacePanel(mode);
     },
     [openWorkspacePanel],
+  );
+
+  const closeDockTab = useCallback(
+    (id: string) => {
+      setDockTabs((tabs) => {
+        const next = tabs.filter((tab) => tab.id !== id);
+        if (next.length === 0) {
+          setActiveDockId("");
+          return next;
+        }
+        setActiveDockId((current) => {
+          if (current !== id) return current;
+          const index = tabs.findIndex((tab) => tab.id === id);
+          return next[Math.min(index, next.length - 1)]?.id ?? next[0].id;
+        });
+        return next;
+      });
+    },
+    [],
   );
 
   const openRightDockFile = useCallback(
@@ -3183,112 +3239,133 @@ export default function App() {
             ].join(" ")}
             aria-label={t("rightDock.workbench")}
           >
-            <OverviewDock
-              active={rightDockMode}
-              onSelect={(key) => openRightDockMode(key as RightDockMode)}
-              sections={[
-                {
-                  key: "context",
-                  label: t("rightDock.overview"),
-                  icon: <Activity size={13} />,
-                  content: (
-                    <ContextPanel
-                      tabId={activeTabId}
-                      context={state.context}
-                      usage={state.usage}
-                      sessionTokens={state.sessionTokens}
-                      sessionCost={state.sessionCost}
-                      sessionCurrency={state.sessionCurrency}
-                      refreshKey={dockRefreshKey}
-                      onOpenWorkspaceMode={openRightDockMode}
-                      onOpenWorkspaceFile={openRightDockFile}
-                      onOpenWorkspaceFileList={openRightDockFileList}
-                      onOpenWorkspaceChangeList={openRightDockChangeList}
-                      onOpenWorkspaceChangeFile={openRightDockChangeFile}
-                    />
-                  ),
-                },
-                {
-                  key: "files",
-                  label: t("workspace.filesTab"),
-                  icon: <FileText size={13} />,
-                  content: (
-                    <WorkspacePanel
-                      open={workspacePanelRenderable}
-                      cwd={state.meta?.cwd}
-                      maximized={workspacePanelMaximized}
-                      panelWidth={workspacePanelRenderWidth}
-                      onClose={() => setWorkspacePanel(false)}
-                      onToggleMaximized={() => {
-                        closeTransientOverlays();
-                        setWorkspacePanelMaximized((value) => !value);
-                      }}
-                      onPreviewModeChange={handleWorkspacePreviewModeChange}
-                      onAddToChat={addWorkspaceTextToComposer}
-                      onRequestPanelWidth={ensureWorkspacePanelWidth}
-                      refreshKey={dockRefreshKey}
-                      initialViewMode="files"
-                      revealPathRequest={workspaceRevealRequest}
-                      changeRevealRequest={workspaceChangeRevealRequest}
-                      fileListRequest={workspaceFileListRequest}
-                      changeListRequest={workspaceChangeListRequest}
-                      showViewTabs={false}
-                    />
-                  ),
-                },
-                {
-                  key: "changed",
-                  label: t("workspace.changedTab"),
-                  icon: <GitBranch size={13} />,
-                  content: (
-                    <WorkspacePanel
-                      open={workspacePanelRenderable}
-                      cwd={state.meta?.cwd}
-                      maximized={workspacePanelMaximized}
-                      panelWidth={workspacePanelRenderWidth}
-                      onClose={() => setWorkspacePanel(false)}
-                      onToggleMaximized={() => {
-                        closeTransientOverlays();
-                        setWorkspacePanelMaximized((value) => !value);
-                      }}
-                      onPreviewModeChange={handleWorkspacePreviewModeChange}
-                      onAddToChat={addWorkspaceTextToComposer}
-                      onRequestPanelWidth={ensureWorkspacePanelWidth}
-                      refreshKey={dockRefreshKey}
-                      initialViewMode="changed"
-                      revealPathRequest={workspaceRevealRequest}
-                      changeRevealRequest={workspaceChangeRevealRequest}
-                      fileListRequest={workspaceFileListRequest}
-                      changeListRequest={workspaceChangeListRequest}
-                      showViewTabs={false}
-                    />
-                  ),
-                },
-                ...(browserAvailable
-                  ? [{
-                      key: "browser",
-                      label: t("rightDock.browser"),
-                      icon: <Globe size={13} />,
-                      content: (
-                        <BrowserPanel ownerTabId={browserOwnerTabId} visible={workspacePanelRenderable} onTaskStateChange={setBrowserTaskState} obstructed={betaConnectionsOpen || workspacePanelResizing || sidebarResizing || startupSplashHold || clearContextPending || Boolean(settingsTarget || histView || paletteOpen || newSessionChooserOpen || automationPanelOpen || toolLibraryPanelOpen || workMonitorOpen || topicExportOpen || topicOverflowOpen || textEditMenuPoint || selectionMenuPoint || state.approval || state.ask || state.messageAction)} />
-                      ),
-                    }]
-                  : []),
-                {
-                  key: "sideChat",
-                  label: t("rightDock.sideChat"),
-                  icon: <MessageSquareText size={13} />,
-                  content: <SideChatPanel tabId={activeTabId} />,
-                },
-                {
-                  key: "background",
-                  label: t("process.timeline.background"),
-                  icon: <Clock size={13} />,
-                  badge: Array.isArray(state.jobs) ? state.jobs.length : 0,
-                  content: <BackgroundJobsPanel jobs={state.jobs} />,
-                },
-              ]}
-            />
+            <div className="workbench-dock__tools">
+              <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.sideDock")}>
+                {dockTabs.map((tab) => {
+                  const meta = DOCK_TAB_META[tab.kind];
+                  const selected = tab.id === activeDockTab?.id;
+                  return (
+                    <span key={tab.id} className={`workbench-dock__tabwrap${selected ? " is-active" : ""}`}>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={selected}
+                        className={`workbench-dock__tab${selected ? " workbench-dock__tab--active" : ""}`}
+                        onClick={() => openRightDockMode(tab.kind)}
+                      >
+                        {meta.icon}
+                        <span className="workbench-dock__tab-label">{meta.label(t)}</span>
+                      </button>
+                      {tab.kind !== "context" && (
+                        <button
+                          type="button"
+                          className="workbench-dock__tabclose"
+                          aria-label={t("rightDock.close")}
+                          onClick={() => closeDockTab(tab.id)}
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+                <button
+                  type="button"
+                  className="workbench-dock__tabadd"
+                  aria-label={t("rightDock.addTab")}
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setDockAddMenu({ x: rect.left, y: rect.bottom + 4 });
+                  }}
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+              <Tooltip label={t("rightDock.close")} fill disabled={false}>
+                <button className="workbench-dock__close" type="button" aria-label={t("rightDock.close")} onClick={closeWorkspacePanel}>
+                  <X size={13} />
+                </button>
+              </Tooltip>
+            </div>
+            {dockAddMenu && (
+              <FloatingMenu x={dockAddMenu.x} y={dockAddMenu.y} width={180} estimatedHeight={170} className="workbench-dock__addmenu">
+                <FloatingMenuItems
+                  items={(Object.keys(DOCK_TAB_META) as DockKind[]).map((kind) => ({
+                    icon: DOCK_TAB_META[kind].icon,
+                    label: DOCK_TAB_META[kind].label(t),
+                    onSelect: () => {
+                      setDockAddMenu(null);
+                      openRightDockMode(kind);
+                    },
+                  }))}
+                />
+              </FloatingMenu>
+            )}
+            <div className="workbench-dock__body">
+            {rightDockMode === "context" && (
+              <OverviewDock
+                active={rightDockMode}
+                onSelect={(key) => openRightDockMode(key as RightDockMode)}
+                sections={[
+                  {
+                    key: "context",
+                    label: t("rightDock.overview"),
+                    icon: <Activity size={13} />,
+                    content: (
+                      <ContextPanel
+                        tabId={activeTabId}
+                        context={state.context}
+                        usage={state.usage}
+                        sessionTokens={state.sessionTokens}
+                        sessionCost={state.sessionCost}
+                        sessionCurrency={state.sessionCurrency}
+                        refreshKey={dockRefreshKey}
+                        onOpenWorkspaceMode={openRightDockMode}
+                        onOpenWorkspaceFile={openRightDockFile}
+                        onOpenWorkspaceFileList={openRightDockFileList}
+                        onOpenWorkspaceChangeList={openRightDockChangeList}
+                        onOpenWorkspaceChangeFile={openRightDockChangeFile}
+                      />
+                    ),
+                  },
+                  {
+                    key: "background",
+                    label: t("process.timeline.background"),
+                    icon: <Clock size={13} />,
+                    badge: Array.isArray(state.jobs) ? state.jobs.length : 0,
+                    content: <BackgroundJobsPanel jobs={state.jobs} />,
+                  },
+                ]}
+              />
+            )}
+            {(rightDockMode === "files" || rightDockMode === "changed") && (
+              <WorkspacePanel
+                open={workspacePanelRenderable}
+                cwd={state.meta?.cwd}
+                maximized={workspacePanelMaximized}
+                panelWidth={workspacePanelRenderWidth}
+                onClose={() => setWorkspacePanel(false)}
+                onToggleMaximized={() => {
+                  closeTransientOverlays();
+                  setWorkspacePanelMaximized((value) => !value);
+                }}
+                onPreviewModeChange={handleWorkspacePreviewModeChange}
+                onAddToChat={addWorkspaceTextToComposer}
+                onRequestPanelWidth={ensureWorkspacePanelWidth}
+                refreshKey={dockRefreshKey}
+                initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
+                revealPathRequest={workspaceRevealRequest}
+                changeRevealRequest={workspaceChangeRevealRequest}
+                fileListRequest={workspaceFileListRequest}
+                changeListRequest={workspaceChangeListRequest}
+                showViewTabs={false}
+              />
+            )}
+            {rightDockMode === "browser" && browserAvailable && (
+              <BrowserPanel ownerTabId={browserOwnerTabId} visible={workspacePanelRenderable} onTaskStateChange={setBrowserTaskState} obstructed={betaConnectionsOpen || workspacePanelResizing || sidebarResizing || startupSplashHold || clearContextPending || Boolean(settingsTarget || histView || paletteOpen || newSessionChooserOpen || automationPanelOpen || toolLibraryPanelOpen || workMonitorOpen || topicExportOpen || topicOverflowOpen || textEditMenuPoint || selectionMenuPoint || state.approval || state.ask || state.messageAction)} />
+            )}
+            {rightDockMode === "sideChat" && <SideChatPanel tabId={activeTabId} />}
+            </div>
           </aside>
         )}
       </div>

@@ -1,12 +1,12 @@
 **English** | [简体中文](README.md)
 
-# O.R.C.A. 3.0.18
+# O.R.C.A. 3.0.19
 
 **O.R.C.A.** (**Open Reasoning & Computing Agent**) is an open-source workspace for real work. It brings model conversations, Assistant, Coding, research, files and images, engineering tools, memory, and automation into one pausable, inspectable, recoverable application.
 
-> **3.0.18** brings browser control to the official build: the model can open pages, click, and type, and every action waits for your approval. It also adds WhaleStack account sign-in: enter your WhaleStack credentials under Settings and the app gets relay model access automatically, with no Base URL or API key to type in. The 3.0.13 improvements — readable history after compaction, the live work overview, and smaller permission dialogs — all remain.
+> **3.0.19** rebuilds the right-hand panel and the built-in browser. The panel is now a tabbed side dock — side conversation, files, changed files and browser pages each get a tab, several can stay open, and collapsing it brings the overview back. The browser gains what real pages need: actions no longer fail because the page kept changing, and it can hover, double-click, clear, wait for elements, upload, press keys, reach into open shadow roots and same-origin frames, and answer JavaScript dialogs. Full access runs actions automatically; other modes still approve each step.
 >
-> [Release notes](docs/releases/desktop-v3.0.18.md) · [Build checklist](docs/build/desktop-v3.0.18.md) · [Release verification](docs/audits/desktop-v3.0.18-verification.md)
+> [Release notes](docs/releases/desktop-v3.0.19.md) · [Build checklist](docs/build/desktop-v3.0.19.md) · [Release verification](docs/audits/desktop-v3.0.19-verification.md)
 
 ## Downloads
 
@@ -14,11 +14,11 @@ Choose the package for your platform from the Release download links and check i
 
 | Platform | Package | Notes |
 | --- | --- | --- |
-| Windows x64 | [Installer](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.18/O.R.C.A-for-Windows-windows-amd64-installer.exe) · [Portable ZIP](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.18/O.R.C.A-for-Windows-windows-amd64.zip) | Cloud features; managed local AI and Computer Use temporarily disabled |
-| macOS 12+ Universal | [DMG](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.18/O.R.C.A-macos-universal.dmg) | Intel and Apple Silicon; managed local AI and Computer Use temporarily disabled |
-| Linux x64 | [DEB](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.18/O.R.C.A-linux-amd64.deb) | Debian / Ubuntu; requires a matching WebKitGTK runtime; managed local AI and Computer Use temporarily disabled |
+| Windows x64 | [Installer](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.19/O.R.C.A-for-Windows-windows-amd64-installer.exe) · [Portable ZIP](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.19/O.R.C.A-for-Windows-windows-amd64.zip) | Cloud features; managed local AI and Computer Use temporarily disabled |
+| macOS 12+ Universal | [DMG](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.19/O.R.C.A-macos-universal.dmg) | Intel and Apple Silicon; managed local AI and Computer Use temporarily disabled |
+| Linux x64 | [DEB](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/download/desktop-v3.0.19/O.R.C.A-linux-amd64.deb) | Debian / Ubuntu; requires a matching WebKitGTK runtime; managed local AI and Computer Use temporarily disabled |
 
-- [3.0.18 release page, checksums, and release notes](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.18)
+- [3.0.19 release page, checksums, and release notes](https://github.com/nanbo0ne/O.R.C.A-for-Windows/releases/tag/desktop-v3.0.19)
 - Check the version, platform, and filename when downloading.
 - Never commit an API key to documentation; official packages ship with no provider key.
 
@@ -191,7 +191,7 @@ Run `wails dev` in `desktop` for development. Running `npm run dev` alone uses a
 | Blank window or frame issue | WebView2/WebKitGTK/GTK versions, GPU driver, and Modern/Classic selection; restart and collect logs before classifying it as a native defect |
 | Updater does nothing | Primary manifest, GitHub fallback, signature/version fields, and system proxy; on Windows manually download and exit to install rather than expecting a background install |
 
-See the [build checklist](docs/build/desktop-v3.0.18.md) for build instructions and the [verification record](docs/audits/desktop-v3.0.18-verification.md) for release checks. See [desktop/README.md](desktop/README.md) for desktop details and the [artifact runtime boundary](docs/ARTIFACT_RUNTIME.md) for office artifacts.
+See the [build checklist](docs/build/desktop-v3.0.19.md) for build instructions and the [verification record](docs/audits/desktop-v3.0.19-verification.md) for release checks. See [desktop/README.md](desktop/README.md) for desktop details and the [artifact runtime boundary](docs/ARTIFACT_RUNTIME.md) for office artifacts.
 
 ## License
 

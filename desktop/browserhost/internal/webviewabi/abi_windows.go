@@ -138,6 +138,13 @@ type ICoreWebView2NavigationCompletedEventArgsVtbl struct {
 	IUnknownVtbl
 	GetIsSuccess, GetWebErrorStatus, GetNavigationId ComProc
 }
+type ICoreWebView2ScriptDialogOpeningEventArgs struct {
+	Vtbl *ICoreWebView2ScriptDialogOpeningEventArgsVtbl
+}
+type ICoreWebView2ScriptDialogOpeningEventArgsVtbl struct {
+	IUnknownVtbl
+	GetUri, GetKind, GetMessage, GetDefaultText, PutDefaultText, Accept, GetDeferral ComProc
+}
 type ICoreWebView2PermissionRequestedEventArgs struct {
 	Vtbl *ICoreWebView2PermissionRequestedEventArgsVtbl
 }

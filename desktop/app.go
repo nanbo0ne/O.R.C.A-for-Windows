@@ -3200,7 +3200,7 @@ func (a *App) SetConversationModeForTab(tabID string, mode string) (retErr error
 		RuntimeProfile:          mode,
 		MemoryProfile:           conversationMemoryProfile(mode),
 		AssistantMemoryStoreDir: assistantStoreDirForMode(mode),
-	})
+	}, tab.ID)
 	if err != nil {
 		return err
 	}
@@ -4675,7 +4675,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		RuntimeProfile:          currentTabPromptMode(tab),
 		MemoryProfile:           conversationMemoryProfile(currentTabPromptMode(tab)),
 		AssistantMemoryStoreDir: assistantStoreDirForMode(currentTabPromptMode(tab)),
-	})
+	}, tab.ID)
 	if err != nil {
 		return err
 	}
@@ -4800,7 +4800,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		RuntimeProfile:          currentTabPromptMode(tab),
 		MemoryProfile:           conversationMemoryProfile(currentTabPromptMode(tab)),
 		AssistantMemoryStoreDir: assistantStoreDirForMode(currentTabPromptMode(tab)),
-	})
+	}, tab.ID)
 	if err != nil {
 		return err
 	}

@@ -580,7 +580,7 @@ func browserObservationMessage(o browserhost.Observation, vision bool) (provider
 }
 
 var browserSchemas = []provider.ToolSchema{
-	{Name: "browser_action", Description: "One action against the current observation. DOM control IDs preferred. Canvas IDs are containers, not click targets: omit elementId and use current screenshot pixel x/y coordinates. All mutation needs exact user consent; never retry an uncertain input.", Parameters: json.RawMessage(`{"type":"object","required":["kind"],"properties":{"kind":{"type":"string","enum":["click","type","select","scroll","key","navigate","wait"]},"elementId":{"type":"string"},"text":{"type":"string"},"key":{"type":"string"},"url":{"type":"string"},"x":{"type":"number"},"y":{"type":"number"},"deltaY":{"type":"number"}},"additionalProperties":false}`)},
+	{Name: "browser_action", Description: "One action against the current observation. DOM control IDs preferred. Canvas IDs are containers, not click targets: omit elementId and use current screenshot pixel x/y coordinates. hover opens menus and tooltips; dblclick opens rows and also triggers click; clear empties an input before typing; waitfor waits for a selector or visible text; upload answers a file input with an absolute path. All mutation needs exact user consent; never retry an uncertain input.", Parameters: json.RawMessage(`{"type":"object","required":["kind"],"properties":{"kind":{"type":"string","enum":["click","dblclick","hover","clear","type","select","scroll","key","navigate","wait","waitfor","upload"]},"elementId":{"type":"string"},"text":{"type":"string"},"key":{"type":"string"},"url":{"type":"string"},"x":{"type":"number"},"y":{"type":"number"},"deltaY":{"type":"number"}},"additionalProperties":false}`)},
 	{Name: "browser_complete", Description: "Propose completion only when current page evidence meets the success criterion.", Parameters: json.RawMessage(`{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"}},"additionalProperties":false}`)},
 	{Name: "browser_escalate", Description: "Stop and return control when blocked, ambiguous, sensitive, or unsupported.", Parameters: json.RawMessage(`{"type":"object","required":["reason"],"properties":{"reason":{"type":"string"}},"additionalProperties":false}`)},
 }
@@ -636,7 +636,10 @@ func browserAction(raw string, o browserObserved, vision bool) (browserhost.Acti
 		}
 	}
 	switch a.Kind {
-	case "click":
+	case "click", "dblclick", "hover", "clear":
+		if a.Kind != "click" && target == nil {
+			return a, errors.New(a.Kind + " requires a current DOM element")
+		}
 		if target != nil && (strings.EqualFold(target.Role, "canvas") || strings.EqualFold(target.Type, "canvas")) {
 			return a, errors.New("canvas IDs identify containers, not buttons; omit elementId and use current screenshot pixel x/y coordinates")
 		}
@@ -665,7 +668,7 @@ func browserAction(raw string, o browserObserved, vision bool) (browserhost.Acti
 		if a.Kind == "select" {
 			found := false
 			for _, option := range target.Options {
-				if option.Value == a.Text && !option.Disabled {
+				if !option.Disabled && (option.Value == a.Text || strings.TrimSpace(option.Label) == strings.TrimSpace(a.Text)) {
 					found = true
 				}
 			}
@@ -674,10 +677,27 @@ func browserAction(raw string, o browserObserved, vision bool) (browserhost.Acti
 			}
 		}
 	case "key":
-		// Native key dispatch targets focus, not ElementID. Only Escape is safe
-		// without a host-attested focused element; all other keys require takeover.
-		if a.Key != "Escape" {
-			return a, errors.New("focused-key input is unavailable in this preview; use a DOM target or human takeover")
+		// Native key dispatch targets whatever the page focused. Only keys that
+		// navigate or confirm an already-approved form are permitted; free typing
+		// still goes through a DOM target so a focus handler cannot redirect it.
+		switch a.Key {
+		case "Enter", "Tab", "Escape", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Space":
+		default:
+			return a, errors.New("unsupported key; type text into a DOM element instead")
+		}
+	case "waitfor":
+		if strings.TrimSpace(a.Text) == "" {
+			return a, errors.New("waitfor needs a selector or visible text")
+		}
+		if a.DeltaY == 0 {
+			a.DeltaY = 15000
+		}
+	case "upload":
+		if target == nil || !strings.EqualFold(target.Type, "file") {
+			return a, errors.New("upload requires the current observation's file input")
+		}
+		if strings.TrimSpace(a.Text) == "" {
+			return a, errors.New("upload requires an absolute file path")
 		}
 	case "navigate":
 		var err error
@@ -700,7 +720,7 @@ func (s *browserService) execute(t *browserTask, callID string, o browserObserve
 			return err
 		}
 	}
-	if a.Kind != "wait" && a.Kind != "scroll" {
+	if a.Kind != "wait" && a.Kind != "scroll" && a.Kind != "hover" && a.Kind != "waitfor" {
 		payload, _ := json.Marshal(a)
 		_, origin, _ := browserURL(o.URL)
 		// Gate every potentially consequential interaction. Page labels and

@@ -726,7 +726,7 @@ func (a *App) rebuild() error {
 		RuntimeProfile:          currentTabPromptMode(tab),
 		MemoryProfile:           conversationMemoryProfile(currentTabPromptMode(tab)),
 		AssistantMemoryStoreDir: assistantStoreDirForMode(currentTabPromptMode(tab)),
-	})
+	}, tab.ID)
 	if err != nil {
 		a.mu.Lock()
 		tab.StartupErr = err.Error()

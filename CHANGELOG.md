@@ -1,5 +1,21 @@
 # Changelog
 
+## Desktop 3.0.19 / 桌面版 3.0.19
+
+- 右侧改成带标签页的侧边坞：侧边对话、文件、改动列表、浏览器页面各占一个标签，可同时打开多个；坞与概览互斥，坞收起后概览自动回来。
+- The right-hand panel is now a tabbed side dock: side conversation, files, changed files and browser pages each get a tab, several can stay open at once, and the dock and the overview exclude each other.
+- 浏览器不再因为页面一直在变（计时器、广告、动画）就把每个动作判为过期：过期只看被操作的那个元素，页面自己在后台变化不再卡住操作。
+- The browser no longer fails every action on pages that keep changing; staleness is judged on the element being acted on, so a page that moves on in the background does not block anything.
+- 补齐真实页面需要的动作：悬停、双击、清空输入框、等待选择器或文字出现、通过文件框上传、按键与组合键。
+- Actions a real page needs are now available: hover, double-click, clear, wait for a selector or text, upload through a file input, and key presses with modifiers.
+- 观察可以进入开放的 shadow root 和同源 frame；JavaScript 对话框自动应答并记为事件。
+- Observation reaches into open shadow roots and same-origin frames, and JavaScript dialogs are answered automatically and recorded as events.
+- 修复切换模型/模式/思考强度后浏览器工具从工具表里消失（`unknown tool "browser_task"`）的问题。
+- Fix the browser tools disappearing from the tool list (`unknown tool "browser_task"`) after switching model, mode or effort.
+- 已用 the-internet.herokuapp.com 的十五个场景验证浏览器宿主。
+- The browser host is verified against fifteen scenarios on the-internet.herokuapp.com.
+- [Release notes / 发布说明](docs/releases/desktop-v3.0.19.md) · [Build / 构建](docs/build/desktop-v3.0.19.md) · [Verification / 验收](docs/audits/desktop-v3.0.19-verification.md)
+
 ## Desktop 3.0.18 / 桌面版 3.0.18
 
 - 模型选择器显示本地部署当前实际加载的模型名；中转站保留固定调用名 `lens-main`，显示名、上下文与视觉支持从网关实时读取，换权重后无需重新登录或换 Key。

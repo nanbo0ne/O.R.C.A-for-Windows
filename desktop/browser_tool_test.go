@@ -322,9 +322,14 @@ func TestBrowserInputApprovalIndependentOfRiskLabel(t *testing.T) {
 }
 func TestBrowserActionValidation(t *testing.T) {
 	o := browserObserved{Observation: browserhost.Observation{TabID: "t", Generation: 3, DocumentID: "d", Elements: []browserhost.Element{{ID: "s", Type: "password"}, {ID: "f", Type: "file"}, {ID: "ok", Type: "text"}}}}
-	for _, raw := range []string{`{"kind":"evaluate","text":"alert(1)"}`, `{"kind":"click","generation":3}`, `{"kind":"click","elementId":"missing"}`, `{"kind":"type","elementId":"s"}`, `{"kind":"click","elementId":"f"}`, `{"kind":"click","x":1,"y":1}`, `{"kind":"navigate","url":"file:///secret"}`, `{"kind":"key","key":"Enter"}`, `{"kind":"wait"} {}`} {
+	for _, raw := range []string{`{"kind":"evaluate","text":"alert(1)"}`, `{"kind":"click","generation":3}`, `{"kind":"click","elementId":"missing"}`, `{"kind":"type","elementId":"s"}`, `{"kind":"click","elementId":"f"}`, `{"kind":"click","x":1,"y":1}`, `{"kind":"navigate","url":"file:///secret"}`, `{"kind":"key","key":"a"}`, `{"kind":"key"}`, `{"kind":"waitfor"} {}`} {
 		if _, err := browserAction(raw, o, false); err == nil {
 			t.Errorf("accepted %s", raw)
+		}
+	}
+	for _, raw := range []string{`{"kind":"key","key":"Enter"}`, `{"kind":"key","key":"Tab"}`, `{"kind":"key","key":"ArrowDown"}`, `{"kind":"waitfor","text":"#done"}`, `{"kind":"hover","elementId":"ok"}`, `{"kind":"dblclick","elementId":"ok"}`} {
+		if a, err := browserAction(raw, o, false); err != nil || a.Generation != 3 {
+			t.Errorf("rejected %s: %v", raw, err)
 		}
 	}
 	if a, err := browserAction(`{"kind":"type","elementId":"ok","text":"fixture"}`, o, false); err != nil || a.Generation != 3 || a.DocumentID != "d" {

@@ -100,6 +100,8 @@ type Observation struct {
 	ScreenshotBlocked string    `json:"screenshotBlocked,omitempty"`
 	Screenshot        []byte    `json:"-"`
 	MIME              string    `json:"-"`
+	Frames            int       `json:"frames,omitempty"`
+	ShadowRoots       int       `json:"shadowRoots,omitempty"`
 }
 
 type Element struct {
@@ -115,6 +117,7 @@ type Element struct {
 	Href      string         `json:"href,omitempty"`
 	Sensitive bool           `json:"sensitive,omitempty"`
 	Disabled  bool           `json:"disabled,omitempty"`
+	Checked   bool           `json:"checked,omitempty"`
 	Options   []SelectOption `json:"options,omitempty"`
 }
 

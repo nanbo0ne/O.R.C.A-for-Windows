@@ -16950,6 +16950,65 @@ a[href] {
   border: 1px solid var(--border-soft);
 }
 
+.workbench-dock__tabs {
+  grid-template-columns: none;
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.workbench-dock__tabs::-webkit-scrollbar { display: none; }
+
+.workbench-dock__tabwrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 6px;
+}
+
+.workbench-dock__tabwrap.is-active {
+  background: var(--bg-elev);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+
+.workbench-dock__tabwrap.is-active .workbench-dock__tab {
+  background: transparent;
+  box-shadow: none;
+  padding-right: 2px;
+}
+
+.workbench-dock__tabclose,
+.workbench-dock__tabadd {
+  --wails-draggable: no-drag;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+
+.workbench-dock__tabadd {
+  width: 22px;
+  height: 22px;
+  margin: 0 2px 0 0;
+}
+
+.workbench-dock__tabclose:hover,
+.workbench-dock__tabadd:hover {
+  background: var(--bg);
+  color: var(--fg);
+}
+
 .workbench-dock__tab {
   --wails-draggable: no-drag;
   display: inline-flex;
@@ -16999,6 +17058,30 @@ a[href] {
     gap: 2px;
     font-size: 10px;
   }
+}
+
+.workbench-dock__close {
+  --wails-draggable: no-drag;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+
+.workbench-dock__close:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+
+.workbench-dock__tools {
+  gap: 6px;
 }
 
 .workbench-dock__body {
