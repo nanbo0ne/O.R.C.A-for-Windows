@@ -141,6 +141,10 @@ type browserService struct {
 	shownOwner string
 	closed     bool
 	emit       func(string, BrowserState)
+	// fullAccess reports whether the owner's conversation runs with every tool
+	// approval already granted (the composer's 完全访问 switch). The browser must
+	// follow that switch instead of asking again for each page it opens.
+	fullAccess func(owner string) bool
 }
 
 func newBrowserService(host browserhost.Backend, root string, emit func(string, BrowserState)) *browserService {
@@ -974,6 +978,19 @@ func (s *browserService) approve(owner string, cmd BrowserCommand) BrowserState 
 	return s.state(owner)
 }
 func (s *browserService) consent(t *browserTask, origin, reason string) error {
+	// 完全访问 covers the browser too: the account already accepted every tool
+	// approval for this conversation, so a page load is not a second decision.
+	if s.fullAccess != nil && s.fullAccess(t.owner) {
+		s.mu.Lock()
+		if err := s.checkTaskLocked(t); err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		t.consents = append(t.consents, BrowserConsent{Origin: origin, Model: t.model, Reason: reason})
+		t.lastConsent = time.Now()
+		s.mu.Unlock()
+		return nil
+	}
 	s.mu.Lock()
 	if err := s.checkTaskLocked(t); err != nil {
 		s.mu.Unlock()
@@ -1113,6 +1130,12 @@ func (a *App) initBrowser() {
 			wruntime.EventsEmit(a.ctx, "browser:state", map[string]any{"ownerTabId": owner, "state": state})
 		}
 	})
+	s.fullAccess = func(owner string) bool {
+		a.mu.RLock()
+		t := a.tabs[owner]
+		a.mu.RUnlock()
+		return t != nil && t.Ctrl != nil && t.Ctrl.AutoApproveTools()
+	}
 	a.browser = s
 }
 func (a *App) browserOwner(owner string) (*browserService, error) {

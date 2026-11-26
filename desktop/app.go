@@ -353,6 +353,7 @@ func (a *App) startup(ctx context.Context) {
 	a.startInstallerShutdownListener()
 
 	go a.restoreOrBuildTabs()
+	go a.whaleStackRefreshOnStartup()
 	go a.startDesktopBotGatewayOnStartup()
 	go a.runWelcomeSuggestionScheduler()
 }
@@ -4451,6 +4452,7 @@ func removeServerOrder(order []string, name string) []string {
 // ModelInfo is one (provider, model) the bottom switcher can pick. Ref ("provider/
 // model") is what SetModel takes; Provider/Model are for display.
 type ModelInfo struct {
+	DisplayName            string `json:"displayName,omitempty"`
 	Ref                    string `json:"ref"`
 	Provider               string `json:"provider"`
 	Model                  string `json:"model"`
@@ -4517,17 +4519,50 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 		if !modelProviderAccessAllowed(access, p.Name) || !p.Configured() {
 			continue
 		}
-		for _, m := range p.ChatModelList() {
+		modelIDs := p.ChatModelList()
+		var live map[string]whaleModel
+		if p.Name == whaleStackProvider {
+			if rows := loadedWhaleCatalog(p.BaseURL, p.APIKey()); rows != nil {
+				modelIDs = rows.ids()
+				live = make(map[string]whaleModel, len(rows))
+				for _, row := range rows {
+					live[row.ID] = row
+				}
+			}
+		}
+		for _, m := range modelIDs {
 			ref := p.Name + "/" + m
 			entry := *p
 			entry.Model = m
 			resolved := modelmeta.Resolve(&entry, metadataStore)
-			out = append(out, ModelInfo{
+			info := ModelInfo{
 				Ref: ref, Provider: p.Name, Model: m, Current: ref == curModel, ContextWindow: resolved.ContextWindow,
 				ContextWindowConfirmed: resolved.ContextConfirmed, ContextSource: resolved.ContextSource, Vision: resolved.Vision,
 				ToolUse: resolved.ToolUse, StructuredOutput: resolved.StructuredOutput, PricingAvailable: resolved.PricingAvailable,
 				Currency: resolved.Currency, MetadataSource: resolved.MetadataSource,
-			})
+			}
+			if row, ok := live[m]; ok {
+				info.DisplayName = row.Display
+				if row.ID == "lens-main" && row.Generation > 0 {
+					if curModel == p.Name+"/Chimera_v1" {
+						info.Current = true
+					}
+					info.ContextWindowConfirmed = row.Context > 0
+					info.ContextWindow = row.Context
+					info.ContextSource = "gateway"
+					info.Vision = "unknown"
+					if row.Vision != nil {
+						if *row.Vision {
+							info.Vision = "supported"
+						} else {
+							info.Vision = "unsupported"
+						}
+					}
+					info.ToolUse = "unknown"
+					info.StructuredOutput = "unknown"
+				}
+			}
+			out = append(out, info)
 		}
 	}
 	return out
@@ -5201,6 +5236,49 @@ func (a *App) RevealPath(path string) error {
 		path = abs
 	}
 	return revealPath(path)
+}
+
+// OpenPath opens an arbitrary file with its default application. It is the
+// left-click action for a file path shown in a conversation.
+func (a *App) OpenPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return os.ErrInvalid
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return openExplicitPath(path)
+}
+
+// OpenPathWith shows the platform's "open with" chooser for a file.
+func (a *App) OpenPathWith(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return os.ErrInvalid
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	switch goruntime.GOOS {
+	case "windows":
+		return exec.Command("rundll32.exe", "shell32.dll,OpenAs_RunDLL", path).Start()
+	case "darwin":
+		return exec.Command("open", "-R", path).Start()
+	default:
+		return exec.Command("xdg-open", filepath.Dir(path)).Start()
+	}
+}
+
+func openExplicitPath(path string) error {
+	switch goruntime.GOOS {
+	case "darwin":
+		return exec.Command("open", path).Start()
+	case "windows":
+		return exec.Command("cmd", "/c", "start", "", path).Start()
+	default:
+		return exec.Command("xdg-open", path).Start()
+	}
 }
 
 func revealPath(path string) error {

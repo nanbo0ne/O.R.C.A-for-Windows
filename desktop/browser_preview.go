@@ -12,6 +12,13 @@ const (
 	browserPreviewHomeEnv     = "ORCA_BROWSER_PREVIEW_HOME"
 	browserPreviewWindowClass = "OrcaBrowserPreviewWindow"
 	browserPreviewTitle       = "O.R.C.A. Browser Preview"
+
+	// stableWindowClass is the class Wails registers its main window under when
+	// Windows.WindowClassName is empty. The browser host and the web-beta host
+	// locate the app window by class, so the official channel must report the
+	// real class instead of an empty string; an empty lookup never finds the
+	// window and every tab fails with "browser host window not ready".
+	stableWindowClass = "wailsWindow"
 )
 
 // browserPreviewEnabled gates the isolated preview identity: its own window
@@ -107,5 +114,5 @@ func browserWindowClass() string {
 	if browserPreviewEnabled() {
 		return browserPreviewWindowClass
 	}
-	return ""
+	return stableWindowClass
 }

@@ -144,17 +144,21 @@ func FetchModelMetadataURL(ctx context.Context, endpoint, apiKey string) ([]Mode
 }
 
 func modelContextMetadata(raw map[string]any) (int, string) {
-	for _, key := range []string{"context_length", "context_window", "max_context_length", "max_model_len"} {
+	for _, key := range []string{"context_length", "context_window", "max_context_length", "max_model_len", "n_ctx", "n_ctx_train"} {
 		if value := positiveInt(raw[key]); value > 0 {
 			return value, key
 		}
 	}
-	for _, parent := range []string{"architecture", "capabilities", "limits"} {
+	// llama.cpp reports the loaded context slot as meta.n_ctx and repeats it
+	// under default_generation_settings.n_ctx; neither is part of the OpenAI
+	// catalog shape, so an unparsed value leaves the context gauge with no
+	// denominator on a local llama.cpp server.
+	for _, parent := range []string{"architecture", "capabilities", "limits", "meta", "default_generation_settings"} {
 		nested, ok := raw[parent].(map[string]any)
 		if !ok {
 			continue
 		}
-		for _, key := range []string{"context_length", "context_window", "max_context_length", "max_model_len", "context"} {
+		for _, key := range []string{"context_length", "context_window", "max_context_length", "max_model_len", "context", "n_ctx", "n_ctx_train"} {
 			if value := positiveInt(nested[key]); value > 0 {
 				return value, parent + "." + key
 			}

@@ -130,8 +130,12 @@ export function ContextPanel({
     }
   }, [tabId]);
 
+  // The panel is a summary, not a live meter: a slower sweep keeps it honest
+  // without a request every few seconds, and a hidden window asks for nothing.
   useEffect(() => {
-    const id = window.setInterval(() => void refresh(), 6000);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 15000);
     return () => window.clearInterval(id);
   }, [refresh]);
 

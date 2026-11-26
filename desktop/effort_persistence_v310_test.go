@@ -22,6 +22,12 @@ func effortPersistenceV310Fixture(t *testing.T) (*App, *WorkspaceTab, *Workspace
 	t.Chdir(t.TempDir())
 	requests := make(chan map[string]any, 16)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The app may read the catalog once to learn a context window; this
+		// fixture has none, and the probe must fail without disturbing the turn.
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)

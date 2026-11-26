@@ -330,6 +330,11 @@ func localRuntimeProviderEntry(modelID string, status localai.RuntimeStatus) con
 }
 
 func (a *App) buildController(ctx context.Context, opts boot.Options, ownerTabID ...string) (*control.Controller, error) {
+	// A custom OpenAI-compatible endpoint often reports its context length only
+	// through its own catalog (llama.cpp: meta.n_ctx). Probe once when the
+	// stored metadata has none, so the context gauge has a denominator without
+	// requiring a manual model-list refresh.
+	opts.ProbeMissingContext = true
 	trustedComputerUse := false
 	prepare := opts.PrepareRuntimeProviders
 	opts.PrepareRuntimeProviders = func(ctx context.Context, cfg *config.Config, model string) ([]config.ProviderEntry, error) {

@@ -40,10 +40,21 @@ func (e *ProviderEntry) FetchModelMetadata(ctx context.Context) ([]openai.ModelM
 	if e.BaseURL == "" {
 		return nil, fmt.Errorf("fetch models: provider %q has no base_url", e.Name)
 	}
-	key := e.APIKey()
-	if key == "" {
+	if e.APIKey() == "" {
 		return nil, fmt.Errorf("fetch models: provider %q has no API key (set %s in .env)", e.Name, e.APIKeyEnv)
 	}
+	return e.FetchModelMetadataAnonymous(ctx)
+}
+
+// FetchModelMetadataAnonymous reads the catalog without requiring a configured
+// key. Local OpenAI-compatible servers (llama.cpp, LM Studio) serve /models
+// unauthenticated, and for those endpoints the catalog is the only place the
+// loaded context length appears (llama.cpp: meta.n_ctx).
+func (e *ProviderEntry) FetchModelMetadataAnonymous(ctx context.Context) ([]openai.ModelMetadata, error) {
+	if e.BaseURL == "" {
+		return nil, fmt.Errorf("fetch models: provider %q has no base_url", e.Name)
+	}
+	key := e.APIKey()
 	candidates, err := BuildModelFetchURLs(e.BaseURL, e.ModelsURL)
 	if err != nil {
 		return nil, err

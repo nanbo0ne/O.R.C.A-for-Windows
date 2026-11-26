@@ -4,6 +4,7 @@ import { useT, type DictKey } from "../lib/i18n";
 import { UNKNOWN_ACCOUNT_SUMMARY, type BetaAccountSummary } from "../lib/betaBridge";
 import type { SettingsTab } from "../lib/types";
 import { Tooltip } from "./Tooltip";
+import { AccountCapsule } from "./AccountCapsule";
 import { Quit, WindowMinimise, WindowToggleMaximise } from "../../wailsjs/runtime/runtime";
 
 type DesktopPlatform = "darwin" | "windows" | "linux";
@@ -358,6 +359,7 @@ function ModernAppChrome(props: AppChromeProps) {
       <div className="modern-chrome__workspace-row">
         <button className="modern-chrome__sidebar-toggle" type="button" onClick={sidebarExpandBlocked ? undefined : onToggleSidebar} aria-label={sidebarToggleTitle} aria-pressed={!sidebarCollapsed} disabled={sidebarExpandBlocked}><PanelLeft size={16} /></button>
         <div className="modern-chrome__brand" aria-label="O.R.C.A.">O.R.C.A.</div>
+        <AccountCapsule />
         <div className="modern-chrome__context"><span title={workspaceLabel}>{workspaceLabel}</span><span aria-hidden="true">/</span><strong title={sessionLabel}>{sessionLabel}</strong></div>
         <div className="modern-chrome__workspace-actions">
           <span className="modern-chrome__model" title={modelLabel}>{modelLabel}</span>

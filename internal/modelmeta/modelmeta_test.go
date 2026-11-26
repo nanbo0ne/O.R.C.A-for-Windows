@@ -2,6 +2,10 @@ package modelmeta
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -200,5 +204,46 @@ func TestOfficialDeepSeekMetadataPreservesCustomProviders(t *testing.T) {
 				t.Fatalf("custom configured pricing changed: %+v", got)
 			}
 		})
+	}
+}
+
+// A local llama.cpp endpoint reports its context length only as meta.n_ctx, and
+// the metadata stored when the provider was added predates that parse. The
+// discovery pass must fill it in so the context gauge has a denominator.
+func TestDiscoverMissingContextReadsLlamaCppCatalog(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+			{"id": "local-gguf", "meta": map[string]any{"n_ctx": 262144}},
+		}})
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	store := &Store{path: filepath.Join(dir, "meta.json"), Items: map[string]Metadata{}}
+	entry := &config.ProviderEntry{Name: "local", Kind: "openai", BaseURL: srv.URL, Model: "local-gguf"}
+	probeMu.Lock()
+	probeAt = map[string]time.Time{}
+	probeMu.Unlock()
+	t.Cleanup(func() {
+		probeMu.Lock()
+		probeAt = map[string]time.Time{}
+		probeMu.Unlock()
+	})
+
+	got := DiscoverMissingContext(context.Background(), entry, store, Resolve(entry, store))
+	if got.ContextWindow != 262144 || !got.ContextConfirmed || got.ContextSource != "meta.n_ctx" {
+		t.Fatalf("discovered context = %+v", got)
+	}
+	// The probe result is persisted for later builds and the next pass is throttled.
+	stored := Resolve(entry, store)
+	if stored.ContextWindow != 262144 {
+		t.Fatalf("stored context = %+v", stored)
+	}
+	first := hits
+	_ = DiscoverMissingContext(context.Background(), entry, store, Resolved{})
+	if hits != first {
+		t.Fatalf("probe repeated inside the throttle window: %d -> %d", first, hits)
 	}
 }

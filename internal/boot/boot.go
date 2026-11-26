@@ -62,6 +62,11 @@ type Options struct {
 	Model      string
 	MaxSteps   int
 	RequireKey bool
+	// ProbeMissingContext reads the provider catalog once when the resolved
+	// model has no context window. The desktop enables it so a local
+	// OpenAI-compatible server (llama.cpp reports meta.n_ctx) fills the
+	// context gauge without the user refreshing the model list first.
+	ProbeMissingContext bool
 	Sink       event.Sink
 	// EffortOverride is a session-local reasoning effort override. Nil means use
 	// the resolved provider config; a non-nil empty string means provider default.
@@ -202,6 +207,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	metadataStore := modelmeta.Load("")
 	mainMetadata := modelmeta.Resolve(entry, metadataStore)
+	if opts.ProbeMissingContext {
+		mainMetadata = modelmeta.DiscoverMissingContext(ctx, entry, metadataStore, mainMetadata)
+	}
 	entry.ContextWindow = mainMetadata.ContextWindow
 	entry.Price = mainMetadata.Pricing
 	if opts.EffortOverride != nil {

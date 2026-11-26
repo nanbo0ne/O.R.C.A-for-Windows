@@ -662,6 +662,7 @@ export interface MCPServerInput {
 }
 
 export interface ModelInfo {
+  displayName?: string;
   ref: string; // "provider/model" - pass to SetModel
   provider: string;
   model: string;
@@ -738,7 +739,7 @@ export interface AssistantMemorySettings {
   assistantMemoryRecallEnabled: boolean;
 }
 
-export type ProcessDisplayMode = "compact" | "detailed";
+export type ProcessDisplayMode = "minimal" | "compact" | "detailed";
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
 export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "localAI" | "computer" | "appearance" | "about";

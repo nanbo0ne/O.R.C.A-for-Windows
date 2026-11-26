@@ -42,7 +42,7 @@ export function CapabilitiesPanel({
   }, [reload]);
   useEffect(() => {
     if (tab !== "servers" || !view?.servers.some((s) => s.status === "initializing" || s.status === "deferred")) return;
-    const id = window.setInterval(() => void reload(), 2500);
+    const id = window.setInterval(() => { if (document.visibilityState === "visible") void reload(); }, 8000);
     return () => window.clearInterval(id);
   }, [reload, tab, view?.servers]);
 

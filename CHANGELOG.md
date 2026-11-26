@@ -1,5 +1,25 @@
 # Changelog
 
+## Desktop 3.0.18 / 桌面版 3.0.18
+
+- 模型选择器显示本地部署当前实际加载的模型名；中转站保留固定调用名 `lens-main`，显示名、上下文与视觉支持从网关实时读取，换权重后无需重新登录或换 Key。
+- The model picker names the model the local deployment is actually running; the relay keeps the stable call name `lens-main` while display name, context and vision come from the gateway, so a weight swap needs no new key and no re-sign-in.
+- 沿用 3.0.17 的浏览器权限跟随、浏览器授权登录、账号胶囊与渲染延后改进。
+- Browser permission following the selector, browser-authorization sign-in, the account capsule and deferred rendering carry over from 3.0.17.
+- [Release notes / 发布说明](docs/releases/desktop-v3.0.18.md) · [Build / 构建](docs/build/desktop-v3.0.18.md) · [Verification / 验收](docs/audits/desktop-v3.0.18-verification.md)
+
+## Desktop 3.0.17 / 桌面版 3.0.17
+
+- 浏览器动作跟随窗口下方的权限选择器：选完全访问即免逐次确认，其他模式仍逐步批准。
+- Browser actions follow the permission selector: full access runs without per-action prompts, other modes still ask.
+- 鲸栈登录改为默认浏览器授权，密码不经过桌面进程；账号胶囊改为醒目的蓝色控件。
+- WhaleStack sign-in runs in the default browser, so the password never reaches the app; the account capsule is now a visible blue control.
+- 模型列表在启动时和按需刷新，本地部署换模型后所有选择器同步更新；刷新失败保留上次结果。
+- The model list refreshes at launch and on demand, so a swapped local model reaches every picker; a failed refresh keeps the last list.
+- 设置、历史、自动化、工具库面板改为首次打开才加载，窗口隐藏时后台轮询降频。
+- Settings, history, automation and tool-library panels load on first open, and polling slows while the window is hidden.
+- [Release notes / 发布说明](docs/releases/desktop-v3.0.17.md) · [Build / 构建](docs/build/desktop-v3.0.17.md) · [Verification / 验收](docs/audits/desktop-v3.0.17-verification.md)
+
 ## Desktop 3.0.16 / 桌面版 3.0.16
 
 - 内置浏览器操控进入正式版：模型可以打开页面、点击和输入，每一步动作执行前都要用户批准。

@@ -111,6 +111,23 @@ interface DesktopWindowState {
 // added or renamed, the generated types shift, and a key present in GeneratedApp
 // but missing from AppBindings causes a type error here. Fix: add the new method
 // to AppBindings, then run `pnpm typecheck` to verify.
+// WhaleStackDeviceView is the browser hand-off the capsule shows while it waits.
+export interface WhaleStackDeviceView {
+  device: string;
+  code: string;
+  verifyUrl: string;
+  expiresIn: number;
+}
+
+// WhaleStackStatusView mirrors the header capsule's account: who is signed in
+// and which relay models the sign-in unlocked. The credential stays in Go.
+export interface WhaleStackStatusView {
+  signedIn: boolean;
+  email?: string;
+  name?: string;
+  models?: string[];
+}
+
 export interface AppBindings {
   BrowserAvailable(): Promise<boolean>;
   GetBrowserState(ownerTabID: string): Promise<BrowserState>;
@@ -218,6 +235,8 @@ export interface AppBindings {
   OpenWorkspacePath(rel: string): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
+  OpenPath(path: string): Promise<void>;
+  OpenPathWith(path: string): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
   SaveClipboardImage(): Promise<string>;
   ReadClipboardFilePaths(): Promise<string[]>;
@@ -259,6 +278,10 @@ export interface AppBindings {
   RemoveProviderAccess(name: string): Promise<void>;
   SetProviderKey(apiKeyEnv: string, value: string): Promise<void>;
   WhaleStackSignIn(email: string, password: string): Promise<ProviderView>;
+  WhaleStackStartSignIn(): Promise<WhaleStackDeviceView>;
+  WhaleStackFinishSignIn(device: string): Promise<ProviderView>;
+  WhaleStackRefreshModels(): Promise<ProviderView>;
+  WhaleStackStatus(): Promise<WhaleStackStatusView>;
   ClearProviderKey(apiKeyEnv: string): Promise<void>;
   SetPermissionMode(mode: string): Promise<void>;
   SetAutoReviewModel(ref: string): Promise<void>;
@@ -2069,6 +2092,12 @@ function makeMockApp(): AppBindings {
     async RevealPath(path: string) {
       console.info("mock RevealPath", path);
     },
+    async OpenPath(path: string) {
+      console.info("mock OpenPath", path);
+    },
+    async OpenPathWith(path: string) {
+      console.info("mock OpenPathWith", path);
+    },
     async SavePastedImage(_dataUrl: string) {
       return ".orca/attachments/mock.png";
     },
@@ -2260,6 +2289,25 @@ function makeMockApp(): AppBindings {
       if (p?.builtIn) p.added = false;
       else settings.providers = settings.providers.filter((x) => x.name !== name);
     },
+    async WhaleStackStartSignIn() {
+      await delay(200);
+      return { device: "mock-device", code: "MOCK-0000", verifyUrl: "https://login.aichat.diy/desktop?code=MOCK-0000", expiresIn: 600 };
+    },
+    async WhaleStackFinishSignIn(_device: string) {
+      await delay(300);
+      return this.WhaleStackSignIn("demo@example.com", "demo");
+    },
+    async WhaleStackStatus() {
+      const p = settings.providers.find((x) => x.name === "鲸栈");
+      if (!p?.keySet) return { signedIn: false };
+      return { signedIn: true, name: p.name, models: p.models ? [...p.models] : [] };
+    },
+    async WhaleStackRefreshModels() {
+      await delay(200);
+      const p = settings.providers.find((x) => x.name === "鲸栈");
+      if (!p) throw new Error("尚未登录鲸栈账号");
+      return p;
+    },
     async WhaleStackSignIn(email: string, _password: string) {
       await delay(400);
       if (!email.trim()) throw new Error("请输入用户名和密码");
@@ -2446,7 +2494,7 @@ function makeMockApp(): AppBindings {
           settings.processDisplayMode = on ? "detailed" : "compact";
         },
         async SetProcessDisplayMode(mode: string) {
-          settings.processDisplayMode = mode === "detailed" ? "detailed" : "compact";
+          settings.processDisplayMode = mode === "detailed" || mode === "minimal" ? mode : "compact";
           settings.expandThinking = settings.processDisplayMode === "detailed";
         },
         async SetActivityIndicatorEnabled(enabled: boolean) {

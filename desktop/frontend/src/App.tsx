@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   Activity,
+  Clock,
   Command,
   Download,
   SquarePen,
@@ -21,6 +22,8 @@ import {
 } from "lucide-react";
 import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
+import { registerPathHandlers } from "./lib/pathActions";
+import { BackgroundJobsPanel, OverviewDock } from "./components/OverviewDock";
 import { modelDisplayLabel } from "./lib/modelCatalog";
 import type { ModelInfo } from "./lib/types";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT } from "./lib/i18n";
@@ -34,9 +37,9 @@ import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { ClearContextCard } from "./components/ClearContextCard";
 import { StatusBar } from "./components/StatusBar";
-import { HistoryPanel } from "./components/HistoryPanel";
+const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((m) => ({ default: m.HistoryPanel })));
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
-import { SettingsPanel } from "./components/SettingsPanel";
+const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((m) => ({ default: m.SettingsPanel })));
 import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
@@ -47,8 +50,8 @@ import { ProjectTree } from "./components/ProjectTree";
 import { NewSessionChooser } from "./components/NewSessionChooser";
 import { CopyButton } from "./components/CopyButton";
 import { UpdateBanner } from "./components/UpdateBanner";
-import { AutomationPanel } from "./components/AutomationPanel";
-import { ToolLibraryPanel } from "./components/ToolLibraryPanel";
+const AutomationPanel = lazy(() => import("./components/AutomationPanel").then((m) => ({ default: m.AutomationPanel })));
+const ToolLibraryPanel = lazy(() => import("./components/ToolLibraryPanel").then((m) => ({ default: m.ToolLibraryPanel })));
 import { SideChatPanel } from "./components/SideChatPanel";
 import { BrowserPanel, browserTaskRunning } from "./components/BrowserPanel";
 import { BetaConnectionsPanel } from "./components/BetaConnectionsPanel";
@@ -123,13 +126,12 @@ const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
 const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
-type RightDockMode = "context" | "files" | "changed" | "sideChat" | "browser";
+type RightDockMode = "context" | "files" | "changed" | "sideChat" | "browser" | "background";
 type WorkspaceRevealRequest = { id: number; path: string };
 type WorkspaceFileListRequest = { id: number; paths: string[] };
 type WorkspaceChangeListEntry = { key: string; path: string; meta: string; time: string; detail: string };
 type WorkspaceChangeListRequest = { id: number; changes: WorkspaceChangeListEntry[] };
 type QueuedPrompt = { id: string; displayText: string; submitText: string; guided?: boolean };
-const SHOW_CONTEXT_DOCK = true;
 const INDEPENDENT_WORKSPACE_TITLE = "独立工作区";
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
 type DesktopPlatform = "darwin" | "windows" | "linux";
@@ -701,7 +703,7 @@ export default function App() {
         .finally(() => { busy = false; });
     };
     refresh();
-    const timer = window.setInterval(refresh, 5000);
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 15000);
     const onFocus = () => refresh();
     window.addEventListener("focus", onFocus);
     return () => { disposed = true; window.clearInterval(timer); window.removeEventListener("focus", onFocus); };
@@ -772,7 +774,7 @@ export default function App() {
 		setDesktopUIStyle(runtimeStyle);
 	  }
       setLocalePref(normalizeLangPref(settings.desktopLanguage));
-      setProcessDisplayMode(settings.processDisplayMode === "compact" || settings.processDisplayMode === "detailed"
+      setProcessDisplayMode(settings.processDisplayMode === "minimal" || settings.processDisplayMode === "compact" || settings.processDisplayMode === "detailed"
         ? settings.processDisplayMode
         : settings.expandThinking ? "detailed" : "compact");
       setActivityIndicatorEnabled(Boolean(settings.activityIndicatorEnabled));
@@ -2198,6 +2200,40 @@ export default function App() {
     setComposerInsertRequest({ id: Date.now(), text });
   }, []);
 
+  // File actions for paths the model prints. Registered once so the markdown
+  // renderer can act on a link without threading callbacks through every row.
+  useEffect(() => {
+    registerPathHandlers({
+      open: (path) => { void app.OpenPath(path).catch(() => undefined); },
+      reveal: (path) => { void app.RevealPath(path).catch(() => undefined); },
+      openWith: (path) => { void app.OpenPathWith(path).catch(() => undefined); },
+      addToChat: (path) => setComposerInsertRequest({ id: Date.now(), text: path }),
+    });
+    return () => registerPathHandlers(null);
+  }, []);
+
+  // The account capsule lives in the chrome, outside the settings surface, so it
+  // asks for the settings panel through an event rather than a prop chain.
+  useEffect(() => {
+    const onOpenSettings = (event: Event) => {
+      const tab = (event as CustomEvent<string>).detail;
+      setSettingsTarget((tab as SettingsTab) || "general");
+    };
+    window.addEventListener("orca:open-settings", onOpenSettings);
+    return () => window.removeEventListener("orca:open-settings", onOpenSettings);
+  }, []);
+
+  // Signing in from the capsule adds a provider; every surface that lists models
+  // has to see it without a restart.
+  useEffect(() => {
+    const onSignedIn = () => {
+      void refreshMeta();
+      void app.Settings().then(applyDesktopPreferences).catch(() => undefined);
+    };
+    window.addEventListener("orca:whalestack-signed-in", onSignedIn);
+    return () => window.removeEventListener("orca:whalestack-signed-in", onSignedIn);
+  }, [applyDesktopPreferences]);
+
   const replaceComposerText = useCallback((text: string) => {
     setComposerInsertRequest({ id: Date.now(), text, mode: "replace" });
   }, []);
@@ -3147,103 +3183,112 @@ export default function App() {
             ].join(" ")}
             aria-label={t("rightDock.workbench")}
           >
-            <div className="workbench-dock__tools">
-              <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.views")}>
-                {SHOW_CONTEXT_DOCK && (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={rightDockMode === "context"}
-                    className={`workbench-dock__tab${rightDockMode === "context" ? " workbench-dock__tab--active" : ""}`}
-                    onClick={() => openRightDockMode("context")}
-                    title={t("rightDock.overview")}
-                  >
-                    <Activity size={13} />
-                    <span className="workbench-dock__tab-label">{t("rightDock.overview")}</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightDockMode === "files"}
-                  className={`workbench-dock__tab${rightDockMode === "files" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("files")}
-                  title={t("workspace.filesTab")}
-                >
-                  <FileText size={13} />
-                  <span className="workbench-dock__tab-label">{t("workspace.filesTab")}</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightDockMode === "changed"}
-                  className={`workbench-dock__tab${rightDockMode === "changed" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("changed")}
-                  title={t("workspace.changedTab")}
-                >
-                  <GitBranch size={13} />
-                  <span className="workbench-dock__tab-label">{t("workspace.changedTab")}</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightDockMode === "sideChat"}
-                  className={`workbench-dock__tab${rightDockMode === "sideChat" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("sideChat")}
-                  title={t("rightDock.sideChat")}
-                >
-                  <MessageSquareText size={13} />
-                  <span className="workbench-dock__tab-label">{t("rightDock.sideChat")}</span>
-                </button>
-                {browserAvailable && <button type="button" role="tab" aria-selected={rightDockMode === "browser"} className={`workbench-dock__tab${rightDockMode === "browser" ? " workbench-dock__tab--active" : ""}`} onClick={() => openRightDockMode("browser")} title={t("rightDock.browser")}>
-                  <Globe size={13} /><span className="workbench-dock__tab-label">{t("rightDock.browser")}</span>
-                </button>}
-              </div>
-            </div>
-            <div className="workbench-dock__body">
-              {rightDockMode === "context" ? (
-                <ContextPanel
-                  tabId={activeTabId}
-                  context={state.context}
-                  usage={state.usage}
-                  sessionTokens={state.sessionTokens}
-                  sessionCost={state.sessionCost}
-                  sessionCurrency={state.sessionCurrency}
-                  refreshKey={dockRefreshKey}
-                  onOpenWorkspaceMode={openRightDockMode}
-                  onOpenWorkspaceFile={openRightDockFile}
-                  onOpenWorkspaceFileList={openRightDockFileList}
-                  onOpenWorkspaceChangeList={openRightDockChangeList}
-                  onOpenWorkspaceChangeFile={openRightDockChangeFile}
-                />
-              ) : rightDockMode === "sideChat" ? (
-                <SideChatPanel tabId={activeTabId} />
-              ) : rightDockMode === "browser" ? (
-                <BrowserPanel ownerTabId={browserOwnerTabId} visible={workspacePanelRenderable} onTaskStateChange={setBrowserTaskState} obstructed={betaConnectionsOpen || workspacePanelResizing || sidebarResizing || startupSplashHold || clearContextPending || Boolean(settingsTarget || histView || paletteOpen || newSessionChooserOpen || automationPanelOpen || toolLibraryPanelOpen || workMonitorOpen || topicExportOpen || topicOverflowOpen || textEditMenuPoint || selectionMenuPoint || state.approval || state.ask || state.messageAction)} />
-              ) : (
-                <WorkspacePanel
-                  open={workspacePanelRenderable}
-                  cwd={state.meta?.cwd}
-                  maximized={workspacePanelMaximized}
-                  panelWidth={workspacePanelRenderWidth}
-                  onClose={() => setWorkspacePanel(false)}
-                  onToggleMaximized={() => {
-                    closeTransientOverlays();
-                    setWorkspacePanelMaximized((value) => !value);
-                  }}
-                  onPreviewModeChange={handleWorkspacePreviewModeChange}
-                  onAddToChat={addWorkspaceTextToComposer}
-                  onRequestPanelWidth={ensureWorkspacePanelWidth}
-                  refreshKey={dockRefreshKey}
-                  initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
-                  revealPathRequest={workspaceRevealRequest}
-                  changeRevealRequest={workspaceChangeRevealRequest}
-                  fileListRequest={workspaceFileListRequest}
-                  changeListRequest={workspaceChangeListRequest}
-                  showViewTabs={false}
-                />
-              )}
-            </div>
+            <OverviewDock
+              active={rightDockMode}
+              onSelect={(key) => openRightDockMode(key as RightDockMode)}
+              sections={[
+                {
+                  key: "context",
+                  label: t("rightDock.overview"),
+                  icon: <Activity size={13} />,
+                  content: (
+                    <ContextPanel
+                      tabId={activeTabId}
+                      context={state.context}
+                      usage={state.usage}
+                      sessionTokens={state.sessionTokens}
+                      sessionCost={state.sessionCost}
+                      sessionCurrency={state.sessionCurrency}
+                      refreshKey={dockRefreshKey}
+                      onOpenWorkspaceMode={openRightDockMode}
+                      onOpenWorkspaceFile={openRightDockFile}
+                      onOpenWorkspaceFileList={openRightDockFileList}
+                      onOpenWorkspaceChangeList={openRightDockChangeList}
+                      onOpenWorkspaceChangeFile={openRightDockChangeFile}
+                    />
+                  ),
+                },
+                {
+                  key: "files",
+                  label: t("workspace.filesTab"),
+                  icon: <FileText size={13} />,
+                  content: (
+                    <WorkspacePanel
+                      open={workspacePanelRenderable}
+                      cwd={state.meta?.cwd}
+                      maximized={workspacePanelMaximized}
+                      panelWidth={workspacePanelRenderWidth}
+                      onClose={() => setWorkspacePanel(false)}
+                      onToggleMaximized={() => {
+                        closeTransientOverlays();
+                        setWorkspacePanelMaximized((value) => !value);
+                      }}
+                      onPreviewModeChange={handleWorkspacePreviewModeChange}
+                      onAddToChat={addWorkspaceTextToComposer}
+                      onRequestPanelWidth={ensureWorkspacePanelWidth}
+                      refreshKey={dockRefreshKey}
+                      initialViewMode="files"
+                      revealPathRequest={workspaceRevealRequest}
+                      changeRevealRequest={workspaceChangeRevealRequest}
+                      fileListRequest={workspaceFileListRequest}
+                      changeListRequest={workspaceChangeListRequest}
+                      showViewTabs={false}
+                    />
+                  ),
+                },
+                {
+                  key: "changed",
+                  label: t("workspace.changedTab"),
+                  icon: <GitBranch size={13} />,
+                  content: (
+                    <WorkspacePanel
+                      open={workspacePanelRenderable}
+                      cwd={state.meta?.cwd}
+                      maximized={workspacePanelMaximized}
+                      panelWidth={workspacePanelRenderWidth}
+                      onClose={() => setWorkspacePanel(false)}
+                      onToggleMaximized={() => {
+                        closeTransientOverlays();
+                        setWorkspacePanelMaximized((value) => !value);
+                      }}
+                      onPreviewModeChange={handleWorkspacePreviewModeChange}
+                      onAddToChat={addWorkspaceTextToComposer}
+                      onRequestPanelWidth={ensureWorkspacePanelWidth}
+                      refreshKey={dockRefreshKey}
+                      initialViewMode="changed"
+                      revealPathRequest={workspaceRevealRequest}
+                      changeRevealRequest={workspaceChangeRevealRequest}
+                      fileListRequest={workspaceFileListRequest}
+                      changeListRequest={workspaceChangeListRequest}
+                      showViewTabs={false}
+                    />
+                  ),
+                },
+                ...(browserAvailable
+                  ? [{
+                      key: "browser",
+                      label: t("rightDock.browser"),
+                      icon: <Globe size={13} />,
+                      content: (
+                        <BrowserPanel ownerTabId={browserOwnerTabId} visible={workspacePanelRenderable} onTaskStateChange={setBrowserTaskState} obstructed={betaConnectionsOpen || workspacePanelResizing || sidebarResizing || startupSplashHold || clearContextPending || Boolean(settingsTarget || histView || paletteOpen || newSessionChooserOpen || automationPanelOpen || toolLibraryPanelOpen || workMonitorOpen || topicExportOpen || topicOverflowOpen || textEditMenuPoint || selectionMenuPoint || state.approval || state.ask || state.messageAction)} />
+                      ),
+                    }]
+                  : []),
+                {
+                  key: "sideChat",
+                  label: t("rightDock.sideChat"),
+                  icon: <MessageSquareText size={13} />,
+                  content: <SideChatPanel tabId={activeTabId} />,
+                },
+                {
+                  key: "background",
+                  label: t("process.timeline.background"),
+                  icon: <Clock size={13} />,
+                  badge: Array.isArray(state.jobs) ? state.jobs.length : 0,
+                  content: <BackgroundJobsPanel jobs={state.jobs} />,
+                },
+              ]}
+            />
           </aside>
         )}
       </div>
@@ -3257,6 +3302,7 @@ export default function App() {
       )}
 
       {histView !== null && (
+        <Suspense fallback={null}>
         <HistoryPanel
           kind={histView.kind}
           sessions={histView.sessions}
@@ -3270,11 +3316,13 @@ export default function App() {
           onPurgeAll={onPurgeAllTrashedSessions}
           onClose={closeHistory}
         />
+        </Suspense>
       )}
 
       {betaConnectionsAvailable && betaConnectionsOpen && <BetaConnectionsPanel capabilities={betaCapabilities} onClose={() => setBetaConnectionsOpen(false)} onAccountChanged={() => { closeTransientOverlays(); setAccountCatalogRevision(value => value + 1); void refreshMeta(); }} nativeObstructed={workspacePanelResizing || sidebarResizing || startupSplashHold || clearContextPending || Boolean(settingsTarget || histView || paletteOpen || newSessionChooserOpen || automationPanelOpen || toolLibraryPanelOpen || workMonitorOpen || topicExportOpen || topicOverflowOpen || textEditMenuPoint || selectionMenuPoint || state.approval || state.ask || state.messageAction || needsOnboarding)} />}
 
       {settingsTarget !== null && (
+        <Suspense fallback={null}>
         <SettingsPanel
           initialTab={settingsTarget}
           productCapabilities={productCapabilities}
@@ -3286,14 +3334,15 @@ export default function App() {
               .catch((e) => console.warn("desktop preferences refresh failed", e));
           }}
         />
+        </Suspense>
       )}
 
       {automationPanelOpen && (
-        <AutomationPanel onClose={() => setAutomationPanelOpen(false)} />
+        <Suspense fallback={null}><AutomationPanel onClose={() => setAutomationPanelOpen(false)} /></Suspense>
       )}
 
       {toolLibraryPanelOpen && (
-        <ToolLibraryPanel onClose={() => setToolLibraryPanelOpen(false)} />
+        <Suspense fallback={null}><ToolLibraryPanel onClose={() => setToolLibraryPanelOpen(false)} /></Suspense>
       )}
 
       <CommandPalette

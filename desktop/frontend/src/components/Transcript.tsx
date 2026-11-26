@@ -609,7 +609,15 @@ function TimelineItems({
         );
         break;
       case "process":
-        const segmentOpen = processOpenOverrides.get(segment.id) ?? !segment.defaultCollapsed;
+        // A settled block is folding material even when the turn was interrupted,
+        // steered, or failed: only live work stays open. Minimal keeps every
+        // block folded until the reader asks for it.
+        const segmentOpen = processOpenOverrides.get(segment.id)
+          ?? (processDisplayMode === "minimal"
+            ? false
+            : processDisplayMode === "detailed"
+              ? !segment.defaultCollapsed
+              : !segment.defaultCollapsed && !segment.completed);
         nodes.push(
           <div className="timeline-entry timeline-entry--process" data-transcript-anchor={segment.id} key={segment.id}>
             <TimelineProcessGroup

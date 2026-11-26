@@ -253,10 +253,11 @@ func (c *Config) SetExpandThinking(on bool) error {
 
 func (c *Config) SetProcessDisplayMode(mode string) error {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case ProcessDisplayCompact, ProcessDisplayDetailed:
-		c.Desktop.ShowReasoning = boolPtr(strings.EqualFold(strings.TrimSpace(mode), ProcessDisplayDetailed))
-		c.Desktop.ProcessDisplayMode = strings.ToLower(strings.TrimSpace(mode))
-		c.Desktop.ExpandThinking = c.Desktop.ProcessDisplayMode == ProcessDisplayDetailed
+	case ProcessDisplayMinimal, ProcessDisplayCompact, ProcessDisplayDetailed:
+		normalized := strings.ToLower(strings.TrimSpace(mode))
+		c.Desktop.ShowReasoning = boolPtr(normalized == ProcessDisplayDetailed)
+		c.Desktop.ProcessDisplayMode = normalized
+		c.Desktop.ExpandThinking = normalized == ProcessDisplayDetailed
 		return nil
 	case ProcessDisplayStandard:
 		c.Desktop.ShowReasoning = boolPtr(false)
@@ -264,7 +265,7 @@ func (c *Config) SetProcessDisplayMode(mode string) error {
 		c.Desktop.ExpandThinking = c.Desktop.ProcessDisplayMode == ProcessDisplayDetailed
 		return nil
 	default:
-		return fmt.Errorf("process display mode %q: must be compact|detailed", mode)
+		return fmt.Errorf("process display mode %q: must be minimal|compact|detailed", mode)
 	}
 }
 

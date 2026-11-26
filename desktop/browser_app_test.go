@@ -428,3 +428,46 @@ func TestBrowserReleaseChannelEnabled(t *testing.T) {
 		t.Fatal("an unregistered owner must still report unsupported")
 	}
 }
+
+func TestBrowserConsentFollowsFullAccess(t *testing.T) {
+	s, _, id := browserFixture(t)
+	task, end, err := s.beginTask(computerParentTestContext(t), "owner", "full-access-parent", id, "fake/model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer end(nil)
+
+	// 完全访问 applies to the browser too: no approval callback may be needed.
+	s.fullAccess = func(string) bool { return true }
+	done := make(chan error, 1)
+	go func() { done <- s.consent(task, "https://example.test", "open page") }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("full access still asked for consent: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("full access blocked on an approval that should never be requested")
+	}
+
+	// With the switch off the same call must wait for a human decision.
+	s.fullAccess = func(string) bool { return false }
+	blocked := make(chan error, 1)
+	go func() { blocked <- s.consent(task, "https://example.test", "open page") }()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if state := s.state("owner"); state.Approval != nil {
+			s.approve("owner", BrowserCommand{Op: "approve", ApprovalID: state.Approval.ID, Allow: true})
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	select {
+	case err := <-blocked:
+		if err != nil {
+			t.Fatalf("approved consent failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("consent did not resolve after approval")
+	}
+}

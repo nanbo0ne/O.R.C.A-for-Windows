@@ -93,7 +93,7 @@ func TestBrowserPreviewIdentityOnlyOnPreviewChannel(t *testing.T) {
 		t.Fatalf("preview lock identity = %#v, want distinct identity", previewLock)
 	}
 	channel = "stable"
-	if browserPreviewEnabled() || desktopTitle("windows") != desktopWindowTitle("windows") || browserWindowClass() != "" {
+	if browserPreviewEnabled() || desktopTitle("windows") != desktopWindowTitle("windows") || browserWindowClass() != stableWindowClass {
 		t.Fatal("stable channel should retain normal identity")
 	}
 	stableLock := singleInstanceLock(&App{})

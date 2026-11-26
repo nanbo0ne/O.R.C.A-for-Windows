@@ -236,6 +236,8 @@ type windowLookup struct {
 }
 
 // NewCallback trampolines cannot be freed. Reuse one for every enumeration.
+// Windows compares window class names case-insensitively (the system class is
+// registered as "Static"), so an exact-match lookup can miss the app window.
 var enumOwnWindow = syscall.NewCallback(func(hwnd uintptr, lookup *windowLookup) uintptr {
 	user32 := windows.NewLazySystemDLL("user32.dll")
 	var pid uint32
@@ -245,7 +247,7 @@ var enumOwnWindow = syscall.NewCallback(func(hwnd uintptr, lookup *windowLookup)
 	}
 	var name [128]uint16
 	user32.NewProc("GetClassNameW").Call(hwnd, uintptr(unsafe.Pointer(&name[0])), 128)
-	if windows.UTF16ToString(name[:]) == lookup.class {
+	if strings.EqualFold(windows.UTF16ToString(name[:]), lookup.class) {
 		lookup.found = hwnd
 		return 0
 	}

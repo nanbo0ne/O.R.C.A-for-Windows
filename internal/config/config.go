@@ -217,6 +217,7 @@ func (c *Config) LocalAIVRAMReserveMiB() int {
 }
 
 const (
+	ProcessDisplayMinimal  = "minimal"
 	ProcessDisplayCompact  = "compact"
 	ProcessDisplayStandard = "standard"
 	ProcessDisplayDetailed = "detailed"
@@ -257,8 +258,13 @@ func (c *Config) DesktopUIStyle() string {
 	return DesktopUIStyleModern
 }
 
-// The public two-state control now changes reasoning visibility only.
+// The public control changes reasoning visibility and how much settled process
+// detail stays open. "minimal" keeps every grouped block folded; it is stored
+// explicitly so it is not mistaken for compact.
 func (c *Config) DesktopProcessDisplayMode() string {
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Desktop.ProcessDisplayMode), ProcessDisplayMinimal) {
+		return ProcessDisplayMinimal
+	}
 	if c.Desktop.ShowReasoning != nil && *c.Desktop.ShowReasoning {
 		return ProcessDisplayDetailed
 	}
@@ -2556,6 +2562,11 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 	// "provider/model"
 	if prov, model, ok := strings.Cut(ref, "/"); ok {
 		if e, found := c.Provider(prov); found {
+			// Existing signed-in tabs keep the same channel after its published
+			// main slot acquires a stable call ID. Never rewrite custom providers.
+			if prov == "鲸栈" && e.APIKeyEnv == "WHALESTACK_API_KEY" && model == "Chimera_v1" && !e.HasModel(model) && e.HasModel("lens-main") {
+				return resolved(e, "lens-main")
+			}
 			if entry, ok := resolved(e, model); ok {
 				return entry, true
 			}

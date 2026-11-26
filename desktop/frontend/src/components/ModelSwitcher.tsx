@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Brain, Check, ChevronsUpDown } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
+import { syncWhaleCatalog } from "../lib/whaleCatalogSync";
 import { modelDisplayLabel, selectableModels } from "../lib/modelCatalog";
 import { useT } from "../lib/i18n";
 import type { ModelInfo } from "../lib/types";
@@ -46,9 +47,12 @@ export function ModelSwitcher({ label, tabId, onPick, showTooltip = false }: { l
   }, [clearCloseTimer]);
 
   useEffect(() => {
-    if (open) {
-      (tabId ? app.ModelsForTab(tabId) : app.Models()).then((next) => setModels(selectableModels(asArray(next)))).catch(() => {});
-    }
+    let epoch=0;
+    const read=()=>{const id=++epoch;(tabId ? app.ModelsForTab(tabId) : app.Models()).then((next) => {if(id===epoch)setModels(selectableModels(asArray(next)));}).catch(()=>{});};
+    read();
+    if(open) void syncWhaleCatalog().catch(()=>{});
+    window.addEventListener("orca:whalestack-models",read);
+    return ()=>{++epoch;window.removeEventListener("orca:whalestack-models",read);};
   }, [open, tabId]);
 
   useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
@@ -68,12 +72,13 @@ export function ModelSwitcher({ label, tabId, onPick, showTooltip = false }: { l
     closeMenu();
   };
 
+  const activeLabel=models.find(m=>m.current)?.displayName || label;
   const trigger = (
       <button
         ref={triggerRef}
         type="button"
         className="modelsw__trigger"
-        aria-label={label}
+        aria-label={activeLabel}
         aria-haspopup="listbox"
         aria-expanded={open && !closing}
         onKeyDown={(event) => {
@@ -82,14 +87,14 @@ export function ModelSwitcher({ label, tabId, onPick, showTooltip = false }: { l
         onClick={() => (open || closing ? closeMenu() : openMenu())}
       >
         <Brain size={13} className="modelsw__kind" />
-        <span className="modelsw__label">{label}</span>
+        <span className="modelsw__label">{activeLabel}</span>
         <ChevronsUpDown size={11} />
       </button>
   );
 
   return (
     <div className="modelsw">
-      {showTooltip ? <Tooltip label={label} fill disabled={open || closing}>{trigger}</Tooltip> : trigger}
+      {showTooltip ? <Tooltip label={activeLabel} fill disabled={open || closing}>{trigger}</Tooltip> : trigger}
       <AnchoredPopover
         open={open}
         closing={closing}
@@ -115,10 +120,10 @@ export function ModelSwitcher({ label, tabId, onPick, showTooltip = false }: { l
               role="option"
               aria-selected={m.current}
               className={`modelsw__item ${m.current ? "modelsw__item--current" : ""}`}
-              onClick={() => pick(m.ref, modelDisplayLabel(m.ref, m.model, m.metadataSource === "deepseek_official"))}
+              onClick={() => pick(m.ref, m.displayName || modelDisplayLabel(m.ref, m.model, m.metadataSource === "deepseek_official"))}
             >
               <span className="modelsw__copy">
-                <span className="modelsw__model" title={m.ref}>{modelDisplayLabel(m.ref, m.model, m.metadataSource === "deepseek_official")}</span>
+                <span className="modelsw__model" title={m.ref}>{m.displayName || modelDisplayLabel(m.ref, m.model, m.metadataSource === "deepseek_official")}</span>
                 <span className="modelsw__provider" title={providerLabel(m, t)}>{providerLabel(m, t)}</span>
               </span>
               {m.current && <Check size={13} className="modelsw__check" />}

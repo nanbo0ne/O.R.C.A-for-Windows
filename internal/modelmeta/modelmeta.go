@@ -3,6 +3,7 @@
 package modelmeta
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -293,4 +294,57 @@ func nonEmpty(value, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// probeInterval bounds automatic catalog probes for a provider that never
+// reports a context window, including failed attempts.
+const probeInterval = 5 * time.Minute
+
+// probeTimeout keeps a missing or unreachable catalog from stalling a build.
+const probeTimeout = 3 * time.Second
+
+var (
+	probeMu sync.Mutex
+	probeAt = map[string]time.Time{}
+)
+
+// DiscoverMissingContext fills an absent context window from the provider's
+// model catalog. llama.cpp exposes its loaded slot only as meta.n_ctx, so a
+// local endpoint otherwise keeps the context gauge empty forever: the metadata
+// stored when the provider was added predates this parse and stays at zero.
+// Errors and repeated misses are throttled; callers should treat the result as
+// best effort.
+func DiscoverMissingContext(ctx context.Context, entry *config.ProviderEntry, store *Store, resolved Resolved) Resolved {
+	if entry == nil || store == nil || resolved.ContextWindow > 0 {
+		return resolved
+	}
+	if !strings.EqualFold(strings.TrimSpace(entry.Kind), "openai") {
+		return resolved
+	}
+	if strings.TrimSpace(entry.BaseURL) == "" || strings.TrimSpace(entry.Model) == "" {
+		return resolved
+	}
+	key := Key(entry)
+	probeMu.Lock()
+	if last := probeAt[key]; !last.IsZero() && time.Since(last) < probeInterval {
+		probeMu.Unlock()
+		return resolved
+	}
+	probeAt[key] = time.Now()
+	probeMu.Unlock()
+
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	items, err := entry.FetchModelMetadataAnonymous(probeCtx)
+	if err != nil {
+		return resolved
+	}
+	for _, item := range items {
+		if item.ID != entry.Model || item.ContextWindow <= 0 {
+			continue
+		}
+		_ = store.Put(MetadataFromDiscovery(entry, item.ContextWindow, item.ContextReason, Status(item.Vision), Status(item.ToolUse), Status(item.StructuredOutput), item.Pricing))
+		return Resolve(entry, store)
+	}
+	return resolved
 }

@@ -161,3 +161,37 @@ func TestFetchModelMetadataReadsContextCapabilitiesAndPricing(t *testing.T) {
 		t.Fatalf("nested metadata = %+v", nested)
 	}
 }
+
+// llama.cpp's /v1/models reports the loaded slot as meta.n_ctx and repeats it
+// under default_generation_settings; without it the context gauge has no
+// denominator on a local server.
+func TestFetchModelMetadataReadsLlamaCppContext(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": []map[string]any{
+			{
+				"id": "local-gguf", "object": "model",
+				"status":       map[string]any{"value": "loaded"},
+				"meta":         map[string]any{"n_ctx": 262144},
+				"architecture": map[string]any{"input_modalities": []string{"text", "image"}},
+				"default_generation_settings": map[string]any{"n_ctx": 131072},
+			},
+			{"id": "props-only", "default_generation_settings": map[string]any{"n_ctx": 8192}},
+		}})
+	}))
+	defer srv.Close()
+
+	items, err := FetchModelMetadata(context.Background(), srv.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]ModelMetadata{}
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	if got := byID["local-gguf"]; got.ContextWindow != 262144 || !got.ContextWindowConfirmed || got.ContextReason != "meta.n_ctx" {
+		t.Fatalf("llama.cpp meta context = %+v", got)
+	}
+	if got := byID["props-only"]; got.ContextWindow != 8192 || got.ContextReason != "default_generation_settings.n_ctx" {
+		t.Fatalf("default_generation_settings context = %+v", got)
+	}
+}
